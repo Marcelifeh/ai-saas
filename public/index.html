@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>AI POD Idea Generator</title>
+    <style>
+        body {
+            font-family: Arial;
+            padding: 40px;
+            max-width: 700px;
+            margin: auto;
+        }
+
+        select,
+        button {
+            padding: 10px;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>AI POD Idea Generator</h2>
+
+    <label>Platform</label>
+    <select id="platform">
+        <option>Amazon</option>
+    </select>
+
+    <label>Audience</label>
+    <select id="audience">
+        <option>cat lovers</option>
+        <option>dog lovers</option>
+        <option>Christians</option>
+        <option>nurses</option>
+    </select>
+
+    <label>Theme</label>
+    <select id="theme">
+        <option>humor</option>
+        <option>fitness</option>
+        <option>faith</option>
+        <option>seasonal</option>
+    </select>
+
+    <button onclick="generateIdea()">Generate Idea</button>
+
+    <div class="result" id="result">
+        Your result will appear here...
+    </div>
+
+    <script>
+        async function generateIdea() {
+            const platform = document.getElementById("platform").value;
+            const audience = document.getElementById("audience").value;
+            const theme = document.getElementById("theme").value;
+
+            const response = await fetch("/api/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ platform, audience, theme })
+            });
+
+            const data = await response.json();
+            document.getElementById("result").innerText = data.result;
+        }
+    </script>
+
+</body>
+
+</html>
