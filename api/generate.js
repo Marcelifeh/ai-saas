@@ -21,32 +21,56 @@ module.exports = async function handler(req, res) {
             messages: [
                 {
                     role: "system",
-                    content: "Generate 10 short, catchy, shirt-ready slogans. Return them as a list, one per line.",
+                    content: `
+You are an eCommerce POD trend research assistant.
+
+Return ONLY valid JSON in this exact structure:
+
+{
+  "niche": "",
+  "whyItSells": "",
+  "competitionLevel": "",
+  "emotionalTrigger": "",
+  "targetAudiences": [],
+  "designDirections": [],
+  "shirtSlogans": []
+}
+
+Generate 10 shirt-ready slogans.
+No explanations. JSON only.
+`
                 },
                 {
                     role: "user",
-                    content: prompt,
-                },
+                    content: prompt
+                }
             ],
+            temperature: 0.8,
         });
 
         const text = aiResponse.choices[0].message.content;
 
-        const shirtSlogans = text
-            .split("\n")
-            .map(s => s.replace(/^\d+[\).\s-]*/, "").trim())
-            .filter(Boolean);
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        } catch (err) {
+            return res.status(500).json({
+                success: false,
+                error: "AI did not return valid JSON",
+                raw: text
+            });
+        }
 
         res.status(200).json({
             success: true,
-            shirtSlogans,
+            data: parsed
         });
 
     } catch (error) {
-        console.error("API Error:", error);
+        console.error(error);
         res.status(500).json({
             success: false,
-            error: error.message || "Internal Server Error",
+            error: error.message
         });
     }
 };
