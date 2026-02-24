@@ -12,6 +12,23 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <!-- Babel (to compile JSX in the browser) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        .animate-fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
 </head>
 
 <body class="bg-gray-50 min-h-screen">
@@ -22,8 +39,12 @@
 
         function App() {
             const [prompt, setPrompt] = useState("");
+            const [platform, setPlatform] = useState("");
+            const [audience, setAudience] = useState("");
+            const [style, setStyle] = useState("");
             const [strategy, setStrategy] = useState(null);
             const [loading, setLoading] = useState(false);
+            const [showOptions, setShowOptions] = useState(false);
 
             const handleGenerate = async () => {
                 if (!prompt.trim()) return;
@@ -35,7 +56,7 @@
                     const response = await fetch("/api/generate", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ prompt }),
+                        body: JSON.stringify({ prompt, platform, audience, style }),
                     });
 
                     const data = await response.json();
@@ -55,82 +76,167 @@
             };
 
             return (
-                <div className="container mx-auto p-4 max-w-3xl mt-10 pb-20">
-                    <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                        <h1 className="text-3xl font-extrabold mb-2 text-center text-gray-900">POD Strategy Generator</h1>
-                        <p className="text-gray-500 text-center mb-8">Enter a niche or topic to get a full merch strategy</p>
+                <div className="container mx-auto p-4 max-w-4xl mt-10 pb-20">
+                    <div className="bg-white p-6 md:p-10 rounded-2xl shadow-xl border border-gray-100">
+                        <header className="text-center mb-10">
+                            <h1 className="text-4xl font-black mb-2 text-gray-900 tracking-tight">POD Master Strategy</h1>
+                            <p className="text-gray-500 font-medium">Transform simple ideas into high-converting products</p>
+                        </header>
 
-                        <div className="flex flex-col md:flex-row gap-2 mb-6">
-                            <input
-                                type="text"
-                                placeholder="e.g., retro hiking, cat dads, nurse humor..."
-                                value={prompt}
-                                onChange={(e) => setPrompt(e.target.value)}
-                                className="flex-1 border border-gray-200 p-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg shadow-sm"
-                            />
+                        <div className="space-y-4 mb-8">
+                            <div className="relative">
+                                <label className="text-xs font-bold text-gray-400 uppercase tracking-widest ml-1 mb-1 block">Your Core Idea</label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g., retro hiking, cat dads, nurse humor..."
+                                    value={prompt}
+                                    onChange={(e) => setPrompt(e.target.value)}
+                                    className="w-full border-2 border-gray-100 p-5 rounded-xl focus:outline-none focus:border-blue-500 text-xl font-medium shadow-sm transition-all"
+                                />
+                            </div>
+
+                            <button
+                                onClick={() => setShowOptions(!showOptions)}
+                                className="text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center transition-all px-1"
+                            >
+                                {showOptions ? "− Hide Advanced Options" : "+ Add Platform, Audience or Style"}
+                            </button>
+
+                            {showOptions && (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-5 bg-gray-50 rounded-xl border border-gray-100 animate-fade-in">
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Platform</label>
+                                        <select
+                                            value={platform}
+                                            onChange={(e) => setPlatform(e.target.value)}
+                                            className="w-full bg-white border border-gray-200 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                        >
+                                            <option value="">Auto-Detect</option>
+                                            <option value="Amazon Merch">Amazon Merch</option>
+                                            <option value="Etsy">Etsy</option>
+                                            <option value="Redbubble">Redbubble</option>
+                                            <option value="Printful/Shopify">Shopify/Direct</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Target Audience</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. Grandma, Techies"
+                                            value={audience}
+                                            onChange={(e) => setAudience(e.target.value)}
+                                            className="w-full bg-white border border-gray-200 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Style/Tone</label>
+                                        <input
+                                            type="text"
+                                            placeholder="e.g. Minimal, Witty"
+                                            value={style}
+                                            onChange={(e) => setStyle(e.target.value)}
+                                            className="w-full bg-white border border-gray-200 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             <button
                                 onClick={handleGenerate}
                                 disabled={loading || !prompt.trim()}
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg disabled:bg-blue-300 transition duration-150 shadow-md whitespace-nowrap"
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-5 px-8 rounded-xl disabled:bg-blue-300 transition-all shadow-lg hover:shadow-blue-200/50 transform hover:-translate-y-0.5"
                             >
-                                {loading ? "Analyzing..." : "Generate Strategy"}
+                                {loading ? "AI is Strategizing..." : "GENERATE FULL STRATEGY"}
                             </button>
                         </div>
 
                         {strategy && (
-                            <div className="mt-8 space-y-8 animate-in fade-in duration-500">
+                            <div className="mt-12 space-y-10 animate-fade-in">
+                                {/* Insights Header */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-blue-50 p-5 rounded-lg border border-blue-100">
-                                        <h3 className="text-blue-800 font-bold uppercase text-xs tracking-widest mb-2">Target Niche</h3>
-                                        <p className="text-xl font-semibold text-gray-800">{strategy.niche}</p>
+                                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100 shadow-sm">
+                                        <h3 className="text-blue-800 font-black uppercase text-[10px] tracking-[0.2em] mb-3">Identified Niche</h3>
+                                        <p className="text-2xl font-black text-gray-900 leading-tight">{strategy.niche}</p>
                                     </div>
-                                    <div className="bg-green-50 p-5 rounded-lg border border-green-100">
-                                        <h3 className="text-green-800 font-bold uppercase text-xs tracking-widest mb-2">Competition Level</h3>
-                                        <p className="text-xl font-semibold text-gray-800">{strategy.competitionLevel}</p>
+                                    <div className="bg-gradient-to-br from-emerald-50 to-teal-50 p-6 rounded-2xl border border-emerald-100 shadow-sm">
+                                        <h3 className="text-emerald-800 font-black uppercase text-[10px] tracking-[0.2em] mb-3">Competition Level</h3>
+                                        <p className="text-2xl font-black text-gray-900 leading-tight">{strategy.competitionLevel}</p>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <h3 className="text-gray-900 font-bold text-lg mb-2 flex items-center">
-                                        <span className="bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">1</span>
-                                        Why It Sells
-                                    </h3>
-                                    <p className="text-gray-700 bg-gray-50 p-4 rounded-lg border border-gray-100 leading-relaxed">
-                                        {strategy.whyItSells}
-                                    </p>
+                                {/* Why It Sells & Trigger */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="md:col-span-2 space-y-2">
+                                        <h3 className="text-gray-900 font-black text-lg flex items-center">
+                                            <span className="bg-gray-900 text-white w-6 h-6 rounded-lg flex items-center justify-center text-[10px] mr-3 font-mono">01</span>
+                                            Strategic Reason
+                                        </h3>
+                                        <p className="text-gray-600 bg-white p-5 rounded-2xl border border-gray-100 leading-relaxed font-medium">
+                                            {strategy.whyItSells}
+                                        </p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-gray-900 font-black text-lg flex items-center">
+                                            <span className="bg-gray-900 text-white w-6 h-6 rounded-lg flex items-center justify-center text-[10px] mr-3 font-mono">02</span>
+                                            Trigger
+                                        </h3>
+                                        <div className="bg-orange-50 p-5 rounded-2xl border border-orange-100 flex items-center justify-center min-h-[100px] text-center">
+                                            <p className="text-orange-900 font-black text-lg">{strategy.emotionalTrigger}</p>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Target & Design */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 bg-gray-50/50 p-8 rounded-3xl border border-gray-100">
                                     <div>
-                                        <h3 className="text-gray-900 font-bold text-lg mb-3">Target Audiences</h3>
+                                        <h3 className="text-gray-900 font-black text-lg mb-4">Target Audiences</h3>
                                         <div className="flex flex-wrap gap-2">
                                             {strategy.targetAudiences.map((aud, i) => (
-                                                <span key={i} className="bg-white border border-gray-200 px-3 py-1 rounded-full text-sm text-gray-600 shadow-sm">
+                                                <span key={i} className="bg-white border border-gray-200 px-4 py-2 rounded-xl text-xs font-bold text-gray-700 shadow-sm">
                                                     {aud}
                                                 </span>
                                             ))}
                                         </div>
                                     </div>
                                     <div>
-                                        <h3 className="text-gray-900 font-bold text-lg mb-3">Design Directions</h3>
-                                        <ul className="list-disc list-inside space-y-1 text-gray-600 text-sm">
+                                        <h3 className="text-gray-900 font-black text-lg mb-4">Design Logic</h3>
+                                        <ul className="space-y-2">
                                             {strategy.designDirections.map((dir, i) => (
-                                                <li key={i}>{dir}</li>
+                                                <li key={i} className="flex items-start text-xs font-medium text-gray-500">
+                                                    <span className="text-blue-500 mr-2">✦</span> {dir}
+                                                </li>
                                             ))}
                                         </ul>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <h3 className="text-gray-900 font-bold text-lg mb-4 flex items-center">
-                                        <span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs mr-2">2</span>
-                                        Catchy Shirt Slogans
+                                {/* SEO Section */}
+                                {strategy.seoKeywords && (
+                                    <div className="space-y-4">
+                                        <h3 className="text-gray-900 font-black text-xl flex items-center italic">
+                                            <span className="text-blue-600 mr-2">#</span> Optimized SEO Keywords
+                                        </h3>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                            {strategy.seoKeywords.map((kw, i) => (
+                                                <div key={i} className="bg-gray-900 text-gray-400 py-3 px-4 rounded-lg text-[10px] font-mono border border-gray-800 truncate">
+                                                    {kw}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Slogans Section */}
+                                <div className="space-y-6 pt-4">
+                                    <h3 className="text-gray-900 font-black text-2xl flex items-center">
+                                        <span className="bg-blue-600 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">S</span>
+                                        10 Catchy Shirt Slogans
                                     </h3>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         {strategy.shirtSlogans.map((slogan, idx) => (
-                                            <div key={idx} className="bg-white border border-gray-100 p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-default group relative overflow-hidden">
-                                                <div className="absolute left-0 top-0 h-full w-1 bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                                                <p className="text-gray-800 font-medium italic">"{slogan}"</p>
+                                            <div key={idx} className="bg-white border-2 border-gray-50 p-6 rounded-2xl shadow-sm hover:shadow-xl hover:border-blue-100 transition-all cursor-pointer group relative overflow-hidden flex items-center">
+                                                <div className="absolute left-0 top-0 h-full w-1.5 bg-blue-600 transform -translate-x-full group-hover:translate-x-0 transition-transform"></div>
+                                                <p className="text-gray-900 font-black text-lg italic tracking-tight leading-snug">"{slogan}"</p>
                                             </div>
                                         ))}
                                     </div>

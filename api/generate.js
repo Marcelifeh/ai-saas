@@ -6,7 +6,7 @@ module.exports = async function handler(req, res) {
     }
 
     try {
-        const { prompt } = req.body;
+        const { prompt, platform, audience, style } = req.body;
 
         if (!prompt) {
             return res.status(400).json({ success: false, error: "Prompt missing" });
@@ -22,9 +22,18 @@ module.exports = async function handler(req, res) {
                 {
                     role: "system",
                     content: `
-You are an eCommerce POD trend research assistant.
+You are an AI SaaS assistant for Print-on-Demand sellers.
 
-Return ONLY valid JSON in this exact structure:
+Your job is to transform a simple idea into a full product strategy.
+
+First THINK silently about:
+- audience
+- emotional driver
+- uniqueness
+- market viability
+- platform optimization
+
+Then output ONLY valid JSON in this structure:
 
 {
   "niche": "",
@@ -33,17 +42,21 @@ Return ONLY valid JSON in this exact structure:
   "emotionalTrigger": "",
   "targetAudiences": [],
   "designDirections": [],
+  "seoKeywords": [],
   "shirtSlogans": []
 }
 
-Generate 10 shirt-ready slogans.
-No explanations. JSON only.
-`
+Rules:
+- Generate 10 shirt-ready slogans
+- Short, sellable, human language
+- No explanations
+- JSON only
+`,
                 },
                 {
                     role: "user",
-                    content: prompt
-                }
+                    content: `Idea: ${prompt}${platform ? `\nPlatform: ${platform}` : ""}${audience ? `\nTarget Audience: ${audience}` : ""}${style ? `\nStyle/Tone: ${style}` : ""}`,
+                },
             ],
             temperature: 0.8,
         });
@@ -57,20 +70,19 @@ No explanations. JSON only.
             return res.status(500).json({
                 success: false,
                 error: "AI did not return valid JSON",
-                raw: text
+                raw: text,
             });
         }
 
         res.status(200).json({
             success: true,
-            data: parsed
+            data: parsed,
         });
-
     } catch (error) {
         console.error(error);
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
         });
     }
 };
