@@ -24,14 +24,7 @@ module.exports = async function handler(req, res) {
                     content: `
 You are an AI SaaS assistant for Print-on-Demand sellers.
 
-Your job is to transform a simple idea into a full product strategy.
-
-First THINK silently about:
-- audience
-- emotional driver
-- uniqueness
-- market viability
-- platform optimization
+Analyze the user's idea for market viability and search demand.
 
 Then output ONLY valid JSON in this structure:
 
@@ -42,13 +35,19 @@ Then output ONLY valid JSON in this structure:
   "emotionalTrigger": "",
   "targetAudiences": [],
   "designDirections": [],
-  "seoKeywords": [],
+  "seoKeywords": {
+    "primary": "",
+    "longTail": [],
+    "buyerIntent": [],
+    "platformTags": []
+  },
   "shirtSlogans": []
 }
 
 Rules:
 - Generate 10 shirt-ready slogans
-- Short, sellable, human language
+- Keywords must sound natural search phrases
+- Focus on real buyer search behavior
 - No explanations
 - JSON only
 `,
