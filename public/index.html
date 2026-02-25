@@ -148,6 +148,63 @@
                             >
                                 {loading ? "AI is Strategizing..." : "GENERATE FULL STRATEGY"}
                             </button>
+
+                            {strategy && (
+                                <button
+                                    onClick={() => {
+                                        const r = strategy;
+                                        const rows = [];
+                                        const headers = [
+                                            "niche", "slogan", "status", "niche_score", "title", "brand_name",
+                                            "bullet_point_1", "bullet_point_2", "description", "blacklist_flag",
+                                            "tmhunt_flag", "safe", "prompt", "research_demand", "research_competition",
+                                            "viral_potential", "trend_score"
+                                        ];
+                                        rows.push(headers.join(","));
+
+                                        const csvSafe = (text) => {
+                                            if (!text) return "";
+                                            return `"${String(text).replace(/"/g, '""')}"`;
+                                        };
+
+                                        r.shirtSlogans.forEach(slogan => {
+                                            const row = [
+                                                csvSafe(r.niche),
+                                                csvSafe(slogan),
+                                                "NEW",
+                                                r.nicheScore?.overall || "",
+                                                csvSafe(r.seoKeywords?.primary || ""),
+                                                "MyBrand",
+                                                csvSafe(r.whyItSells || ""),
+                                                csvSafe(r.emotionalTrigger || ""),
+                                                csvSafe(r.designDirections?.join(" | ") || ""),
+                                                "",
+                                                "",
+                                                "TRUE",
+                                                csvSafe(prompt),
+                                                r.nicheScore?.demand || "",
+                                                r.nicheScore?.competition || "",
+                                                r.nicheScore?.emotionalPower || "",
+                                                r.nicheScore?.platformFit || ""
+                                            ];
+                                            rows.push(row.join(","));
+                                        });
+
+                                        const csvContent = rows.join("\n");
+                                        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+                                        const url = URL.createObjectURL(blob);
+                                        const link = document.createElement("a");
+                                        link.href = url;
+                                        link.download = "pod_research.csv";
+                                        link.click();
+                                        URL.revokeObjectURL(url);
+                                    }}
+                                    className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 px-8 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    DOWNLOAD CSV EXPORT
+                                </button>
+                            )}
                         </div>
 
                         {strategy && (
