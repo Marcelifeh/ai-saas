@@ -35,7 +35,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState } = React;
+        const { useState, useEffect } = React;
 
         function App() {
             const [prompt, setPrompt] = useState("");
@@ -44,7 +44,24 @@
             const [style, setStyle] = useState("");
             const [strategy, setStrategy] = useState(null);
             const [loading, setLoading] = useState(false);
+            const [loadingText, setLoadingText] = useState("GENERATE");
             const [showOptions, setShowOptions] = useState(false);
+
+            useEffect(() => {
+                let interval;
+                if (loading) {
+                    const phrases = ["Analyzing niche...", "Evaluating demand...", "Writing slogans...", "Building Amazon listing..."];
+                    let idx = 0;
+                    setLoadingText(phrases[0]);
+                    interval = setInterval(() => {
+                        idx = (idx + 1) % phrases.length;
+                        setLoadingText(phrases[idx]);
+                    }, 2500);
+                } else {
+                    setLoadingText("GENERATE");
+                }
+                return () => clearInterval(interval);
+            }, [loading]);
 
             const handleGenerate = async () => {
                 if (!prompt.trim()) return;
@@ -180,19 +197,34 @@
                                             <div className="relative flex-1">
                                                 <input
                                                     type="text"
-                                                    placeholder="Enter core niche, audience, or seed idea..."
+                                                    placeholder="Describe a shirt idea (audience + theme + vibe)..."
                                                     value={prompt}
                                                     onChange={(e) => setPrompt(e.target.value)}
                                                     className="w-full border border-gray-300 p-4 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-lg font-medium shadow-inner transition-all bg-gray-50"
                                                 />
+                                                <p className="text-xs text-gray-400 mt-2 ml-1">Examples: Funny cat mom sarcasm shirt, Christian faith minimalist, Retro gym motivation</p>
                                             </div>
                                             <button
                                                 onClick={handleGenerate}
                                                 disabled={loading || !prompt.trim()}
-                                                className="bg-blue-600 hover:bg-blue-700 text-white font-black py-4 px-8 rounded-xl disabled:bg-blue-300 transition-all shadow-md transform hover:-translate-y-0.5 whitespace-nowrap"
+                                                className="bg-blue-600 hover:bg-blue-700 text-white font-black py-4 px-8 rounded-xl disabled:bg-blue-300 transition-all shadow-md transform hover:-translate-y-0.5 whitespace-nowrap min-w-[200px]"
                                             >
-                                                {loading ? "Strategizing..." : "GENERATE"}
+                                                {loadingText}
                                             </button>
+                                        </div>
+
+                                        {/* Preset Chips */}
+                                        <div className="flex flex-wrap gap-2 pt-2">
+                                            <span className="text-xs font-bold text-gray-400 self-center mr-1">🔥 Trending:</span>
+                                            {["Dog moms", "Nurses", "Gym humor", "Christian faith", "Fishing dads", "Tech workers"].map((preset, i) => (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => setPrompt(preset)}
+                                                    className="text-xs bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-600 font-bold py-1.5 px-3 rounded-full transition-colors border border-gray-200 hover:border-blue-200"
+                                                >
+                                                    {preset}
+                                                </button>
+                                            ))}
                                         </div>
 
                                         <button
@@ -246,6 +278,25 @@
 
                                 {strategy && (
                                     <div className="mt-12 space-y-10 animate-fade-in">
+                                        {/* Score Badges */}
+                                        <div className="flex flex-wrap gap-2 mb-2">
+                                            {strategy.nicheScore?.demand > 75 ? (
+                                                <span className="text-xs font-bold bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-200 shadow-sm">🟢 High Demand</span>
+                                            ) : (
+                                                <span className="text-xs font-bold bg-gray-50 text-gray-700 px-3 py-1.5 rounded-full border border-gray-200 shadow-sm">⚪ Average Demand</span>
+                                            )}
+                                            {strategy.competitionLevel?.toLowerCase().includes('low') || strategy.nicheScore?.competition < 50 ? (
+                                                <span className="text-xs font-bold bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-200 shadow-sm">🟢 Low Competition</span>
+                                            ) : strategy.nicheScore?.competition > 75 || strategy.competitionLevel?.toLowerCase().includes('high') ? (
+                                                <span className="text-xs font-bold bg-red-50 text-red-700 px-3 py-1.5 rounded-full border border-red-200 shadow-sm">🔴 High Competition</span>
+                                            ) : (
+                                                <span className="text-xs font-bold bg-yellow-50 text-yellow-700 px-3 py-1.5 rounded-full border border-yellow-200 shadow-sm">🟡 Medium Comp</span>
+                                            )}
+                                            {strategy.nicheScore?.overall > 80 && (
+                                                <span className="text-xs font-bold bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full border border-orange-200 shadow-sm">🔥 Viral Potential {strategy.nicheScore.overall}%</span>
+                                            )}
+                                        </div>
+
                                         {/* Insights Header & Score */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                             <div className="md:col-span-1 bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-center items-center text-white border border-blue-500">
@@ -318,7 +369,20 @@
                                                 </div>
                                             </div>
                                             <div>
-                                                <h3 className="text-gray-900 font-black text-lg mb-4">Design Logic</h3>
+                                                <div className="flex justify-between items-center mb-4">
+                                                    <h3 className="text-gray-900 font-black text-lg">Design Logic</h3>
+                                                    <button
+                                                        onClick={() => {
+                                                            const text = strategy.designDirections.join('\n');
+                                                            navigator.clipboard.writeText(text);
+                                                            alert("Design Logic copied!");
+                                                        }}
+                                                        className="bg-white hover:bg-gray-100 text-gray-700 text-[10px] font-bold py-1.5 px-2.5 rounded border border-gray-200 shadow-sm flex items-center gap-1 transition-colors uppercase"
+                                                    >
+                                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                                                        Copy
+                                                    </button>
+                                                </div>
                                                 <ul className="space-y-2">
                                                     {strategy.designDirections.map((dir, i) => (
                                                         <li key={i} className="flex items-start text-xs font-medium text-gray-500">
@@ -429,10 +493,23 @@
                                         {/* Amazon Listing Section */}
                                         {strategy.amazonListing && (
                                             <div className="space-y-6 pt-6 border-t border-gray-100">
-                                                <h3 className="text-gray-900 font-black text-2xl flex items-center">
-                                                    <span className="bg-orange-500 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">A</span>
-                                                    Amazon POD Listing
-                                                </h3>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <h3 className="text-gray-900 font-black text-2xl flex items-center">
+                                                        <span className="bg-orange-500 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">A</span>
+                                                        Amazon POD Listing
+                                                    </h3>
+                                                    <button
+                                                        onClick={() => {
+                                                            const text = `Title:\n${strategy.amazonListing.title}\n\nBullet 1:\n${strategy.amazonListing.bulletPoint1}\n\nBullet 2:\n${strategy.amazonListing.bulletPoint2}\n\nDescription:\n${strategy.amazonListing.description}\n\nKeywords:\n${strategy.amazonListing.keywords.join(', ')}`;
+                                                            navigator.clipboard.writeText(text);
+                                                            alert("Full listing copied!");
+                                                        }}
+                                                        className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 text-xs font-black py-2 px-4 rounded-lg shadow-sm flex items-center gap-2 transition-colors uppercase tracking-wider"
+                                                    >
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                                                        ⭐ Copy Full Listing
+                                                    </button>
+                                                </div>
 
                                                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                                                     <div className="p-6 border-b border-gray-100 bg-gray-50/50">
@@ -479,10 +556,23 @@
 
                                         {/* Slogans Section */}
                                         <div className="space-y-6 pt-6 border-t border-gray-100">
-                                            <h3 className="text-gray-900 font-black text-2xl flex items-center">
-                                                <span className="bg-blue-600 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">S</span>
-                                                10 Catchy Shirt Slogans
-                                            </h3>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <h3 className="text-gray-900 font-black text-2xl flex items-center">
+                                                    <span className="bg-blue-600 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">S</span>
+                                                    10 Catchy Shirt Slogans
+                                                </h3>
+                                                <button
+                                                    onClick={() => {
+                                                        const text = strategy.shirtSlogans.join('\n');
+                                                        navigator.clipboard.writeText(text);
+                                                        alert("All slogans copied!");
+                                                    }}
+                                                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 px-3 rounded-md border border-blue-200 flex items-center gap-1.5 transition-colors uppercase"
+                                                >
+                                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                                                    Copy All
+                                                </button>
+                                            </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 {strategy.shirtSlogans.map((slogan, idx) => (
                                                     <div key={idx} className="bg-white border border-gray-100 p-5 rounded-xl shadow-sm hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group relative overflow-hidden flex items-center">
