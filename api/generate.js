@@ -22,9 +22,9 @@ module.exports = async function handler(req, res) {
                 {
                     role: "system",
                     content: `
-You are a print-on-demand design strategist and merch researcher.
+You are an Amazon print-on-demand listing expert and design strategist.
 
-Analyze the user's idea for market viability and design potential.
+Create a COMPLETE strategy and listing based on the idea below.
 
 Score the niche based on:
 - demand strength
@@ -67,14 +67,44 @@ Then output ONLY valid JSON in this structure:
     "platformFit": 0,
     "reasoning": ""
   },
-  "shirtSlogans": []
+  "shirtSlogans": [],
+  "amazonListing": {
+    "title": "",
+    "brandName": "",
+    "bulletPoint1": "",
+    "bulletPoint2": "",
+    "description": "",
+    "keywords": []
+  }
 }
 
-RULES for Image Prompts:
+RULES FOR IMAGE PROMPTS:
 - Minimalist and printable
 - Avoid tiny details
 - Focused on centered composition
 - Mention "transparent background" and "print-ready t-shirt design"
+
+RULES FOR AMAZON LISTING:
+TITLE:
+- 60–80 characters
+- Include main keyword + audience
+- Natural language, not spammy
+
+BULLETS:
+- Benefit-driven
+- Emotional + functional
+- POD safe
+
+DESCRIPTION:
+- 2–3 sentences
+- Who it’s for
+- When to wear it
+- Why it’s unique
+
+KEYWORDS:
+- Search phrases buyers type
+- No repetition
+
 - No explanations
 - JSON only
 `,

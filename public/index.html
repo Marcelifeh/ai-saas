@@ -116,11 +116,11 @@
                                             csvSafe(slogan),
                                             "NEW",
                                             r.nicheScore?.overall || "",
-                                            csvSafe(r.seoKeywords?.primary || ""),
-                                            "MyBrand",
-                                            csvSafe(r.whyItSells || ""),
-                                            csvSafe(r.emotionalTrigger || ""),
-                                            csvSafe(r.designDirections?.join(" | ") || ""),
+                                            csvSafe(r.amazonListing?.title || ""),
+                                            csvSafe(r.amazonListing?.brandName || ""),
+                                            csvSafe(r.amazonListing?.bulletPoint1 || ""),
+                                            csvSafe(r.amazonListing?.bulletPoint2 || ""),
+                                            csvSafe(r.amazonListing?.description || ""),
                                             "",
                                             "",
                                             "TRUE",
@@ -426,8 +426,59 @@
                                             </div>
                                         )}
 
+                                        {/* Amazon Listing Section */}
+                                        {strategy.amazonListing && (
+                                            <div className="space-y-6 pt-6 border-t border-gray-100">
+                                                <h3 className="text-gray-900 font-black text-2xl flex items-center">
+                                                    <span className="bg-orange-500 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">A</span>
+                                                    Amazon POD Listing
+                                                </h3>
+
+                                                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                                                    <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+                                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Product Title</label>
+                                                        <p className="text-lg font-bold text-gray-900 leading-snug">{strategy.amazonListing.title}</p>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 md:grid-cols-2">
+                                                        <div className="p-6 border-b md:border-b-0 md:border-r border-gray-100 space-y-4">
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Brand Name</label>
+                                                                <p className="text-sm font-semibold text-blue-700 bg-blue-50 inline-block px-3 py-1 rounded-md">{strategy.amazonListing.brandName}</p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Bullet Point 1</label>
+                                                                <p className="text-sm text-gray-700 leading-relaxed">{strategy.amazonListing.bulletPoint1}</p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Bullet Point 2</label>
+                                                                <p className="text-sm text-gray-700 leading-relaxed">{strategy.amazonListing.bulletPoint2}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="p-6 space-y-4 bg-gray-50/30">
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Product Description</label>
+                                                                <p className="text-sm text-gray-600 leading-relaxed italic">{strategy.amazonListing.description}</p>
+                                                            </div>
+                                                            <div>
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-2">Backend Search Terms</label>
+                                                                <div className="flex flex-wrap gap-1.5">
+                                                                    {strategy.amazonListing.keywords && strategy.amazonListing.keywords.map((kw, i) => (
+                                                                        <span key={i} className="text-[10px] font-bold bg-white text-gray-600 px-2 py-1 rounded border border-gray-200">
+                                                                            {kw}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Slogans Section */}
-                                        <div className="space-y-6 pt-4">
+                                        <div className="space-y-6 pt-6 border-t border-gray-100">
                                             <h3 className="text-gray-900 font-black text-2xl flex items-center">
                                                 <span className="bg-blue-600 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">S</span>
                                                 10 Catchy Shirt Slogans
