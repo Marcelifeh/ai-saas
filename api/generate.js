@@ -58,15 +58,12 @@ Then output ONLY valid JSON in this structure:
     "buyerIntent": [],
     "platformTags": []
   },
-  "nicheScore": {
-    "overall": 0,
-    "demand": 0,
-    "competition": 0,
-    "emotionalPower": 0,
-    "designSimplicity": 0,
-    "platformFit": 0,
-    "reasoning": ""
-  },
+  "researchDemandScore": 0,
+  "researchCompetitionScore": 0,
+  "trendScore": 0,
+  "viralPotentialScore": 0,
+  "safe": true,
+  "reasoning": "",
   "shirtSlogans": [],
   "amazonListing": {
     "title": "",
@@ -130,9 +127,43 @@ KEYWORDS:
             });
         }
 
+        // Deterministic AI Scoring Engine
+        const demand = parsed.researchDemandScore || 50;
+        const competition = parsed.researchCompetitionScore || 50;
+        const trend = parsed.trendScore || 50;
+        const viral = parsed.viralPotentialScore || 50;
+        const safety = parsed.safe !== false ? 100 : 30;
+
+        const competitionInverse = 100 - competition;
+
+        const finalScore =
+            demand * 0.30 +
+            competitionInverse * 0.25 +
+            trend * 0.20 +
+            viral * 0.15 +
+            safety * 0.10;
+
+        let decision = "TEST";
+        if (finalScore >= 75) decision = "PUBLISH";
+        else if (finalScore < 50) decision = "SKIP";
+
+        const scoreData = {
+            niche_score: Math.round(finalScore),
+            decision,
+            research_demand: demand,
+            research_competition: competition,
+            viral_potential: viral,
+            trend_score: trend
+        };
+
+        const finalResult = {
+            ...parsed,
+            ...scoreData
+        };
+
         res.status(200).json({
             success: true,
-            data: parsed,
+            data: finalResult,
         });
     } catch (error) {
         console.error(error);
