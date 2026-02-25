@@ -152,15 +152,40 @@
 
                         {strategy && (
                             <div className="mt-12 space-y-10 animate-fade-in">
-                                {/* Insights Header */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100 shadow-sm">
-                                        <h3 className="text-blue-800 font-black uppercase text-[10px] tracking-[0.2em] mb-3">Identified Niche</h3>
-                                        <p className="text-2xl font-black text-gray-900 leading-tight">{strategy.niche}</p>
+                                {/* Insights Header & Score */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="md:col-span-1 bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl shadow-lg relative overflow-hidden flex flex-col justify-center items-center text-white border border-blue-500">
+                                        <div className="absolute -right-10 -top-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl"></div>
+                                        <h3 className="uppercase text-[10px] tracking-[0.2em] mb-2 font-bold opacity-80">Overall Niche Score</h3>
+                                        <div className="text-6xl font-black tracking-tighter drop-shadow-md">
+                                            {strategy.nicheScore ? strategy.nicheScore.overall : "N/A"}
+                                        </div>
+                                        <p className="text-xs mt-2 opacity-80 font-medium">/100</p>
                                     </div>
-                                    <div className="bg-gradient-to-br from-emerald-50 to-teal-50 p-6 rounded-2xl border border-emerald-100 shadow-sm">
-                                        <h3 className="text-emerald-800 font-black uppercase text-[10px] tracking-[0.2em] mb-3">Competition Level</h3>
-                                        <p className="text-2xl font-black text-gray-900 leading-tight">{strategy.competitionLevel}</p>
+
+                                    <div className="md:col-span-2 grid grid-cols-2 gap-4">
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-center">
+                                            <h3 className="text-gray-400 font-bold uppercase text-[9px] tracking-[0.2em] mb-1">Target Niche</h3>
+                                            <p className="text-lg font-black text-gray-900 leading-tight line-clamp-2">{strategy.niche}</p>
+                                        </div>
+                                        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col justify-center">
+                                            <h3 className="text-gray-400 font-bold uppercase text-[9px] tracking-[0.2em] mb-1">Competition</h3>
+                                            <p className="text-lg font-black text-gray-900 leading-tight">{strategy.competitionLevel}</p>
+                                        </div>
+                                        {strategy.nicheScore && (
+                                            <div className="col-span-2 bg-gray-50 p-4 rounded-xl border border-gray-100 mt-2">
+                                                <div className="grid grid-cols-5 gap-2 text-center text-xs mb-3">
+                                                    <div><span className="block font-black text-gray-800 text-lg">{strategy.nicheScore.demand}</span><span className="text-gray-500 text-[9px] uppercase">Demand</span></div>
+                                                    <div><span className="block font-black text-gray-800 text-lg">{strategy.nicheScore.competition}</span><span className="text-gray-500 text-[9px] uppercase">Comp</span></div>
+                                                    <div><span className="block font-black text-gray-800 text-lg">{strategy.nicheScore.emotionalPower}</span><span className="text-gray-500 text-[9px] uppercase">Emotion</span></div>
+                                                    <div><span className="block font-black text-gray-800 text-lg">{strategy.nicheScore.designSimplicity}</span><span className="text-gray-500 text-[9px] uppercase">Design</span></div>
+                                                    <div><span className="block font-black text-gray-800 text-lg">{strategy.nicheScore.platformFit}</span><span className="text-gray-500 text-[9px] uppercase">Platform</span></div>
+                                                </div>
+                                                <p className="text-xs text-gray-600 bg-white p-3 rounded-lg border border-gray-200 italic leading-relaxed">
+                                                    <span className="font-bold text-gray-800 mr-1">AI Verdict:</span> {strategy.nicheScore.reasoning}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
