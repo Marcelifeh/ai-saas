@@ -49,6 +49,9 @@
             const [opportunities, setOpportunities] = useState(null);
             const [discovering, setDiscovering] = useState(false);
             const [discoveringText, setDiscoveringText] = useState("🔎 Auto Discover");
+            const [bulkProducts, setBulkProducts] = useState(null);
+            const [bulkLoading, setBulkLoading] = useState(false);
+            const [bulkLoadingText, setBulkLoadingText] = useState("⚡ Bulk Generate Factory");
 
             useEffect(() => {
                 let interval;
@@ -82,12 +85,29 @@
                 return () => clearInterval(interval);
             }, [discovering]);
 
+            useEffect(() => {
+                let interval;
+                if (bulkLoading) {
+                    const phrases = ["Initializing factory...", "Scanning niches...", "Drafting designs...", "Writing Amazon listings...", "Scoring products...", "Finalizing batch..."];
+                    let idx = 0;
+                    setBulkLoadingText(phrases[0]);
+                    interval = setInterval(() => {
+                        idx = (idx + 1) % phrases.length;
+                        setBulkLoadingText(phrases[idx]);
+                    }, 3000);
+                } else {
+                    setBulkLoadingText("⚡ Bulk Generate Factory");
+                }
+                return () => clearInterval(interval);
+            }, [bulkLoading]);
+
             const handleGenerate = async () => {
                 if (!prompt.trim()) return;
 
                 setLoading(true);
                 setStrategy(null);
                 setOpportunities(null);
+                setBulkProducts(null);
 
                 try {
                     const response = await fetch("/api/generate", {
@@ -116,6 +136,7 @@
                 setDiscovering(true);
                 setStrategy(null);
                 setOpportunities(null);
+                setBulkProducts(null);
 
                 try {
                     const response = await fetch("/api/discover", {
@@ -138,6 +159,33 @@
                 setDiscovering(false);
             };
 
+            const handleBulkGenerate = async () => {
+                setBulkLoading(true);
+                setStrategy(null);
+                setOpportunities(null);
+                setBulkProducts(null);
+
+                try {
+                    const response = await fetch("/api/bulk-generate", {
+                        method: "POST"
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        setBulkProducts(data.products);
+                    } else {
+                        console.error("Error:", data.error);
+                        alert("Failed to bulk generate: " + data.error);
+                    }
+                } catch (error) {
+                    console.error(error);
+                    alert("Something went wrong. Check console.");
+                }
+
+                setBulkLoading(false);
+            };
+
             return (
                 <div className="flex h-screen overflow-hidden bg-gray-50">
                     {/* Sidebar */}
@@ -154,11 +202,11 @@
 
                             <button
                                 onClick={() => {
-                                    if (!strategy) {
-                                        alert("Please generate a strategy first.");
+                                    if (!strategy && !bulkProducts) {
+                                        alert("Please generate data first.");
                                         return;
                                     }
-                                    const r = strategy;
+
                                     const rows = [];
                                     const headers = [
                                         "niche", "slogan", "status", "niche_score", "title", "brand_name",
@@ -173,28 +221,55 @@
                                         return `"${String(text).replace(/"/g, '""')}"`;
                                     };
 
-                                    r.shirtSlogans.forEach(slogan => {
-                                        const row = [
-                                            csvSafe(r.niche),
-                                            csvSafe(slogan),
-                                            csvSafe(r.decision),
-                                            r.niche_score || "",
-                                            csvSafe(r.amazonListing?.title || ""),
-                                            csvSafe(r.amazonListing?.brandName || ""),
-                                            csvSafe(r.amazonListing?.bulletPoint1 || ""),
-                                            csvSafe(r.amazonListing?.bulletPoint2 || ""),
-                                            csvSafe(r.amazonListing?.description || ""),
-                                            r.safe === false ? "TRUE" : "FALSE",
-                                            "",
-                                            r.safe !== false ? "TRUE" : "FALSE",
-                                            csvSafe(prompt),
-                                            r.research_demand || "",
-                                            r.research_competition || "",
-                                            r.viral_potential || "",
-                                            r.trend_score || ""
-                                        ];
-                                        rows.push(row.join(","));
-                                    });
+                                    if (strategy) {
+                                        strategy.shirtSlogans.forEach(slogan => {
+                                            const row = [
+                                                csvSafe(strategy.niche),
+                                                csvSafe(slogan),
+                                                csvSafe(strategy.decision),
+                                                strategy.niche_score || "",
+                                                csvSafe(strategy.amazonListing?.title || ""),
+                                                csvSafe(strategy.amazonListing?.brandName || ""),
+                                                csvSafe(strategy.amazonListing?.bulletPoint1 || ""),
+                                                csvSafe(strategy.amazonListing?.bulletPoint2 || ""),
+                                                csvSafe(strategy.amazonListing?.description || ""),
+                                                strategy.safe === false ? "TRUE" : "FALSE",
+                                                "",
+                                                strategy.safe !== false ? "TRUE" : "FALSE",
+                                                csvSafe(prompt),
+                                                strategy.research_demand || "",
+                                                strategy.research_competition || "",
+                                                strategy.viral_potential || "",
+                                                strategy.trend_score || ""
+                                            ];
+                                            rows.push(row.join(","));
+                                        });
+                                    } else if (bulkProducts) {
+                                        bulkProducts.forEach(prod => {
+                                            prod.shirtSlogans.forEach(slogan => {
+                                                const row = [
+                                                    csvSafe(prod.niche),
+                                                    csvSafe(slogan),
+                                                    csvSafe(prod.decision),
+                                                    prod.niche_score || "",
+                                                    csvSafe(prod.amazonListing?.title || ""),
+                                                    csvSafe(prod.amazonListing?.brandName || ""),
+                                                    csvSafe(prod.amazonListing?.bulletPoint1 || ""),
+                                                    csvSafe(prod.amazonListing?.bulletPoint2 || ""),
+                                                    csvSafe(prod.amazonListing?.description || ""),
+                                                    prod.safe === false ? "TRUE" : "FALSE",
+                                                    "",
+                                                    prod.safe !== false ? "TRUE" : "FALSE",
+                                                    "BULK_AUTO",
+                                                    prod.research_demand || "",
+                                                    prod.research_competition || "",
+                                                    prod.viral_potential || "",
+                                                    prod.trend_score || ""
+                                                ];
+                                                rows.push(row.join(","));
+                                            });
+                                        });
+                                    }
 
                                     const csvContent = rows.join("\n");
                                     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -205,15 +280,15 @@
                                     link.click();
                                     URL.revokeObjectURL(url);
                                 }}
-                                disabled={!strategy}
+                                disabled={!strategy && !bulkProducts}
                                 className={`w-full py-3 px-4 rounded-xl font-bold flex items-center gap-3 transition-all text-sm
-                                    ${strategy
+                                    ${(strategy || bulkProducts)
                                         ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
                                         : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}
                                 `}
                             >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                                {strategy ? "Export CSV Data" : "Waiting for Data..."}
+                                {(strategy || bulkProducts) ? "Export CSV Data" : "Waiting for Data..."}
                             </button>
                         </div>
 
@@ -253,18 +328,27 @@
                                             <div className="flex flex-col gap-2 min-w-[200px]">
                                                 <button
                                                     onClick={handleGenerate}
-                                                    disabled={loading || discovering || !prompt.trim()}
+                                                    disabled={loading || discovering || bulkLoading || !prompt.trim()}
                                                     className="bg-blue-600 hover:bg-blue-700 text-white font-black py-4 px-6 rounded-xl disabled:bg-blue-300 transition-all shadow-md transform hover:-translate-y-0.5 whitespace-nowrap"
                                                 >
                                                     {loadingText}
                                                 </button>
-                                                <button
-                                                    onClick={handleDiscover}
-                                                    disabled={loading || discovering}
-                                                    className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 px-6 rounded-xl disabled:bg-purple-300 transition-all shadow-md whitespace-nowrap text-sm border-b-4 border-purple-800 active:border-b-0 active:translate-y-1"
-                                                >
-                                                    {discoveringText}
-                                                </button>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button
+                                                        onClick={handleDiscover}
+                                                        disabled={loading || discovering || bulkLoading}
+                                                        className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 px-3 rounded-xl disabled:bg-purple-300 transition-all shadow-md whitespace-nowrap text-[11px] border-b-4 border-purple-800 active:border-b-0 active:translate-y-1 block w-full leading-tight"
+                                                    >
+                                                        {discoveringText}
+                                                    </button>
+                                                    <button
+                                                        onClick={handleBulkGenerate}
+                                                        disabled={loading || discovering || bulkLoading}
+                                                        className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 font-black py-3 px-3 rounded-xl disabled:bg-yellow-200 transition-all shadow-md whitespace-nowrap text-[11px] border-b-4 border-yellow-600 active:border-b-0 active:translate-y-1 block w-full leading-tight uppercase"
+                                                    >
+                                                        {bulkLoadingText}
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -331,7 +415,62 @@
                                     </div>
                                 </div>
 
-                                {/* Results Section - Split path between Strategy and Opportunities */}
+                                {/* Results Section - Split path between Strategy, Opportunities, and Bulk */}
+
+                                {/* Bulk Generated Products List */}
+                                {bulkProducts && (
+                                    <div className="mt-12 space-y-6 animate-fade-in">
+                                        <div className="flex items-center justify-between border-b border-gray-200 pb-4">
+                                            <h2 className="text-2xl font-black text-gray-900 flex items-center gap-3">
+                                                <span className="bg-yellow-100 text-yellow-700 w-10 h-10 flex items-center justify-center rounded-xl text-lg">🏭</span>
+                                                Bulk Ready-to-Publish Products
+                                            </h2>
+                                            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Fully Generated</p>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 gap-6">
+                                            {bulkProducts.map((prod, idx) => (
+                                                <div key={idx} className="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-xl hover:border-yellow-200 transition-all overflow-hidden flex flex-col md:flex-row">
+
+                                                    {/* Score Box */}
+                                                    <div className="bg-gray-50 border-r border-gray-100 p-6 flex flex-col items-center justify-center min-w-[140px]">
+                                                        <h3 className="uppercase text-[10px] tracking-[0.2em] font-bold text-gray-400 mb-1">Score</h3>
+                                                        <div className="text-4xl font-black text-gray-800 tracking-tighter">{prod.niche_score}</div>
+                                                        <div className="mt-3">
+                                                            {prod.decision === "PUBLISH" ? (
+                                                                <span className="text-[10px] font-black bg-green-500 text-white px-3 py-1.5 rounded shadow-sm flex items-center uppercase tracking-widest"><svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"></path></svg> PUBLISH</span>
+                                                            ) : prod.decision === "TEST" ? (
+                                                                <span className="text-[10px] font-black bg-yellow-400 text-yellow-900 px-3 py-1.5 rounded shadow-sm flex items-center uppercase tracking-widest"><svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z"></path></svg> TEST</span>
+                                                            ) : (
+                                                                <span className="text-[10px] font-black bg-red-500 text-white px-3 py-1.5 rounded shadow-sm flex items-center uppercase tracking-widest"><svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"></path></svg> SKIP</span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Details */}
+                                                    <div className="p-6 flex-1 flex flex-col justify-between">
+                                                        <div>
+                                                            <div className="flex items-start justify-between">
+                                                                <h4 className="text-xl font-black text-gray-900 mb-2">{prod.niche}</h4>
+                                                            </div>
+                                                            <div className="text-sm bg-yellow-50 text-yellow-900 border border-yellow-200 p-3 rounded-lg font-medium mb-3">
+                                                                <span className="font-bold uppercase tracking-wider text-[10px] text-yellow-700 block mb-1">Amazon Title:</span>
+                                                                {prod.amazonListing?.title}
+                                                            </div>
+                                                            <div className="mb-4">
+                                                                <span className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-1">Generated Slogans:</span>
+                                                                <ul className="text-sm font-medium text-gray-700 space-y-1 list-disc list-inside">
+                                                                    {prod.shirtSlogans.map((slogan, sIdx) => <li key={sIdx}>{slogan}</li>)}
+                                                                </ul>
+                                                            </div>
+
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Opportunities List */}
                                 {opportunities && (
