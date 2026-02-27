@@ -13,43 +13,40 @@ module.exports = async function handler(req, res) {
 
         // STEP 1 — discover niches
         const discovery = await client.chat.completions.create({
-            model: "gpt-4o-mini", // Standardizing on gpt-4o-mini
+            model: "gpt-4o-mini",
+            response_format: { type: "json_object" },
             messages: [
-                { role: "system", content: "You are a POD niche discovery engine." },
+                { role: "system", content: "You are a POD niche discovery engine. Always output valid JSON." },
                 {
                     role: "user",
                     content: `
 Find 3 profitable Amazon POD niches.
-Return JSON array only.
+Return a JSON object with a single key "niches" containing an array of objects.
 
-Fields:
-niche
-targetAudience
-whyItSells
-emotionalTrigger
-safe
+Fields per object:
+niche (string)
+targetAudience (string)
+whyItSells (string)
+emotionalTrigger (string)
+safe (boolean, true if family friendly)
 `
                 }
             ]
         });
 
-        let rawDiscovery = discovery.choices[0].message.content;
-        if (rawDiscovery.startsWith('```json')) rawDiscovery = rawDiscovery.replace(/^```json\n/, '').replace(/\n```$/, '');
-        else if (rawDiscovery.startsWith('```')) rawDiscovery = rawDiscovery.replace(/^```\n/, '').replace(/\n```$/, '');
-
-        const niches = JSON.parse(rawDiscovery);
+        const parsedDiscovery = JSON.parse(discovery.choices[0].message.content);
+        const niches = parsedDiscovery.niches || [];
         const results = [];
 
         // STEP 2 — generate products from each niche
         for (const nicheData of niches) {
             const generation = await client.chat.completions.create({
                 model: "gpt-4o-mini",
+                response_format: { type: "json_object" },
                 messages: [
                     {
                         role: "system",
-                        content: `You create Amazon POD shirt listings.
-
-Return exactly this JSON object structure (no markdown):
+                        content: `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:
 {
     "shirtSlogans": ["", "", "", ""],
     "designDirections": ["", ""],
@@ -64,8 +61,7 @@ Return exactly this JSON object structure (no markdown):
                     },
                     {
                         role: "user",
-                        content: `
-Create a POD shirt concept for:
+                        content: `Create a POD shirt concept for:
 
 Niche: ${nicheData.niche}
 Audience: ${nicheData.targetAudience}
@@ -75,15 +71,11 @@ Return valid JSON exactly as structured.`
                 ]
             });
 
-            let rawGen = generation.choices[0].message.content;
-            if (rawGen.startsWith('```json')) rawGen = rawGen.replace(/^```json\n/, '').replace(/\n```$/, '');
-            else if (rawGen.startsWith('```')) rawGen = rawGen.replace(/^```\n/, '').replace(/\n```$/, '');
-
             let gen;
             try {
-                gen = JSON.parse(rawGen);
+                gen = JSON.parse(generation.choices[0].message.content);
             } catch (err) {
-                console.error("Failed to parse generation for niche", nicheData.niche, rawGen);
+                console.error("Failed to parse generation for niche", nicheData.niche);
                 continue; // Skip this one if it fails, continue loop
             }
 

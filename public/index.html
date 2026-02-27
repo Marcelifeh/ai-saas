@@ -26,48 +26,102 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
-
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
             }
+        }
 
-            .heatmap-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-                gap: 12px;
-                margin-top: 15px;
-            }
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 12px;
+            margin-top: 15px;
+        }
 
-            .heat-tile {
-                padding: 14px;
-                border-radius: 10px;
-                color: white;
-                min-height: 110px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                box-shadow: 0 6px 14px rgba(0, 0, 0, 0.15);
-                transition: transform 0.2s ease;
-            }
+        .heat-tile {
+            padding: 14px;
+            border-radius: 10px;
+            color: white;
+            min-height: 110px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 6px 14px rgba(0, 0, 0, 0.15);
+            transition: transform 0.2s ease;
+        }
 
-            .heat-tile:hover {
-                transform: translateY(-4px);
-            }
+        .heat-tile:hover {
+            transform: translateY(-4px);
+        }
 
-            .heat-score {
-                font-size: 28px;
-                font-weight: 900;
-            }
+        .heat-score {
+            font-size: 28px;
+            font-weight: 900;
+        }
 
-            .heat-decision {
-                font-size: 11px;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                opacity: 0.9;
-            }
+        .heat-decision {
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            opacity: 0.9;
+        }
+
+        .queue-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: white;
+            padding: 16px;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .queue-card:hover {
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+            border-color: #22c55e;
+        }
+
+        .run-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            background: white;
+            cursor: pointer;
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .run-card:hover {
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+            border-color: #6366f1;
+        }
+
+        .run-bar-bg {
+            background: #f3f4f6;
+            border-radius: 999px;
+            height: 6px;
+            flex: 1;
+        }
+
+        .run-bar-fill {
+            border-radius: 999px;
+            height: 6px;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            transition: width 0.5s ease;
+        }
+
+        .revenue-box {
+            background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+            border: 1px solid #bbf7d0;
+            border-radius: 12px;
+            padding: 14px 16px;
+        }
+
+        .revenue-box.medium {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef9c3 100%);
+            border-color: #fde68a;
+        }
+
+        .revenue-box.low {
+            background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+            border-color: #e5e7eb;
+        }
     </style>
 </head>
 
@@ -76,6 +130,205 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        // ─── Revenue Projection Engine ─────────────────────────────────────
+        const ROYALTY_PER_SALE = 5.50;  // Amazon POD royalty
+        const BASE_MONTHLY_SALES = 30;  // baseline for an average niche
+
+        function getConfidence(score) {
+            if (score >= 75) return 'High';
+            if (score >= 55) return 'Medium';
+            return 'Low';
+        }
+
+        function estimateSales(product) {
+            const demandFactor = (product.searchVolume || 50) / 100;
+            const compPenalty = 1 - (product.competitionDensity || 50) / 100;
+            const trendBoost = (product.trendMomentum || 50) / 100;
+            const intentBoost = (product.buyerIntent || 50) / 100;
+
+            const raw = BASE_MONTHLY_SALES *
+                demandFactor *
+                compPenalty *
+                (1 + trendBoost) *
+                (1 + intentBoost);
+
+            return Math.max(1, Math.round(raw));
+        }
+
+        function projectRevenue(product) {
+            const sales = estimateSales(product);
+            return {
+                monthlySales: sales,
+                monthlyRevenue: parseFloat((sales * ROYALTY_PER_SALE).toFixed(2)),
+                confidence: getConfidence(product.niche_score || 0)
+            };
+        }
+
+        function portfolioRevenue(products) {
+            return (products || []).reduce((sum, p) => {
+                const proj = p.projection || projectRevenue(p);
+                return sum + proj.monthlyRevenue;
+            }, 0);
+        }
+
+        // ─── RevenueBox Component ────────────────────────────────────────
+        function RevenueBox({ product }) {
+            const proj = product.projection || projectRevenue(product);
+            const confClass = proj.confidence === 'High' ? '' :
+                proj.confidence === 'Medium' ? 'medium' : 'low';
+            const confColor = proj.confidence === 'High' ? 'text-emerald-700' :
+                proj.confidence === 'Medium' ? 'text-yellow-700' : 'text-gray-500';
+            return (
+                <div className={`revenue-box ${confClass} mt-4`}>
+                    <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Revenue Projection
+                        </span>
+                        <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${confColor} ${proj.confidence === 'High' ? 'bg-emerald-100' : proj.confidence === 'Medium' ? 'bg-yellow-100' : 'bg-gray-100'}`}>
+                            {proj.confidence} Confidence
+                        </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-white/70 rounded-lg p-2">
+                            <div className="text-lg font-black text-gray-800">{proj.monthlySales}</div>
+                            <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Est. Sales/mo</div>
+                        </div>
+                        <div className="bg-white/70 rounded-lg p-2">
+                            <div className="text-lg font-black text-gray-800">${proj.monthlyRevenue.toFixed(2)}</div>
+                            <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Profit/mo</div>
+                        </div>
+                        <div className="bg-white/70 rounded-lg p-2">
+                            <div className="text-lg font-black text-gray-800">${(proj.monthlyRevenue * 12).toFixed(0)}</div>
+                            <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Annual Est.</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ─── Publish Queue Logic ─────────────────────────────────────────────
+        function shouldPublish(product) {
+            return (
+                product.niche_score >= 70 &&
+                product.searchVolume >= 60 &&
+                product.competitionDensity <= 50 &&
+                product.trendMomentum >= 50 &&
+                product.safe !== false
+            );
+        }
+
+        function buildPublishQueue(products) {
+            return products
+                .filter(shouldPublish)
+                .map(p => ({
+                    ...p,
+                    publish_confidence: Math.round(
+                        (p.niche_score + p.trendMomentum + p.searchVolume) / 3
+                    )
+                }))
+                .sort((a, b) => b.publish_confidence - a.publish_confidence);
+        }
+
+        function getRiskBadge(p) {
+            if (p.competitionDensity >= 70) return { label: 'Saturated', color: 'bg-red-100 text-red-700' };
+            if (p.trendMomentum >= 70) return { label: 'Emerging', color: 'bg-blue-100 text-blue-700' };
+            return { label: 'Evergreen', color: 'bg-green-100 text-green-700' };
+        }
+
+        function exportQueueCSV(queue) {
+            if (!queue.length) return;
+            const csvSafe = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+            const headers = ['niche', 'title', 'slogan', 'niche_score', 'publish_confidence',
+                'searchVolume', 'competitionDensity', 'trendMomentum', 'buyerIntent'];
+            const rows = queue.map(p =>
+                [
+                    csvSafe(p.niche),
+                    csvSafe(p.title || p.amazonListing?.title),
+                    csvSafe(p.slogan || (p.shirtSlogans && p.shirtSlogans[0])),
+                    p.niche_score,
+                    p.publish_confidence,
+                    p.searchVolume,
+                    p.competitionDensity,
+                    p.trendMomentum,
+                    p.buyerIntent
+                ].join(',')
+            );
+            const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'publish_queue.csv'; a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ─── SmartPublishQueue Component ─────────────────────────────────────
+        function SmartPublishQueue({ products }) {
+            if (!products || products.length === 0) return null;
+            const queue = buildPublishQueue(products);
+            if (queue.length === 0) return (
+                <div className="mb-8 p-5 rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center text-sm text-gray-400 font-semibold animate-fade-in">
+                    No products met the auto-publish threshold this run. Lower the thresholds or re-run to generate higher-scoring niches.
+                </div>
+            );
+            return (
+                <section className="mb-10 animate-fade-in">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 className="text-xl font-black text-gray-900 flex items-center gap-2">
+                                <span className="bg-emerald-100 text-emerald-600 w-8 h-8 flex items-center justify-center rounded-lg shadow-inner">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                                </span>
+                                Smart Publish Queue
+                            </h3>
+                            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mt-1">{queue.length} Auto-Selected Winner{queue.length !== 1 ? 's' : ''}</p>
+                        </div>
+                        <button
+                            onClick={() => exportQueueCSV(queue)}
+                            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black px-4 py-2.5 rounded-xl shadow-md shadow-emerald-900/20 transition-all"
+                        >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            Export Queue CSV
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3">
+                        {queue.map((p, idx) => {
+                            const badge = getRiskBadge(p);
+                            const title = p.title || p.amazonListing?.title || '—';
+                            const slogan = p.slogan || (p.shirtSlogans && p.shirtSlogans[0]) || '—';
+                            return (
+                                <div key={idx} className="queue-card">
+                                    <div className="flex items-start justify-between gap-4">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className="text-[10px] font-black bg-emerald-500 text-white px-2 py-0.5 rounded uppercase tracking-widest">PUBLISH</span>
+                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${badge.color}`}>{badge.label}</span>
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase">#{idx + 1}</span>
+                                            </div>
+                                            <div className="font-black text-gray-800 text-sm mb-0.5">{p.niche}</div>
+                                            <div className="text-xs text-gray-500 font-medium truncate">{title}</div>
+                                            {slogan !== '—' && <div className="text-xs text-emerald-700 font-semibold mt-1 italic">"{slogan}"</div>}
+                                        </div>
+                                        <div className="text-right flex-shrink-0">
+                                            <div className="text-3xl font-black text-gray-800">{p.niche_score}</div>
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Score</div>
+                                            <div className="mt-1 text-sm font-black" style={{ color: '#22c55e' }}>{p.publish_confidence}%</div>
+                                            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Confidence</div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-4 mt-3 pt-3 border-t border-gray-100 text-xs">
+                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Demand</span><span className="font-black text-gray-700">{p.searchVolume}</span></div>
+                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Competition</span><span className="font-black text-gray-700">{p.competitionDensity}</span></div>
+                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Trend</span><span className="font-black text-gray-700">{p.trendMomentum}</span></div>
+                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Buyer Intent</span><span className="font-black text-gray-700">{p.buyerIntent}</span></div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            );
+        }
 
         function getHeatColor(score) {
             if (score >= 75) return "#22c55e";   // green
@@ -110,6 +363,185 @@
             );
         }
 
+        // ─── Run History Helpers ───────────────────────────────────────────
+        function averageArr(arr) {
+            if (!arr.length) return 0;
+            return Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
+        }
+
+        function createRunRecord(products, type) {
+            const scores = products.map(p => p.niche_score).filter(Boolean);
+            return {
+                id: Date.now(),
+                date: new Date().toISOString(),
+                type: type || 'bulk',
+                totalProducts: products.length,
+                avgScore: averageArr(scores),
+                topScore: scores.length ? Math.max(...scores) : 0,
+                publishableCount: products.filter(shouldPublish).length,
+                products
+            };
+        }
+
+        function saveRun(record) {
+            const history = JSON.parse(localStorage.getItem('saas_runs') || '[]');
+            history.unshift(record);
+            localStorage.setItem('saas_runs', JSON.stringify(history.slice(0, 50)));
+        }
+
+        function loadRunHistory() {
+            return JSON.parse(localStorage.getItem('saas_runs') || '[]');
+        }
+
+        // ─── RunHistoryView Component ────────────────────────────────────
+        function RunHistoryView({ history, onClearHistory }) {
+            const [expandedId, setExpandedId] = useState(null);
+
+            if (!history.length) return (
+                <div className="mt-12 flex flex-col items-center justify-center text-center p-12 border-2 border-dashed border-gray-200 rounded-3xl bg-gray-50/50 animate-fade-in">
+                    <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center mb-4 border border-indigo-100">
+                        <svg className="w-7 h-7 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <h3 className="text-lg font-black text-gray-800 mb-1">No runs yet</h3>
+                    <p className="text-sm text-gray-400 font-medium">Run the Bulk Factory or Full Autopilot to start tracking performance</p>
+                </div>
+            );
+
+            // Analytics across all runs
+            const totalProducts = history.reduce((s, r) => s + r.totalProducts, 0);
+            const totalPublishable = history.reduce((s, r) => s + r.publishableCount, 0);
+            const avgRunScore = averageArr(history.map(r => r.avgScore));
+            const publishRate = totalProducts ? Math.round((totalPublishable / totalProducts) * 100) : 0;
+            const bestRun = history.reduce((best, r) => r.avgScore > best.avgScore ? r : best, history[0]);
+            const totalPortfolioRevenue = history.reduce((sum, r) => sum + portfolioRevenue(r.products || []), 0);
+
+            return (
+                <div className="mt-6 animate-fade-in space-y-8">
+
+                    {/* Analytics Summary */}
+                    <div>
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h2 className="text-2xl font-black text-gray-900 flex items-center gap-3">
+                                    <span className="bg-indigo-100 text-indigo-600 w-10 h-10 flex items-center justify-center rounded-xl shadow-inner">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                    </span>
+                                    Performance Analytics
+                                </h2>
+                                <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mt-1">Across {history.length} run{history.length !== 1 ? 's' : ''}</p>
+                            </div>
+                            <button
+                                onClick={onClearHistory}
+                                className="text-xs font-bold text-red-400 hover:text-red-600 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-all"
+                            >Clear History</button>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-center">
+                                <div className="text-2xl font-black text-indigo-600">{history.length}</div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Total Runs</div>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-center">
+                                <div className="text-2xl font-black text-gray-800">{totalProducts}</div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Products Generated</div>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-center">
+                                <div className="text-2xl font-black text-gray-800">{avgRunScore}</div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Avg Niche Score</div>
+                            </div>
+                            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm text-center">
+                                <div className="text-2xl font-black text-emerald-600">{publishRate}%</div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Publish Rate</div>
+                            </div>
+                        </div>
+
+                        {/* Publish rate bar */}
+                        <div className="mt-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+                            <div className="flex justify-between items-center text-xs font-bold text-gray-500 mb-2">
+                                <span>Publish Eligibility Rate</span>
+                                <span className="text-emerald-600">{publishRate}%</span>
+                            </div>
+                            <div className="run-bar-bg"><div className="run-bar-fill" style={{ width: `${publishRate}%` }}></div></div>
+                            {bestRun && (
+                                <div className="mt-3 text-xs text-gray-400 font-medium">✓ Best run on {new Date(bestRun.date).toLocaleDateString()} — avg score <span className="font-black text-gray-700">{bestRun.avgScore}</span></div>
+                            )}
+                        </div>
+
+                        {/* Portfolio Revenue Forecast */}
+                        <div className="mt-4 bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 rounded-xl p-4 flex items-center justify-between">
+                            <div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-600 flex items-center gap-1 mb-1">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    Revenue Forecast
+                                </div>
+                                <div className="text-xs text-emerald-700 font-medium">Estimated if all generated products were published</div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-black text-emerald-700">${totalPortfolioRevenue.toFixed(2)}</div>
+                                <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest">/month portfolio est.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Run list */}
+                    <div>
+                        <h3 className="text-lg font-black text-gray-800 mb-3 flex items-center gap-2">
+                            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Run History
+                        </h3>
+                        <div className="space-y-3">
+                            {history.map((run) => {
+                                const isExpanded = expandedId === run.id;
+                                const date = new Date(run.date);
+                                const typeLabel = run.type === 'autopilot' ? 'Full Autopilot' : 'Bulk Factory';
+                                const typeColor = run.type === 'autopilot' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700';
+                                return (
+                                    <div key={run.id} className="run-card" onClick={() => setExpandedId(isExpanded ? null : run.id)}>
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${typeColor}`}>{typeLabel}</span>
+                                                    <span className="text-[10px] text-gray-400 font-medium">{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })} at {date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                                                </div>
+                                                <div className="flex gap-4 text-sm mt-2">
+                                                    <div><span className="text-gray-400 text-[10px] font-bold uppercase block">Products</span><span className="font-black text-gray-800">{run.totalProducts}</span></div>
+                                                    <div><span className="text-gray-400 text-[10px] font-bold uppercase block">Avg Score</span><span className="font-black text-gray-800">{run.avgScore}</span></div>
+                                                    <div><span className="text-gray-400 text-[10px] font-bold uppercase block">Top Score</span><span className="font-black text-gray-800">{run.topScore}</span></div>
+                                                    <div><span className="text-gray-400 text-[10px] font-bold uppercase block">Publishable</span><span className="font-black text-emerald-600">{run.publishableCount}</span></div>
+                                                </div>
+                                            </div>
+                                            <div className="text-gray-400 mt-1 flex-shrink-0">
+                                                <svg className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                            </div>
+                                        </div>
+
+                                        {isExpanded && (
+                                            <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 gap-2">
+                                                {(run.products || []).map((p, pi) => (
+                                                    <div key={pi} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+                                                        <div>
+                                                            <div className="font-bold text-sm text-gray-800">{p.niche}</div>
+                                                            <div className="text-xs text-gray-400 font-medium">{p.slogan || (p.shirtSlogans && p.shirtSlogans[0]) || ''}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                                            <div className="text-xl font-black" style={{ color: getHeatColor(p.niche_score) }}>{p.niche_score}</div>
+                                                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest ${p.decision === 'PUBLISH' ? 'bg-green-500 text-white' :
+                                                                p.decision === 'TEST' ? 'bg-yellow-400 text-yellow-900' :
+                                                                    'bg-red-500 text-white'
+                                                                }`}>{p.decision}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function App() {
             const [prompt, setPrompt] = useState("");
             const [platform, setPlatform] = useState("");
@@ -140,8 +572,11 @@
             });
             const [autopilotLoading, setAutopilotLoading] = useState(false);
             const [autopilotLoadingText, setAutopilotLoadingText] = useState("Run Autopilot Production");
-            const [activeView, setActiveView] = useState("dashboard"); // 'dashboard', 'discovery', 'bulk', 'autopilot'
+            const [activeView, setActiveView] = useState("dashboard"); // 'dashboard', 'discovery', 'bulk', 'autopilot', 'history'
             const [selectedDesignStyle, setSelectedDesignStyle] = useState("Vintage Distressed");
+            const [runHistory, setRunHistory] = useState(() => loadRunHistory());
+            const [pipelineStatus, setPipelineStatus] = useState(null);   // null | { step, label, progress }
+            const [pipelineRunning, setPipelineRunning] = useState(false);
 
             const PRESET_STYLES = ["Vintage Distressed", "Hand-Drawn", "Bold Graphic", "Retro Vintage", "Minimalist Vector"];
 
@@ -350,6 +785,9 @@
                     if (data.success) {
                         setBulkProducts(data.products);
                         setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+                        const rec = createRunRecord(data.products, 'bulk');
+                        saveRun(rec);
+                        setRunHistory(loadRunHistory());
                     } else {
                         console.error("Error:", data.error);
                         setError({ type: 'validation', message: data.error });
@@ -391,6 +829,9 @@
                     if (data.runSummary && data.products) {
                         setAutopilotData(data);
                         setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+                        const rec = createRunRecord(data.products, 'autopilot');
+                        saveRun(rec);
+                        setRunHistory(loadRunHistory());
                     } else {
                         console.error("Error:", data.error);
                         setError({ type: 'validation', message: data.error || "Autopilot failed to return valid data." });
@@ -405,6 +846,69 @@
                 }
 
                 setAutopilotLoading(false);
+            };
+
+            const PIPELINE_STEPS = [
+                { step: 1, label: 'Discovering profitable niches…', key: 'discover' },
+                { step: 2, label: 'Generating product listings…', key: 'generate' },
+                { step: 3, label: 'Scoring opportunity & demand…', key: 'score' },
+                { step: 4, label: 'Forecasting revenue potential…', key: 'forecast' },
+                { step: 5, label: 'Selecting publish candidates…', key: 'select' },
+            ];
+
+            const handleOneClickAutopilot = async () => {
+                setPipelineRunning(true);
+                setPipelineStatus({ step: 1, label: PIPELINE_STEPS[0].label, progress: 10 });
+                setError(null);
+                setAutopilotData(null);
+                const start = Date.now();
+
+                const stepDelay = (ms) => new Promise(res => setTimeout(res, ms));
+
+                try {
+                    // Step 1: visible start
+                    await stepDelay(400);
+                    setPipelineStatus({ step: 2, label: PIPELINE_STEPS[1].label, progress: 30 });
+
+                    // Step 2-4: fire the unified server pipeline
+                    await stepDelay(600);
+                    setPipelineStatus({ step: 3, label: PIPELINE_STEPS[2].label, progress: 55 });
+
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 90000);
+                    const response = await fetch('/api/autopilot', { method: 'POST', signal: controller.signal });
+                    clearTimeout(timeoutId);
+                    const data = await response.json();
+
+                    setPipelineStatus({ step: 4, label: PIPELINE_STEPS[3].label, progress: 75 });
+                    await stepDelay(400);
+                    setPipelineStatus({ step: 5, label: PIPELINE_STEPS[4].label, progress: 90 });
+                    await stepDelay(400);
+
+                    if (data.runSummary && data.products) {
+                        // Attach revenue projections to every product
+                        const enriched = { ...data, products: data.products.map(p => ({ ...p, projection: projectRevenue(p) })) };
+                        setAutopilotData(enriched);
+                        setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+                        const rec = createRunRecord(enriched.products, 'autopilot');
+                        saveRun(rec);
+                        setRunHistory(loadRunHistory());
+                        setPipelineStatus({ step: 5, label: '✓ Pipeline complete!', progress: 100 });
+                        await stepDelay(900);
+                        setActiveView('autopilot');
+                    } else {
+                        throw { message: data.error || 'Pipeline returned invalid data.' };
+                    }
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        setError({ type: 'recoverable', message: 'One-click pipeline timed out. Please try again.' });
+                    } else {
+                        setError({ type: 'recoverable', message: err.message || 'Pipeline failed. Please try again.' });
+                    }
+                }
+
+                setPipelineRunning(false);
+                setPipelineStatus(null);
             };
 
             return (
@@ -449,6 +953,14 @@
                                 >
                                     <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
                                     Full Autopilot
+                                </button>
+                                <button
+                                    onClick={() => setActiveView("history")}
+                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm ${activeView === "history" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" : "text-gray-400 hover:bg-gray-800 hover:text-white"}`}
+                                >
+                                    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                    History & Analytics
+                                    {runHistory.length > 0 && <span className="ml-auto bg-indigo-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">{runHistory.length}</span>}
                                 </button>
                             </div>
 
@@ -681,6 +1193,95 @@
                                     </div>
                                 )}
 
+                                {/* ─── One-Click Autopilot Command Center ─── */}
+                                {activeView === 'dashboard' && (
+                                    <div className="animate-fade-in">
+                                        <div className={`relative overflow-hidden rounded-2xl border-2 ${pipelineRunning
+                                            ? 'border-emerald-400 bg-gradient-to-br from-emerald-950 to-gray-900'
+                                            : 'border-emerald-200 bg-gradient-to-br from-gray-900 to-slate-900'
+                                            } shadow-xl p-6 md:p-8 transition-all duration-500`}>
+
+                                            {/* Background glow when running */}
+                                            {pipelineRunning && (
+                                                <div className="absolute inset-0 pointer-events-none">
+                                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-emerald-400/40 blur-xl rounded-full"></div>
+                                                </div>
+                                            )}
+
+                                            <div className="flex flex-col md:flex-row items-center gap-6">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-lg ${pipelineRunning ? 'bg-emerald-400/20 ring-2 ring-emerald-400/50' : 'bg-emerald-500/20'
+                                                            }`}>
+                                                            {pipelineRunning ? (
+                                                                <svg className="w-5 h-5 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                                            ) : (
+                                                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <h2 className="text-lg font-black text-white">One-Click Autopilot</h2>
+                                                            <p className="text-xs font-bold text-emerald-400/80 uppercase tracking-widest">Full Business Pipeline</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <p className="text-sm text-gray-400 font-medium leading-relaxed mb-4">
+                                                        Discovers niches → generates listings → scores opportunity → forecasts revenue → selects publish candidates. One click, full output.
+                                                    </p>
+
+                                                    {/* Pipeline steps */}
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        {PIPELINE_STEPS.map(s => (
+                                                            <div key={s.step} className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${pipelineStatus && pipelineStatus.step >= s.step
+                                                                ? 'bg-emerald-500/20 text-emerald-400'
+                                                                : 'bg-white/5 text-gray-600'
+                                                                } transition-all`}>
+                                                                {pipelineStatus && pipelineStatus.step > s.step ? (
+                                                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg>
+                                                                ) : (
+                                                                    <span className="w-2.5 h-2.5 flex items-center justify-center">{s.step}</span>
+                                                                )}
+                                                                {s.key}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    {/* Progress bar */}
+                                                    {pipelineStatus && (
+                                                        <div className="mt-4">
+                                                            <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                                                <span className="font-bold text-emerald-400">{pipelineStatus.label}</span>
+                                                                <span>{pipelineStatus.progress}%</span>
+                                                            </div>
+                                                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className="h-full rounded-full transition-all duration-700 ease-out"
+                                                                    style={{ width: `${pipelineStatus.progress}%`, background: 'linear-gradient(90deg, #34d399, #10b981)' }}
+                                                                ></div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex-shrink-0">
+                                                    <button
+                                                        onClick={handleOneClickAutopilot}
+                                                        disabled={pipelineRunning || autopilotLoading || bulkLoading || loading}
+                                                        className="relative bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 disabled:text-emerald-600 text-white font-black py-4 px-8 rounded-xl shadow-lg shadow-emerald-900/50 transition-all transform hover:-translate-y-0.5 active:translate-y-0 text-base uppercase tracking-wide flex items-center gap-2 min-w-[180px] justify-center"
+                                                    >
+                                                        {pipelineRunning ? (
+                                                            <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Running…</>
+                                                        ) : (
+                                                            <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Launch Pipeline</>
+                                                        )}
+                                                    </button>
+                                                    <p className="text-[10px] text-gray-600 text-center mt-2 font-bold uppercase tracking-widest">~60s full run</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {activeView === 'discovery' && (
                                     <div className="bg-white p-10 rounded-2xl border border-purple-200 shadow-sm flex flex-col items-center justify-center text-center animate-fade-in mb-6">
                                         <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center mb-4 shadow-inner">
@@ -736,6 +1337,19 @@
                                 )}
 
                                 {/* Results Section - Split path between Strategy, Opportunities, and Bulk */}
+
+                                {/* History & Analytics View */}
+                                {activeView === 'history' && (
+                                    <RunHistoryView
+                                        history={runHistory}
+                                        onClearHistory={() => {
+                                            if (confirm('Clear all run history? This cannot be undone.')) {
+                                                localStorage.removeItem('saas_runs');
+                                                setRunHistory([]);
+                                            }
+                                        }}
+                                    />
+                                )}
 
                                 {/* Error State */}
                                 {error && (
@@ -817,6 +1431,8 @@
 
                                         <Heatmap products={autopilotData.products} />
 
+                                        <SmartPublishQueue products={autopilotData.products} />
+
                                         <div className="grid grid-cols-1 gap-6">
                                             {autopilotData.products.map((prod, idx) => (
                                                 <div key={idx} className="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-emerald-200 transition-all overflow-hidden flex flex-col md:flex-row">
@@ -858,6 +1474,7 @@
                                                                 <div><span className="text-gray-400 font-bold uppercase block text-[9px] mb-0.5">Buyer Intent</span> <span className="font-black text-gray-800 text-sm">{prod.buyerIntent}</span></div>
                                                             </div>
                                                         )}
+                                                        <RevenueBox product={prod} />
                                                     </div>
                                                 </div>
                                             ))}
@@ -879,6 +1496,8 @@
                                         </div>
 
                                         <Heatmap products={bulkProducts} />
+
+                                        <SmartPublishQueue products={bulkProducts} />
 
                                         <div className="grid grid-cols-1 gap-6">
                                             {bulkProducts.map((prod, idx) => (
@@ -924,6 +1543,7 @@
                                                                     <div><span className="text-gray-400 font-bold uppercase block text-[9px] mb-0.5">Buyer Intent</span> <span className="font-black text-gray-800 text-sm">{prod.buyerIntent}</span></div>
                                                                 </div>
                                                             )}
+                                                            <RevenueBox product={prod} />
 
                                                         </div>
                                                     </div>
@@ -1257,27 +1877,43 @@
 
                                                 <div className="grid grid-cols-1 gap-4">
                                                     {strategy.imagePrompts.map((basePromptText, idx) => {
-                                                        const finalPromptText = `${basePromptText}, ${selectedDesignStyle} style, transparent background, 300 DPI, vector design`;
+                                                        const isStructured = basePromptText.includes('\n') || basePromptText.length > 150;
+                                                        const finalPromptText = isStructured
+                                                            ? basePromptText
+                                                            : `${basePromptText}, ${selectedDesignStyle} style, transparent background, 300 DPI, vector design`;
+                                                        const wordCount = finalPromptText.trim().split(/\s+/).length;
+                                                        const isCopied = copiedId === 'prompt_' + idx;
+                                                        const promptLabels = ['Typographic Quote', 'Bold Statement', 'Abstract Symbol'];
                                                         return (
-                                                            <div key={idx} className="bg-gray-900 rounded-2xl p-6 relative group overflow-hidden border border-gray-800">
-                                                                <div className="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                                    <button
-                                                                        onClick={() => handleCopy('prompt_' + idx, finalPromptText)}
-                                                                        className="bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold py-2 px-3 rounded-lg backdrop-blur-md border border-white/10 flex items-center justify-center min-w-[120px] transition-all"
-                                                                    >
-                                                                        {copiedId === 'prompt_' + idx ? (
-                                                                            <span className="flex items-center gap-1.5"><svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg> COPIED</span>
-                                                                        ) : (
-                                                                            <span className="flex items-center gap-2"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg> COPY PROMPT</span>
-                                                                        )}
-                                                                    </button>
+                                                            <div key={idx} className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 hover:border-gray-600 transition-colors">
+                                                                <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-800">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="bg-indigo-600/30 text-indigo-400 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-600/30">Image Prompt {idx + 1}</span>
+                                                                        <span className="text-gray-600 text-[10px] font-bold uppercase tracking-widest">{promptLabels[idx] || ''}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{wordCount}w</span>
+                                                                        <button
+                                                                            onClick={() => handleCopy('prompt_' + idx, finalPromptText)}
+                                                                            className={`text-[10px] font-black py-1.5 px-3 rounded-lg border flex items-center gap-1.5 transition-all uppercase tracking-wider ${isCopied ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-white/10 hover:bg-white/20 text-white border-white/10'}`}
+                                                                        >
+                                                                            {isCopied ? (<><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg> Copied!</>) : (<><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg> Copy Prompt</>)}
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
-                                                                <h4 className="text-indigo-400 font-black text-[10px] uppercase tracking-[0.2em] mb-3">Image Prompt {idx + 1}</h4>
-                                                                <p className="text-gray-300 font-mono text-sm leading-relaxed pr-20">{finalPromptText}</p>
+                                                                <div className="px-6 py-5">
+                                                                    <p className="text-gray-300 font-mono text-[13px] leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{finalPromptText}</p>
+                                                                </div>
+                                                                <div className="px-6 pb-4 flex gap-2 flex-wrap">
+                                                                    {['Transparent BG', 'Vector', '300 DPI', 'Screen Print Safe', 'Amazon Merch'].map((tag, ti) => (
+                                                                        <span key={ti} className="text-[9px] font-black uppercase tracking-widest bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 px-2 py-0.5 rounded">{tag}</span>
+                                                                    ))}
+                                                                </div>
                                                             </div>
                                                         );
                                                     })}
                                                 </div>
+
                                             </div>
                                         )}
 

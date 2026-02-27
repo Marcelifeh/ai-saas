@@ -72,15 +72,44 @@ Then output ONLY valid JSON in this structure:
   }
 }
 
-RULES FOR IMAGE PROMPTS:
-- Minimalist and printable
-- Avoid tiny details
-- Focused on centered composition
-- Mention "transparent background" and "print-ready t-shirt design"
+RULES FOR IMAGE PROMPTS — CRITICAL:
+Each of the 3 imagePrompts must be a COMPLETE, STRUCTURED, production-grade POD prompt.
+Use this EXACT multi-line format for each prompt string (vary the design concept between all 3):
+
+"Create a print-ready t-shirt design.
+
+Main focus:
+[specific visual concept tied to the niche and audience]
+
+Design style:
+[one of: retro vintage / bold graphic / minimalist vector / hand-drawn / clean typographic]
+
+Composition:
+[centered / left-aligned / arched / stacked] layout, balanced spacing, strong readability at distance.
+
+Typography:
+[font pairing description, e.g. bold modern sans-serif headline with handwritten accent]
+
+Color palette:
+[2-3 specific muted or brand-appropriate color names], high contrast for black or white shirts.
+
+Technical requirements:
+Transparent background
+Vector style illustration
+300 DPI
+No mockups
+No shadows
+No gradients that break print clarity
+No extra text outside main design
+Screen print safe
+Designed for Amazon Merch on Demand"
+
+Vary the visual concept, composition style, and color choices across all 3 prompts.
+Keep each prompt 100-180 words. Embed the full structured text inside the JSON string value.
 
 RULES FOR AMAZON LISTING:
 TITLE:
-- 60–80 characters
+- 60-80 characters
 - Include main keyword + audience
 - Natural language, not spammy
 
@@ -90,16 +119,14 @@ BULLETS:
 - POD safe
 
 DESCRIPTION:
-- 2–3 sentences
-- Who it’s for
-- When to wear it
-- Why it’s unique
+- 2-3 sentences
+- Who it's for, when to wear it, why it's unique
 
 KEYWORDS:
 - Search phrases buyers type
 - No repetition
 
-- No explanations
+- No explanations outside JSON
 - JSON only
 `,
                 },

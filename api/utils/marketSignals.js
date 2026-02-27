@@ -41,11 +41,7 @@ function scoreWithMarketIntel(intel, market) {
 
     return {
         niche_score: Math.round(finalScore),
-        decision,
-        research_demand: demandScore,
-        research_competition: competitionScore,
-        trend_score: trendScore,
-        viral_potential: Math.round(buyerIntent) // buyer intent is essentially viral potential / purchase likelihood
+        decision
     };
 }
 
