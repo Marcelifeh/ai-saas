@@ -6,18 +6,30 @@
             "use": "@vercel/node"
         },
         {
-            "src": "public/**",
+            "src": "public/index.html",
             "use": "@vercel/static"
         }
     ],
     "routes": [
         {
-            "src": "/api/(.*)",
-            "dest": "/api/$1.js"
+            "src": "/api/bulk-generate",
+            "dest": "/api/bulk-generate.js"
+        },
+        {
+            "src": "/api/discover",
+            "dest": "/api/discover.js"
+        },
+        {
+            "src": "/api/autopilot",
+            "dest": "/api/autopilot.js"
+        },
+        {
+            "src": "/api/generate",
+            "dest": "/api/generate.js"
         },
         {
             "src": "/(.*)",
-            "dest": "/public/$1"
+            "dest": "/public/index.html"
         }
     ]
 }
