@@ -1,4 +1,5 @@
 const OpenAI = require("openai");
+const { generateMarketSignals, scoreWithMarketIntel } = require("./utils/marketSignals");
 
 module.exports = async function handler(req, res) {
     if (req.method !== "POST") {
@@ -66,18 +67,24 @@ title (string, Amazon optimized title, 150 chars max)
 bullet_point_1 (string, 250 chars max)
 bullet_point_2 (string, 250 chars max)
 description (string)
-niche_score (number 0-100)
-decision (string constraint: "PUBLISH", "TEST", or "SKIP")
 `
                         }
                     ]
                 });
 
                 const design = JSON.parse(generation.choices[0].message.content);
+                const market = generateMarketSignals(nicheData.niche);
+                const score = scoreWithMarketIntel(nicheData, market);
 
                 products.push({
-                    ...nicheData,
-                    ...design
+                    niche: nicheData.niche,
+                    slogan: design.slogan,
+                    title: design.title,
+                    bullet_point_1: design.bullet_point_1,
+                    bullet_point_2: design.bullet_point_2,
+                    description: design.description,
+                    ...market,
+                    ...score
                 });
             }
         }

@@ -1,4 +1,5 @@
 const OpenAI = require("openai");
+const { generateMarketSignals, scoreWithMarketIntel } = require("./utils/marketSignals");
 
 module.exports = async function handler(req, res) {
     if (req.method !== "POST") {
@@ -58,10 +59,6 @@ Then output ONLY valid JSON in this structure:
     "buyerIntent": [],
     "platformTags": []
   },
-  "researchDemandScore": 0,
-  "researchCompetitionScore": 0,
-  "trendScore": 0,
-  "viralPotentialScore": 0,
   "safe": true,
   "reasoning": "",
   "shirtSlogans": [],
@@ -128,36 +125,12 @@ KEYWORDS:
         }
 
         // Deterministic AI Scoring Engine
-        const demand = parsed.researchDemandScore || 50;
-        const competition = parsed.researchCompetitionScore || 50;
-        const trend = parsed.trendScore || 50;
-        const viral = parsed.viralPotentialScore || 50;
-        const safety = parsed.safe !== false ? 100 : 30;
-
-        const competitionInverse = 100 - competition;
-
-        const finalScore =
-            demand * 0.30 +
-            competitionInverse * 0.25 +
-            trend * 0.20 +
-            viral * 0.15 +
-            safety * 0.10;
-
-        let decision = "TEST";
-        if (finalScore >= 75) decision = "PUBLISH";
-        else if (finalScore < 50) decision = "SKIP";
-
-        const scoreData = {
-            niche_score: Math.round(finalScore),
-            decision,
-            research_demand: demand,
-            research_competition: competition,
-            viral_potential: viral,
-            trend_score: trend
-        };
+        const market = generateMarketSignals(parsed.niche || prompt);
+        const scoreData = scoreWithMarketIntel(parsed, market);
 
         const finalResult = {
             ...parsed,
+            ...market,
             ...scoreData
         };
 
