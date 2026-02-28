@@ -313,25 +313,68 @@
         function exportQueueCSV(queue) {
             if (!queue.length) return;
             const csvSafe = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
-            const headers = ['niche', 'title', 'slogan', 'niche_score', 'publish_confidence',
-                'searchVolume', 'competitionDensity', 'trendMomentum', 'buyerIntent',
-                'blacklist_flag', 'tmhunt_flag', 'safe'];
-            const rows = queue.map(p =>
-                [
+
+            const headers = [
+                'niche',
+                'amazon_title',
+                'brand_name',
+                'bullet_point_1',
+                'bullet_point_2',
+                'description',
+                'search_keywords',
+                'all_10_slogans',
+                'primary_design_prompt',
+                'secondary_design_prompt',
+                'tertiary_design_prompt',
+                'design_logic',
+                'niche_score',
+                'publish_confidence',
+                'searchVolume',
+                'competitionDensity',
+                'trendMomentum',
+                'buyerIntent',
+                'blacklist_flag',
+                'tmhunt_flag',
+                'safe'
+            ];
+
+            const rows = queue.map(p => {
+                const listing = p.amazonListing || {};
+
+                // Format arrays with newlines for CSV readability
+                const slogans = p.shirtSlogans ? p.shirtSlogans.join('\n') : (p.slogan || '');
+                const keywords = listing.keywords ? listing.keywords.join(', ') : '';
+                const dirs = p.designDirections ? p.designDirections.join('\n') : '';
+
+                // Extract individual prompts if available
+                const prompt1 = p.imagePrompts && p.imagePrompts[0] ? p.imagePrompts[0] : '';
+                const prompt2 = p.imagePrompts && p.imagePrompts[1] ? p.imagePrompts[1] : '';
+                const prompt3 = p.imagePrompts && p.imagePrompts[2] ? p.imagePrompts[2] : '';
+
+                return [
                     csvSafe(p.niche),
-                    csvSafe(p.title || p.amazonListing?.title),
-                    csvSafe(p.slogan || (p.shirtSlogans && p.shirtSlogans[0])),
-                    p.niche_score,
-                    p.publish_confidence,
-                    p.searchVolume,
-                    p.competitionDensity,
-                    p.trendMomentum,
-                    p.buyerIntent,
+                    csvSafe(listing.title || p.title),
+                    csvSafe(listing.brandName || ''),
+                    csvSafe(listing.bulletPoint1 || p.bullet_point_1 || ''),
+                    csvSafe(listing.bulletPoint2 || p.bullet_point_2 || ''),
+                    csvSafe(listing.description || p.description || ''),
+                    csvSafe(keywords),
+                    csvSafe(slogans),
+                    csvSafe(prompt1),
+                    csvSafe(prompt2),
+                    csvSafe(prompt3),
+                    csvSafe(dirs),
+                    p.niche_score || '',
+                    p.publish_confidence || '',
+                    p.searchVolume || '',
+                    p.competitionDensity || '',
+                    p.trendMomentum || '',
+                    p.buyerIntent || '',
                     csvSafe(p.compliance?.policyViolations?.join(' | ') || ''),
                     csvSafe(p.compliance?.trademarkMatches?.join(' | ') || ''),
-                    p.compliance?.safe ? (p.compliance?.wasRewritten ? 'REWRITTEN_SAFE' : 'TRUE') : 'FALSE'
-                ].join(',')
-            );
+                    p.compliance?.safe !== false ? (p.compliance?.wasRewritten ? 'REWRITTEN_SAFE' : 'TRUE') : 'FALSE'
+                ].join(',');
+            });
             const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
