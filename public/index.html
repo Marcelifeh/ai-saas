@@ -2023,9 +2023,10 @@
                                                                     )}
                                                                 </div>
                                                                 <div className="px-6 pb-4 flex gap-2 flex-wrap">
-                                                                    {['Transparent BG', 'Vector', '300 DPI', 'Screen Print Safe', 'Amazon Merch'].map((tag, ti) => (
+                                                                    {['Transparent BG', 'Vector', '300 DPI', 'Screen Print Safe'].map((tag, ti) => (
                                                                         <span key={ti} className="text-[9px] font-black uppercase tracking-widest bg-emerald-900/30 text-emerald-400 border border-emerald-800/40 px-2 py-0.5 rounded">{tag}</span>
                                                                     ))}
+                                                                    <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${currentPlatMeta.color}`}>{currentPlatMeta.label}</span>
                                                                 </div>
                                                             </div>
                                                         );
@@ -2039,8 +2040,10 @@
                                             <div className="space-y-6 pt-6 border-t border-gray-100">
                                                 <div className="flex items-center justify-between mb-2">
                                                     <h3 className="text-gray-900 font-black text-2xl flex items-center">
-                                                        <span className="bg-orange-500 text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono">A</span>
-                                                        Amazon POD Listing
+                                                        <span className={`text-white w-8 h-8 rounded-xl flex items-center justify-center text-xs mr-3 font-mono ${currentPlatKey === 'etsy' ? 'bg-pink-500' : currentPlatKey === 'redbubble' ? 'bg-red-500' : currentPlatKey === 'shopify' ? 'bg-green-600' : 'bg-orange-500'}`}>
+                                                            {currentPlatKey === 'etsy' ? 'E' : currentPlatKey === 'redbubble' ? 'R' : currentPlatKey === 'shopify' ? 'S' : 'A'}
+                                                        </span>
+                                                        {currentPlatMeta.label} Listing
                                                     </h3>
                                                     <button
                                                         onClick={() => {
