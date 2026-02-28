@@ -144,7 +144,7 @@
         function estimateSales(product) {
             const demandFactor = (product.searchVolume || 50) / 100;
             const compPenalty = 1 - (product.competitionDensity || 50) / 100;
-            const trendBoost = (product.trendMomentum || 50) / 100;
+            const trendBoost = ((product.trend?.score || product.trendMomentum || 50) / 100);
             const intentBoost = (product.buyerIntent || 50) / 100;
 
             const raw = BASE_MONTHLY_SALES *
@@ -280,33 +280,69 @@
             );
         }
 
+        // ─── TrendBadge Component ───────────────────────────────────────────────
+        function TrendBadge({ trend }) {
+            if (!trend) return null;
+
+            const badgeColors = {
+                "🔥 Trending": "bg-red-100 text-red-700 border-red-200",
+                "📈 Rising": "bg-orange-100 text-orange-700 border-orange-200",
+                "⚖ Stable": "bg-gray-100 text-gray-700 border-gray-200",
+                "🧊 Cooling": "bg-blue-100 text-blue-700 border-blue-200"
+            };
+
+            const velocityColor = trend.signals?.growthAcceleration >= 60 ? "text-red-500" :
+                trend.signals?.growthAcceleration <= 40 ? "text-blue-500" : "text-gray-400";
+            const velocityIcon = trend.signals?.growthAcceleration >= 60 ? "▲" :
+                trend.signals?.growthAcceleration <= 40 ? "▼" : "▬";
+
+            return (
+                <div className={`flex items-center justify-between gap-3 mt-3 p-3 rounded-lg border ${badgeColors[trend.badge] || badgeColors["⚖ Stable"]}`}>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs">{trend.badge.split(' ')[0]}</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest">{trend.badge.split(' ').slice(1).join(' ')}</span>
+                        <span className={`text-[10px] font-bold ${velocityColor}`}>{velocityIcon} {trend.signals?.growthAcceleration}% Velocity</span>
+                    </div>
+                    <div className="text-[9px] font-bold opacity-60 uppercase tracking-tighter">
+                        Confidence: {trend.confidence}
+                    </div>
+                </div>
+            );
+        }
+
         // ─── Publish Queue Logic ─────────────────────────────────────────────
         function shouldPublish(product) {
+            const trendScore = product.trend?.score || product.trendMomentum || 0;
             return (
                 product.niche_score >= 70 &&
-                product.searchVolume >= 60 &&
-                product.competitionDensity <= 50 &&
-                product.trendMomentum >= 50 &&
+                (product.searchVolume || 0) >= 60 &&
+                (product.competitionDensity || 100) <= 50 &&
+                trendScore >= 50 &&
                 product.safe !== false &&
-                product.compliance?.safe !== false   // never publish flagged products
+                product.compliance?.safe !== false
             );
         }
 
         function buildPublishQueue(products) {
             return products
                 .filter(shouldPublish)
-                .map(p => ({
-                    ...p,
-                    publish_confidence: Math.round(
-                        (p.niche_score + p.trendMomentum + p.searchVolume) / 3
-                    )
-                }))
+                .map(p => {
+                    const trendScore = p.trend?.score || p.trendMomentum || 0;
+                    return {
+                        ...p,
+                        publish_confidence: Math.round(
+                            (p.niche_score * 0.5) + (trendScore * 0.3) + (p.searchVolume * 0.2)
+                        )
+                    };
+                })
                 .sort((a, b) => b.publish_confidence - a.publish_confidence);
         }
 
         function getRiskBadge(p) {
             if (p.competitionDensity >= 70) return { label: 'Saturated', color: 'bg-red-100 text-red-700' };
-            if (p.trendMomentum >= 70) return { label: 'Emerging', color: 'bg-blue-100 text-blue-700' };
+            const trendScore = p.trend?.score || p.trendMomentum || 0;
+            if (trendScore >= 70) return { label: '🔥 Trending', color: 'bg-red-500 text-white' };
+            if (trendScore >= 50) return { label: '📈 Emerging', color: 'bg-blue-100 text-blue-700' };
             return { label: 'Evergreen', color: 'bg-green-100 text-green-700' };
         }
 
@@ -428,6 +464,7 @@
                                             <div className="font-black text-gray-800 text-sm mb-0.5">{p.niche}</div>
                                             <div className="text-xs text-gray-500 font-medium truncate">{title}</div>
                                             {slogan !== '—' && <div className="text-xs text-emerald-700 font-semibold mt-1 italic">"{slogan}"</div>}
+                                            <TrendBadge trend={p.trend} />
                                         </div>
                                         <div className="text-right flex-shrink-0">
                                             <div className="text-3xl font-black text-gray-800">{p.niche_score}</div>
@@ -436,11 +473,11 @@
                                             <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Confidence</div>
                                         </div>
                                     </div>
-                                    <div className="flex gap-4 mt-3 pt-3 border-t border-gray-100 text-xs">
-                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Demand</span><span className="font-black text-gray-700">{p.searchVolume}</span></div>
-                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Competition</span><span className="font-black text-gray-700">{p.competitionDensity}</span></div>
-                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Trend</span><span className="font-black text-gray-700">{p.trendMomentum}</span></div>
-                                        <div><span className="text-gray-400 font-bold uppercase block text-[9px]">Buyer Intent</span><span className="font-black text-gray-700">{p.buyerIntent}</span></div>
+                                    <div className="flex gap-4 mt-3 pt-3 border-t border-gray-100 text-xs text-center border-dashed">
+                                        <div className="flex-1"><span className="text-gray-400 font-bold uppercase block text-[9px]">Demand</span><span className="font-black text-gray-700">{p.searchVolume}</span></div>
+                                        <div className="flex-1 border-x border-gray-100"><span className="text-gray-400 font-bold uppercase block text-[9px]">Competition</span><span className="font-black text-gray-700">{p.competitionDensity}</span></div>
+                                        <div className="flex-1 border-r border-gray-100"><span className="text-gray-400 font-bold uppercase block text-[9px]">Momentum</span><span className="font-black text-emerald-600">+{p.trend?.score || p.trendMomentum}%</span></div>
+                                        <div className="flex-1"><span className="text-gray-400 font-bold uppercase block text-[9px]">Buyer Intent</span><span className="font-black text-gray-700">{p.buyerIntent}</span></div>
                                     </div>
                                 </div>
                             );
@@ -473,8 +510,9 @@
                                 <div className="font-bold text-sm mb-2">{p.niche}</div>
                                 <div className="heat-score">{p.niche_score}</div>
                                 <div className="heat-decision mb-3">{p.decision}</div>
+                                {p.trend && <div className="text-[10px] font-black uppercase tracking-widest mb-2 opacity-90">{p.trend.badge}</div>}
                                 <small className="text-[10px] opacity-80 mt-auto pt-2 border-t border-white/20 -mx-1 px-1">
-                                    Demand {p.searchVolume || p.research_demand} • Comp {p.competitionDensity || p.research_competition}
+                                    Demand {p.searchVolume || p.research_demand} • Momentum +{p.trend?.score || p.trendMomentum}%
                                 </small>
                             </div>
                         ))}
@@ -1781,6 +1819,7 @@ Commercial friendly.
                                                                 <span className="font-bold text-gray-800 uppercase tracking-widest block mb-1">Platform Title:</span>
                                                                 {prod.title}
                                                             </div>
+                                                            <TrendBadge trend={prod.trend} />
                                                         </div>
                                                         {/* Market Intel block for Autopilot view */}
                                                         {prod.searchVolume && (
@@ -1863,6 +1902,7 @@ Commercial friendly.
                                                                     {prod.shirtSlogans.map((slogan, sIdx) => <li key={sIdx}>{slogan}</li>)}
                                                                 </ul>
                                                             </div>
+                                                            <TrendBadge trend={prod.trend} />
                                                             {/* Market Intel block for Bulk Generation view */}
                                                             {prod.searchVolume && (
                                                                 <div className="mt-4 pt-4 border-t border-gray-100 flex gap-4 text-xs">
@@ -1937,6 +1977,7 @@ Commercial friendly.
                                                             <p className="text-gray-600 font-medium text-sm leading-relaxed mb-4">
                                                                 {opp.whyItSells}
                                                             </p>
+                                                            <TrendBadge trend={opp.trend} />
                                                         </div>
                                                         <div className="flex items-center justify-between border-t border-gray-100 pt-4 mt-auto">
                                                             <div className="flex gap-4">

@@ -1,6 +1,7 @@
 const OpenAI = require("openai");
 const { generateMarketSignals, scoreWithMarketIntel } = require("./utils/marketSignals");
 const { enforceCompliance } = require("./utils/complianceCheck");
+const { getTrendSignals } = require("./utils/trendEngine");
 
 module.exports = async function handler(req, res) {
     if (req.method !== "POST") {
@@ -48,9 +49,11 @@ safe (boolean, true if family friendly)
 
         // STEP 2 — generate multiple products per niche
         for (const nicheData of niches) {
-            // Generate 2 products per niche to stay within 60s vercel hobby limit, adjust later if requested
-            for (let i = 0; i < 2; i++) {
+            // Fetch real-world trend signals (simulated layer with caching)
+            const trend = await getTrendSignals(nicheData.niche);
 
+            // Generate 2 products per niche
+            for (let i = 0; i < 2; i++) {
                 const generation = await client.chat.completions.create({
                     model: "gpt-4o-mini",
                     response_format: { type: "json_object" },
@@ -74,8 +77,12 @@ description (string)
                 });
 
                 const design = JSON.parse(generation.choices[0].message.content);
-                const market = generateMarketSignals(nicheData.niche);
-                const score = scoreWithMarketIntel(nicheData, market);
+                const market = generateMarketSignals(nicheData.niche, trend);
+                const score = scoreWithMarketIntel(nicheData, market, trend);
+
+                // Revenue Boost: Factor momentum velocity into base projection
+                const rawRevenue = score.niche_score * 0.85;
+                const projectedRevenue = Math.round(rawRevenue * (1 + trend.score / 120));
 
                 let product = {
                     niche: nicheData.niche,
@@ -84,6 +91,8 @@ description (string)
                     bullet_point_1: design.bullet_point_1,
                     bullet_point_2: design.bullet_point_2,
                     description: design.description,
+                    trend, // Full trend object contract
+                    projectedRevenue,
                     ...market,
                     ...score
                 };
@@ -101,10 +110,12 @@ description (string)
             runTimeSeconds: Math.round((Date.now() - start) / 1000)
         };
 
-        // Sort to show publish products first
+        // Sort: Decisions First (Publish > Test > Skip), then Priority Score (Trend-weighted)
         products.sort((a, b) => {
-            const value = { "PUBLISH": 3, "TEST": 2, "SKIP": 1 };
-            return (value[b.decision] || 0) - (value[a.decision] || 0) || (b.niche_score - a.niche_score);
+            const decValue = { "PUBLISH": 3, "TEST": 2, "SKIP": 1 };
+            const decisionDiff = (decValue[b.decision] || 0) - (decValue[a.decision] || 0);
+            if (decisionDiff !== 0) return decisionDiff;
+            return (b.publishPriority || 0) - (a.publishPriority || 0);
         });
 
         res.status(200).json({
