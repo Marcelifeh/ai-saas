@@ -131,42 +131,98 @@ function generateSafeSlogans(theme) {
         "space fantasy hero": [
             "Cosmic Courage Mode",
             "Guardians of the Infinite",
-            "Born for the Stars"
+            "Born for the Stars",
+            "Galaxy Explorer",
+            "Defy Gravity",
+            "To the Stars and Beyond",
+            "Interstellar Rebel",
+            "Light Speed Mindset",
+            "Stargazer Society",
+            "Astral Adventure Awaits"
         ],
         "cute magical creature": [
             "Tiny Power, Big Heart",
             "Adorably Unstoppable",
-            "Magic in Small Forms"
+            "Magic in Small Forms",
+            "Pocket Sized Magic",
+            "Fiercely Cute",
+            "Evolve Every Day",
+            "Little But Mighty",
+            "Sparkle and Shine",
+            "Creature Comforts",
+            "Charmingly Chaotic"
         ],
         "athletic motivation": [
             "Move with Purpose",
             "Built for the Effort",
-            "Consistency Wins"
+            "Consistency Wins",
+            "Outwork Yesterday",
+            "Push Your Limits",
+            "Train Insane",
+            "Sweat Equity",
+            "Hustle and Muscle",
+            "No Excuses Just Results",
+            "Relentless Pursuit"
         ],
         "wizard school vibe": [
             "Study Hard, Dream Wilder",
             "Arcane Energy Only",
-            "Knowledge is Power"
+            "Knowledge is Power",
+            "Magic in the Making",
+            "Spellbound Student",
+            "Mystical Mindset",
+            "Enchanted Everyday",
+            "Wandering Wizard",
+            "Potions and Positivity",
+            "Sorcery and Science"
         ],
         "superhero action": [
             "Heroic Ambition",
             "Not All Heroes Wear Capes",
-            "Unleash Your Inner Power"
+            "Unleash Your Inner Power",
+            "Caped Crusader Energy",
+            "Save the Day",
+            "Powered by Purpose",
+            "Vigilante Values",
+            "Super Human Effort",
+            "Justice and Joy",
+            "Fearless Defender"
         ],
         "music stan": [
             "In My Own Era",
             "Living For The Music",
-            "Vibes Only"
+            "Vibes Only",
+            "Soundtrack of My Life",
+            "Lost in the Lyrics",
+            "Press Play on Life",
+            "Melody Maker",
+            "Rhythm is a Dancer",
+            "Beat Drops and Heart Throps",
+            "Turn Up the Volume"
         ],
         "animated character": [
             "Nostalgic Heart",
             "Forever Young",
-            "Cartoon State of Mind"
+            "Cartoon State of Mind",
+            "Drawn to Adventure",
+            "Sketching My Reality",
+            "Animated and Alive",
+            "Childhood Classics",
+            "Toon Town Native",
+            "Weekend Morning Vibes",
+            "Saturday Morning Energy"
         ],
         "general inspirational theme": [
             "Progress Over Perfection",
             "Quiet Strength",
-            "Becoming Better Daily"
+            "Becoming Better Daily",
+            "Embrace the Journey",
+            "Find Your Fire",
+            "Keep Moving Forward",
+            "Believe in You",
+            "Small Steps Big Leaps",
+            "Chasing Sunsets",
+            "Live With Intention"
         ]
     };
 

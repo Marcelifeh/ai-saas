@@ -49,7 +49,7 @@ safe (boolean, true if family friendly)
                         role: "system",
                         content: `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:
 {
-    "shirtSlogans": ["", "", "", ""],
+    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],
     "designDirections": ["", ""],
     "amazonListing": {
         "title": "",

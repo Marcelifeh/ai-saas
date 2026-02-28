@@ -156,7 +156,10 @@ Then output ONLY valid JSON in this structure:
   },
   "safe": true,
   "reasoning": "",
-  "shirtSlogans": [],
+  "shirtSlogans": [
+    "slogan 1", "slogan 2", "slogan 3", "slogan 4", "slogan 5",
+    "slogan 6", "slogan 7", "slogan 8", "slogan 9", "slogan 10"
+  ],
   "amazonListing": {
     "title": "",
     "brandName": "",
@@ -178,7 +181,7 @@ RULES FOR AMAZON LISTING:
 TITLE: 60-80 chars, main keyword + audience, natural language
 BULLETS: benefit-driven, emotional + functional, POD safe
 DESCRIPTION: 2-3 sentences — who it's for, when to wear it, why it's unique
-KEYWORDS: search phrases buyers type, no repetition
+KEYWORD/SLOGANS: Provide exactly 10 catchy, commercial shirt slogans. Provide strong search keywords.
 
 COMPLIANCE RULES — CRITICAL:
 Do NOT include brand names, copyrighted characters, trademarked phrases, song lyrics, movie quotes, or celebrity references in any field.
