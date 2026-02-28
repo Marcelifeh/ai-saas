@@ -1,5 +1,6 @@
 const OpenAI = require("openai");
 const { generateMarketSignals, scoreWithMarketIntel } = require("./utils/marketSignals");
+const { enforceCompliance } = require("./utils/complianceCheck");
 
 module.exports = async function handler(req, res) {
     if (req.method !== "POST") {
@@ -76,7 +77,7 @@ description (string)
                 const market = generateMarketSignals(nicheData.niche);
                 const score = scoreWithMarketIntel(nicheData, market);
 
-                products.push({
+                let product = {
                     niche: nicheData.niche,
                     slogan: design.slogan,
                     title: design.title,
@@ -85,7 +86,9 @@ description (string)
                     description: design.description,
                     ...market,
                     ...score
-                });
+                };
+                product = enforceCompliance(product);
+                products.push(product);
             }
         }
 

@@ -208,6 +208,78 @@
             );
         }
 
+        // ─── Client-side Compliance Helpers ─────────────────────────────────────
+        const FRONTEND_TRADEMARK_FLAGS = [
+            "disney", "marvel", "star wars", "star trek", "pokemon", "nintendo", "super mario",
+            "zelda", "minecraft", "nike", "adidas", "supreme", "gucci", "louis vuitton",
+            "prada", "versace", "chanel", "rolex", "yeezy", "coca cola", "pepsi", "starbucks",
+            "red bull", "harry potter", "lord of the rings", "game of thrones", "breaking bad",
+            "the simpsons", "spongebob", "mickey mouse", "spiderman", "batman", "superman",
+            "iron man", "avengers", "frozen", "moana", "hello kitty", "barbie", "transformers",
+            "taylor swift", "beyonce", "eminem", "drake", "kanye west", "the beatles"
+        ];
+        const FRONTEND_POLICY_BLOCK = [
+            "logo parody", "brand parody", "celebrity name", "movie quote", "song lyrics",
+            "copyrighted character", "guaranteed cure", "medical claim", "hate symbol",
+            "hate speech", "racial slur", "explicit sexual"
+        ];
+
+        function checkFrontendCompliance(text) {
+            const lower = (text || "").toLowerCase();
+            const tm = FRONTEND_TRADEMARK_FLAGS.filter(t => lower.includes(t));
+            const pol = FRONTEND_POLICY_BLOCK.filter(t => lower.includes(t));
+            return { flagged: tm.length > 0 || pol.length > 0, trademarks: tm, policies: pol };
+        }
+
+        // ─── ComplianceBadge Component ───────────────────────────────────────────
+        function ComplianceBadge({ compliance }) {
+            if (!compliance) return null;
+
+            if (compliance.wasRewritten) {
+                return (
+                    <div className="flex flex-col gap-2 mt-3 p-3 bg-purple-50/50 border border-purple-200 rounded-lg">
+                        <div className="flex items-center gap-2">
+                            <svg className="w-4 h-4 text-purple-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path></svg>
+                            <span className="text-[10px] font-black text-purple-700 uppercase tracking-widest">Rewritten — Safe</span>
+                        </div>
+                        <div className="text-[10px] font-medium text-purple-600">
+                            Original concept generated to ensure marketplace compliance.
+                        </div>
+                    </div>
+                );
+            }
+
+            if (compliance.safe) {
+                return (
+                    <div className="flex items-center gap-2 mt-3 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <svg className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"></path></svg>
+                        <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Compliance Clear — Safe for Publishing</span>
+                    </div>
+                );
+            }
+            const isHigh = compliance.riskLevel === 'HIGH';
+            return (
+                <div className={`mt-3 px-3 py-3 rounded-lg border ${isHigh ? 'bg-red-50 border-red-200' : 'bg-yellow-50 border-yellow-200'}`}>
+                    <div className="flex items-center gap-2 mb-2">
+                        <svg className={`w-3.5 h-3.5 flex-shrink-0 ${isHigh ? 'text-red-500' : 'text-yellow-500'}`} fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"></path></svg>
+                        <span className={`text-[10px] font-black uppercase tracking-widest ${isHigh ? 'text-red-700' : 'text-yellow-700'}`}>
+                            {isHigh ? '🚫 High Risk' : '⚠️ Medium Risk'} — Review Before Publishing
+                        </span>
+                    </div>
+                    {compliance.trademarkMatches.length > 0 && (
+                        <p className={`text-[10px] font-bold ${isHigh ? 'text-red-600' : 'text-yellow-600'}`}>
+                            <span className="uppercase tracking-wider">Trademark:</span> {compliance.trademarkMatches.join(", ")}
+                        </p>
+                    )}
+                    {compliance.policyViolations.length > 0 && (
+                        <p className={`text-[10px] font-bold mt-0.5 ${isHigh ? 'text-red-600' : 'text-yellow-600'}`}>
+                            <span className="uppercase tracking-wider">Policy:</span> {compliance.policyViolations.join(", ")}
+                        </p>
+                    )}
+                </div>
+            );
+        }
+
         // ─── Publish Queue Logic ─────────────────────────────────────────────
         function shouldPublish(product) {
             return (
@@ -215,7 +287,8 @@
                 product.searchVolume >= 60 &&
                 product.competitionDensity <= 50 &&
                 product.trendMomentum >= 50 &&
-                product.safe !== false
+                product.safe !== false &&
+                product.compliance?.safe !== false   // never publish flagged products
             );
         }
 
@@ -241,7 +314,8 @@
             if (!queue.length) return;
             const csvSafe = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
             const headers = ['niche', 'title', 'slogan', 'niche_score', 'publish_confidence',
-                'searchVolume', 'competitionDensity', 'trendMomentum', 'buyerIntent'];
+                'searchVolume', 'competitionDensity', 'trendMomentum', 'buyerIntent',
+                'blacklist_flag', 'tmhunt_flag', 'safe'];
             const rows = queue.map(p =>
                 [
                     csvSafe(p.niche),
@@ -252,7 +326,10 @@
                     p.searchVolume,
                     p.competitionDensity,
                     p.trendMomentum,
-                    p.buyerIntent
+                    p.buyerIntent,
+                    csvSafe(p.compliance?.policyViolations?.join(' | ') || ''),
+                    csvSafe(p.compliance?.trademarkMatches?.join(' | ') || ''),
+                    p.compliance?.safe ? (p.compliance?.wasRewritten ? 'REWRITTEN_SAFE' : 'TRUE') : 'FALSE'
                 ].join(',')
             );
             const blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -726,8 +803,20 @@
                 setOpportunities(null);
                 setBulkProducts(null);
                 setError(null);
+
+                // Pre-generation compliance warning (advisory — AI will still run with safety rules)
+                const preCheck = checkFrontendCompliance(prompt + ' ' + audience);
+                if (preCheck.flagged) {
+                    const issueList = [...preCheck.trademarks, ...preCheck.policies].join(', ');
+                    setError({
+                        type: 'validation',
+                        message: `⚠ Potential IP Risk Detected — your prompt references restricted content: "${issueList}". The AI will apply safety rules, but please review the result carefully before publishing.`
+                    });
+                }
+
                 const start = Date.now();
                 setStartTime(start);
+
 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout
