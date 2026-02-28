@@ -214,6 +214,9 @@ ${imagePromptTemplate}`,
         }
 
         // Deterministic AI Scoring Engine
+        const market = generateMarketSignals(parsed.niche || prompt);
+        const scoreData = scoreWithMarketIntel(parsed, market);
+
         const baseResult = {
             ...parsed,
             niche: parsed.niche || prompt,
