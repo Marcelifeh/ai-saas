@@ -46,7 +46,13 @@ ${imagePromptTemplate}
             max_tokens: 600
         });
 
-        const result = JSON.parse(aiResponse.choices[0].message.content);
+        let content = aiResponse.choices[0].message.content.trim();
+        // Strip markdown code blocks if the AI includes them
+        if (content.startsWith('```')) {
+            content = content.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+        }
+
+        const result = JSON.parse(content);
         return res.json({ success: true, prompt: result.prompt });
 
     } catch (error) {
