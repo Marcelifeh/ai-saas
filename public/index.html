@@ -1892,10 +1892,20 @@
 
                                                 <div className="grid grid-cols-1 gap-4">
                                                     {strategy.imagePrompts.map((basePromptText, idx) => {
+                                                        // Inject the active style into the DESIGN STYLE: line of structured prompts
+                                                        const injectStyle = (text, style) => {
+                                                            // Match "DESIGN STYLE:" followed by anything up to the next newline
+                                                            const styleLineRx = /(DESIGN STYLE:\s*)([^\n]*)/i;
+                                                            if (styleLineRx.test(text)) {
+                                                                return text.replace(styleLineRx, `$1${style}`);
+                                                            }
+                                                            // Fallback: style appended for very short / legacy prompts
+                                                            return `${text}, ${style} style, transparent background, 300 DPI, vector design`;
+                                                        };
+
                                                         const isStructured = basePromptText.includes('\n') || basePromptText.length > 150;
-                                                        const finalPromptText = isStructured
-                                                            ? basePromptText
-                                                            : `${basePromptText}, ${selectedDesignStyle} style, transparent background, 300 DPI, vector design`;
+                                                        const finalPromptText = injectStyle(basePromptText, selectedDesignStyle);
+
                                                         const wordCount = finalPromptText.trim().split(/\s+/).length;
                                                         const isCopied = copiedId === 'prompt_' + idx;
                                                         const promptLabels = ['Typographic Quote', 'Bold Statement', 'Abstract Symbol'];
