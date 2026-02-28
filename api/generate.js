@@ -130,6 +130,7 @@ Use the user's details to populate the niches, audiences, and styles.`,
             ...market,
             ...scoreData,
             detectedPlatform,
+            platform: detectedPlatform,
         };
 
         const finalResult = enforceCompliance(baseResult);

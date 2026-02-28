@@ -47,16 +47,45 @@ ${imagePromptTemplate}
         });
 
         let content = aiResponse.choices[0].message.content.trim();
-        // Strip markdown code blocks if the AI includes them
-        if (content.startsWith('```')) {
-            content = content.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+
+        // Robust JSON extraction: Find the first { and last }
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            console.error("No JSON found in AI response:", content);
+            return res.status(500).json({
+                success: false,
+                error: "AI did not return a valid design structure",
+                raw: content
+            });
         }
 
-        const result = JSON.parse(content);
-        return res.json({ success: true, prompt: result.prompt });
+        try {
+            const result = JSON.parse(jsonMatch[0]);
+            return res.json({
+                success: true,
+                prompt: result.prompt,
+                fallback: false,
+                error: null
+            });
+        } catch (parseError) {
+            console.error("JSON Parse Error:", parseError, "Content:", jsonMatch[0]);
+            return res.status(200).json({ // Return 200 even on AI failure to let client handle fallback gracefully
+                success: false,
+                prompt: null,
+                fallback: true,
+                error: "Failed to parse design instructions",
+                action: "Use client-side fallback"
+            });
+        }
 
     } catch (error) {
-        console.error("Error generating prompt:", error);
-        return res.status(500).json({ success: false, error: "Prompt generation failed" });
+        console.error("Prompt generation error:", error);
+        return res.status(200).json({
+            success: false,
+            prompt: null,
+            fallback: true,
+            error: error.message || "Deep-link generation timed out",
+            action: "Use client-side fallback"
+        });
     }
 };
