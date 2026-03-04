@@ -37,6 +37,13 @@
             }
         },
         {
+            "src": "api/discover-advanced.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 30
+            }
+        },
+        {
             "src": "api/**/*.js",
             "use": "@vercel/node"
         },

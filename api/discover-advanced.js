@@ -24,17 +24,19 @@ module.exports = requireAuth(async function handler(req, res) {
             return res.status(403).json(guard);
         }
 
-        const results = discoverHighPotentialKeywords(niche);
+        // Phase 36: now async — AI batch evaluates keywords
+        const results = await discoverHighPotentialKeywords(niche);
 
         return res.status(200).json({
             success: true,
             niche,
             topKeywords: results,
+            metricsSource: results[0]?.metricsSource || 'simulated',
             workspaceCreditsRemaining: guard.usage.creditsRemaining,
             usage: guard.usage
         });
     } catch (e) {
         console.error("Advanced Discovery Error:", e);
-        return res.status(500).json({ error: "Failed to run advanced discovery" });
+        return res.status(500).json({ error: "Failed to run advanced discovery", details: e.message });
     }
 });
