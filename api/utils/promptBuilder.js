@@ -35,49 +35,15 @@ Suitable for paid traffic ad creative thumbnails`
 };
 
 function buildImagePrompt({ niche, audience, style, platform }) {
-    const platformKey = detectPlatform(platform);
-    const platformBlock = PLATFORM_RULES[platformKey];
+    // Style is injected by the frontend based on user selection.
+    // Do NOT include a Style: line here — it will be added dynamically.
+    return `Create an original POD t-shirt design.
 
-    return `Create a commercial print-ready apparel design.
-
-NICHE: ${niche}
-TARGET AUDIENCE: ${audience || "general apparel buyer"}
-DESIGN STYLE: ${style || "evergreen commercial"}
-
-CORE CONCEPT:
-A visually clear, high-conversion t-shirt design focused on strong readability, emotional appeal, and marketplace compliance.
-
-COMPOSITION:
-Centered design optimized for chest print area
-Strong silhouette — balanced spacing — readable at distance
-No clutter
-
-GRAPHIC STYLE:
-Clean vector illustration or typography-based design
-Commercial evergreen style suitable for mass-market apparel
-
-COLOR STRATEGY:
-Print-safe color palette
-High contrast for dark and light garments
-Limited color count for production efficiency
-
-PLATFORM PRODUCTION REQUIREMENTS:
-Transparent background
-Vector-style artwork
-300 DPI minimum
-No mockups — no background scenery — no photographic textures
-No tiny details that disappear when printed
-No trademarked content
-
-COMMERCIAL OPTIMIZATION:
-Designed for high click-through and readability in marketplace thumbnails
-Emotionally resonant visual concept
-Scalable across apparel types (t-shirt, hoodie, tote)
-
-${platformBlock}
-
-OUTPUT:
-Single isolated design ready for upload to POD platforms`;
+Text: "[SLOGAN]"
+No brands, logos, or trademarks.
+Transparent background.
+Commercial friendly.
+300 DPI.`;
 }
 
 module.exports = {

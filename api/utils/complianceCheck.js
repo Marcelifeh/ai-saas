@@ -17,7 +17,9 @@ const TRADEMARK_RED_FLAGS = [
     "the simpsons", "family guy", "south park", "sesame street",
     "spongebob", "mickey mouse", "spiderman", "batman", "superman",
     "iron man", "avengers", "frozen", "moana", "pixar",
-    "hello kitty", "barbie", "transformers",
+    "hello kitty", "barbie", "transformers", "cyberpunk 2077", "night city",
+    "elden ring", "dark souls", "the last of us", "grand theft auto", "gta v",
+    "stardew valley", "animal crossing", "among us", "fallout", "skyrim",
     // Music
     "taylor swift", "beyonce", "eminem", "drake", "kanye west",
     "the beatles", "rolling stones", "metallica",
@@ -106,13 +108,15 @@ function evaluateCompliance(product) {
 
 function extractTheme(text) {
     const themes = [
-        { key: "space fantasy hero", hints: ["lightsaber", "jedi", "galaxy", "star wars"] },
-        { key: "cute magical creature", hints: ["pocket monster", "evolution", "pokemon"] },
-        { key: "athletic motivation", hints: ["just do it", "swoosh vibe", "nike", "adidas"] },
-        { key: "wizard school vibe", hints: ["sorting", "magic school", "harry potter", "hogwarts"] },
-        { key: "superhero action", hints: ["marvel", "dc comics", "avengers", "batman", "superman", "spiderman"] },
-        { key: "music stan", hints: ["taylor swift", "beyonce", "drake"] },
-        { key: "animated character", hints: ["disney", "mickey", "spongebob", "simpsons", "hello kitty"] }
+        { key: "space fantasy hero", hints: ["lightsaber", "jedi", "galaxy", "star wars", "falcon", "vader", "luke", "yoda", "skywalker", "sith", "the force", "galactic empire", "rebel alliance"] },
+        { key: "cute magical creature", hints: ["pocket monster", "evolution", "pokemon", "pikachu", "charizard", "bulbasaur", "squirtle", "gengar", "pokeball", "catch em all", "digimon", "tamagotchi"] },
+        { key: "athletic motivation", hints: ["just do it", "swoosh vibe", "nike", "adidas", "puma", "under armour", "reebok", "workout", "fitness", "gym rat", "marathon", "personal best"] },
+        { key: "wizard school vibe", hints: ["sorting", "magic school", "harry potter", "hogwarts", "gryffindor", "slytherin", "hufflepuff", "ravenclaw", "quidditch", "dumbledore", "voldemort", "diagonalley", "wizarding world"] },
+        { key: "superhero action", hints: ["marvel", "dc comics", "avengers", "batman", "superman", "spiderman", "iron man", "captain america", "thor", "hulk", "black widow", "justice league", "joker", "wonder woman", "black panther"] },
+        { key: "music stan", hints: ["taylor swift", "beyonce", "drake", "swiftie", "beehive", "concert tour", "album drop", "fandom", "fan girl", "music festival", "coachella", "lollapalooza"] },
+        { key: "animated character", hints: ["disney", "mickey", "spongebob", "simpsons", "hello kitty", "looney tunes", "bugs bunny", "daffy duck", "pixar", "woody", "buzz lightyear", "elsa", "olaf", "minion", "gru"] },
+        { key: "cyberpunk future", hints: ["cyberpunk", "neon city", "distopian", "night city", "neon", "cyborg", "android", "retrofuturistic", "bladerunner"] },
+        { key: "fantasy adventure", hints: ["dungeons and dragons", "d&d", "dnd", "lord of the rings", "lotr", "gandalf", "frodo", "middle earth", "critical role", "rpg", "quest", "paladin", "rogue", "wizard", "cleric"] }
     ];
 
     const lower = text.toLowerCase();
@@ -212,6 +216,30 @@ function generateSafeSlogans(theme) {
             "Weekend Morning Vibes",
             "Saturday Morning Energy"
         ],
+        "cyberpunk future": [
+            "Neon Pulse",
+            "Digital Nomad",
+            "Glitch in the Code",
+            "City of Lights and Shadows",
+            "Synthetic Soul",
+            "Retro Future Vibes",
+            "Neural Network Native",
+            "Chrome and Circuitry",
+            "Electric Dreams",
+            "Post-Human Potential"
+        ],
+        "fantasy adventure": [
+            "The Quest Awaits",
+            "Choose Your Own Path",
+            "Legend in the Making",
+            "Roll for Initiative",
+            "Mythic Mindset",
+            "Epic Journeys Only",
+            "Sorcery and Steel",
+            "Kingdom of Imagination",
+            "Born for Adventure",
+            "Ancient Souls and New Worlds"
+        ],
         "general inspirational theme": [
             "Progress Over Perfection",
             "Quiet Strength",
@@ -230,20 +258,26 @@ function generateSafeSlogans(theme) {
 }
 
 function buildSafeImagePrompt(theme) {
-    return `Create a commercial print-ready apparel design.
+    return `Create a premium, commercial print-ready apparel design.
 
-Theme: Original concept inspired by ${theme}
+Theme: ORIGINAL CONCEPT inspired by ${theme.toUpperCase()}.
 
-Original concept only.
-No references to brands, characters, movies, or lyrics.
+CRITICAL COMPLIANCE RULES:
+- ORIGINAL CONCEPT ONLY.
+- ABSOLUTELY NO references to existing brands, copyrighted characters, movies, or lyrics.
+- Create unique, professional artwork that captures the vibe without using protected IP.
 
-Style:
-Clean vector design, strong silhouette, high readability.
+Design Style:
+- Professional vector illustration with clean linework.
+- High-contrast, scalable design.
+- Composition optimized for the center of a t-shirt or hoodie.
+- Balanced typography and iconography.
 
-Production:
-Transparent background
-300 DPI
-Print optimized for POD marketplaces
+Production Technicals:
+- Transparent background
+- 300 DPI high resolution
+- CMYK color profile optimized for POD printing
+- Professional DTG/Screen-print ready
 `;
 }
 

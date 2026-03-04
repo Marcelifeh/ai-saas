@@ -1,0 +1,6 @@
+[
+  "[Missing Export] autopilot.js requires 'discoverNiches' from ./discover",
+  "[Missing Export] discover-advanced.js requires 'getWorkspaceUsage' from ./utils/workspaceUsage",
+  "[Missing Export] discover-advanced.js requires 'verifyAndConsumeWorkspaceCredits' from ./utils/usageGuard",
+  "[Missing File] invite.js requires ../../utils/workspaceStore"
+]

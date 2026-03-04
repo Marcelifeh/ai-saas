@@ -1,7 +1,17 @@
 const OpenAI = require("openai");
 const { buildImagePrompt } = require("./utils/promptBuilder");
+const { enforceUsage } = require("./utils/usageGuard");
+const { requireAuth } = require("./utils/sessionManager");
 
-module.exports = async function handler(req, res) {
+module.exports = requireAuth(async function handler(req, res) {
+    const { user } = req.platformContext;
+    const userId = user.id;
+    const guard = enforceUsage(userId, "generatePrompt");
+
+    if (!guard.allowed) {
+        return res.status(403).json(guard);
+    }
+
     if (req.method !== "POST") {
         return res.status(405).json({ success: false, error: "POST only" });
     }
@@ -22,24 +32,23 @@ module.exports = async function handler(req, res) {
             messages: [
                 {
                     role: "system",
-                    content: `You are a professional print-on-demand designer mapping a given slogan to a structured image prompt.
-Return ONLY valid JSON with a single key "prompt" containing the structured prompt string.
-Use the EXACT formatting from the template provided by the user.
-Embed the full structured text as the JSON string value (use \\n for newlines inside JSON strings).
-The prompt should be 120-200 words.
-Ensure the design explicitly integrates this exact text: "${slogan}"`
+                    content: `You are a professional POD t-shirt design prompt writer.
+Return ONLY valid JSON with a single key "prompt".
+Use EXACTLY this format:
+
+Create an original POD t-shirt design.
+Text: "[The exact slogan]"
+Style: [STYLE] — [1-2 sentences of vivid, niche-specific design description: visual motifs, color palette, symbols, textures, and composition that suit both the slogan and niche.]
+No brands, logos, or trademarks.
+Transparent background.
+Commercial friendly.
+300 DPI.
+
+IMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line. Do NOT replace it.`
                 },
                 {
                     role: "user",
-                    content: `Slogan to feature: "${slogan}"
-Niche: ${niche}
-Target Audience: ${audience || "general apparel buyer"}
-Style/Tone: ${style || "evergreen commercial"}
-
-Use this template as the base for the structured prompt:
-
-${imagePromptTemplate}
-`
+                    content: `Create the image prompt for this slogan: "${slogan}" (Niche: ${niche})`
                 }
             ],
             temperature: 0.8,
@@ -63,6 +72,7 @@ ${imagePromptTemplate}
             const result = JSON.parse(jsonMatch[0]);
             return res.json({
                 success: true,
+                usage: guard.usage,
                 prompt: result.prompt,
                 fallback: false,
                 error: null
@@ -88,4 +98,4 @@ ${imagePromptTemplate}
             action: "Use client-side fallback"
         });
     }
-};
+});

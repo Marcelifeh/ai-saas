@@ -2,7 +2,42 @@
     "version": 2,
     "builds": [
         {
-            "src": "api/*.js",
+            "src": "api/generate.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 60
+            }
+        },
+        {
+            "src": "api/bulk-generate.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 60
+            }
+        },
+        {
+            "src": "api/discover.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 60
+            }
+        },
+        {
+            "src": "api/autopilot.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 60
+            }
+        },
+        {
+            "src": "api/generate-prompt.js",
+            "use": "@vercel/node",
+            "config": {
+                "maxDuration": 30
+            }
+        },
+        {
+            "src": "api/**/*.js",
             "use": "@vercel/node"
         },
         {
@@ -26,6 +61,46 @@
         {
             "src": "/api/generate",
             "dest": "/api/generate.js"
+        },
+        {
+            "src": "/api/auth/demo",
+            "dest": "/api/auth/demo.js"
+        },
+        {
+            "src": "/api/usage",
+            "dest": "/api/usage.js"
+        },
+        {
+            "src": "/api/analytics/workspace",
+            "dest": "/api/analytics/workspace.js"
+        },
+        {
+            "src": "/api/analytics/insights",
+            "dest": "/api/analytics/insights.js"
+        },
+        {
+            "src": "/api/workspace/list",
+            "dest": "/api/workspace/list.js"
+        },
+        {
+            "src": "/api/workspace/switch",
+            "dest": "/api/workspace/switch.js"
+        },
+        {
+            "src": "/api/billing/create-checkout-session",
+            "dest": "/api/billing/create-checkout-session.js"
+        },
+        {
+            "src": "/api/discover-advanced",
+            "dest": "/api/discover-advanced.js"
+        },
+        {
+            "src": "/api/generate-prompt",
+            "dest": "/api/generate-prompt.js"
+        },
+        {
+            "src": "/api/(.*)",
+            "dest": "/api/$1"
         },
         {
             "src": "/(.*)",

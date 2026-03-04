@@ -12,6 +12,8 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <!-- Babel (to compile JSX in the browser) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         .animate-fade-in {
             animation: fadeIn 0.5s ease-in;
@@ -27,6 +29,58 @@
                 opacity: 1;
                 transform: translateY(0);
             }
+        }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+        }
+
+        .analytics-card {
+            background: #111;
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #222;
+        }
+
+        .analytics-card.highlight {
+            border: 1px solid #4f46e5;
+        }
+
+        .analytics-title {
+            color: white;
+            font-weight: 800;
+            font-size: 14px;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .analytics-stat {
+            font-size: 24px;
+            font-weight: 900;
+            margin-bottom: 4px;
+        }
+
+        .analytics-substat {
+            font-size: 12px;
+            color: #9ca3af;
+            font-weight: 600;
+        }
+
+        .analytics-list div {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #333;
+            color: #d1d5db;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .analytics-list div:last-child {
+            border-bottom: none;
         }
 
         .heatmap-grid {
@@ -122,6 +176,28 @@
             background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
             border-color: #e5e7eb;
         }
+
+        .usage-panel {
+            background: #0f172a;
+            border-radius: 12px;
+            padding: 14px;
+            margin-top: auto;
+            border: 1px solid #1e293b;
+        }
+
+        .credit-bar {
+            height: 8px;
+            background: #1e293b;
+            border-radius: 6px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+
+        .credit-line {
+            height: 100%;
+            background: linear-gradient(90deg, #6366f1, #22c55e);
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 
@@ -130,6 +206,58 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
+
+        // ─── Local Dev Auto-Login Mock ──────────────────────────────────────
+        // Injects standard Enterprise Session Tokens into the prototype UI without needing a login page.
+        const originalFetch = window.fetch;
+        window.fetch = async function () {
+            let args = Array.prototype.slice.call(arguments);
+            let url = args[0];
+            let options = args[1] || {};
+
+            let token = localStorage.getItem('saas_token');
+
+            async function bootstrapToken() {
+                try {
+                    const res = await originalFetch('/api/auth/demo', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success && data.token) {
+                        localStorage.setItem('saas_token', data.token);
+                        return data.token;
+                    }
+                } catch (e) {
+                    console.error("Failed to bootstrap auth", e);
+                }
+                return null;
+            }
+
+            // If we don't have a token, and we're not asking for one, bootstrap the session
+            if (!token && !url.includes('/api/auth/demo')) {
+                token = await bootstrapToken();
+            }
+
+            // Inject the Bearer token for middleware compliance
+            if (token && !url.includes('/api/auth/demo')) {
+                options.headers = options.headers || {};
+                options.headers['Authorization'] = `Bearer ${token}`;
+                args[1] = options;
+            }
+
+            let response = await originalFetch.apply(this, args);
+
+            // Silent Token Renewal on 401 Unauthorized
+            if (response.status === 401 && !url.includes('/api/auth/demo')) {
+                console.warn("[AUTH] 401 Received. Attempting token renewal...");
+                token = await bootstrapToken();
+                if (token) {
+                    options.headers['Authorization'] = `Bearer ${token}`;
+                    args[1] = options;
+                    response = await originalFetch.apply(this, args); // Retry once
+                }
+            }
+
+            return response;
+        };
 
         // ─── Revenue Projection Engine ─────────────────────────────────────
         const ROYALTY_PER_SALE = 5.50;  // Amazon POD royalty
@@ -507,12 +635,21 @@
                     <div className="heatmap-grid">
                         {products.map((p, idx) => (
                             <div key={idx} className="heat-tile" style={{ background: getHeatColor(p.niche_score) }}>
-                                <div className="font-bold text-sm mb-2">{p.niche}</div>
-                                <div className="heat-score">{p.niche_score}</div>
-                                <div className="heat-decision mb-3">{p.decision}</div>
-                                {p.trend && <div className="text-[10px] font-black uppercase tracking-widest mb-2 opacity-90">{p.trend.badge}</div>}
-                                <small className="text-[10px] opacity-80 mt-auto pt-2 border-t border-white/20 -mx-1 px-1">
-                                    Demand {p.searchVolume || p.research_demand} • Momentum +{p.trend?.score || p.trendMomentum}%
+                                <div className="font-bold text-sm mb-2 leading-tight">{p.niche}</div>
+                                <div className="flex items-center justify-between">
+                                    <div className="heat-score">{p.niche_score}</div>
+                                    <div className="text-right">
+                                        <div className="text-[10px] font-black uppercase tracking-widest opacity-90">{p.decision}</div>
+                                        <div className="text-[9px] font-bold opacity-80">{p.trend?.badge || 'Stable'}</div>
+                                    </div>
+                                </div>
+                                <div className="mt-2 text-[10px] font-black bg-white/20 p-1.5 rounded-lg flex justify-between items-center">
+                                    <span className="opacity-70 uppercase tracking-tighter">Est. Profit</span>
+                                    <span>${(p.projectedRevenue || 400).toLocaleString()}/mo</span>
+                                </div>
+                                <small className="text-[10px] opacity-80 mt-auto pt-2 border-t border-white/20 -mx-1 px-1 flex justify-between">
+                                    <span>Demand {p.research_demand || p.searchVolume}</span>
+                                    <span>Momentum +{p.trend?.score || p.trendMomentum || 0}%</span>
                                 </small>
                             </div>
                         ))}
@@ -715,6 +852,7 @@
                 targetAudiences: Array.isArray(raw.targetAudiences) ? raw.targetAudiences : (raw.audience ? [raw.audience] : []),
                 rewritten: Boolean(raw.rewritten || raw.compliance?.wasRewritten),
                 imagePrompt: raw.imagePrompt || null,
+                imagePrompts: Array.isArray(raw.imagePrompts) ? raw.imagePrompts : [],
                 status: raw.status || "ready",
                 createdAt: raw.createdAt || Date.now()
             };
@@ -758,28 +896,164 @@ Commercial friendly.
 `.trim();
         }
 
+        // ─── AI Insight Panel Component ──────────────────────────────────────
+        function InsightPanel({ insights }) {
+            if (!insights || insights.length === 0) return null;
+            const [currentIndex, setCurrentIndex] = useState(0);
+
+            useEffect(() => {
+                setCurrentIndex(0); // Reset index when data changes to prevent out-of-bounds crashes
+                if (insights.length <= 1) return;
+                const timer = setInterval(() => {
+                    setCurrentIndex(prev => (prev + 1) % insights.length);
+                }, 8000);
+                return () => clearInterval(timer);
+            }, [insights]);
+
+            const activeInsight = insights[currentIndex];
+            if (!activeInsight) return null; // Defensive check
+
+            const colors = {
+                info: 'bg-blue-50 border-blue-200 text-blue-800',
+                success: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+                warning: 'bg-amber-50 border-amber-200 text-amber-800',
+                error: 'bg-red-50 border-red-200 text-red-800'
+            };
+
+            return (
+                <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border animate-fade-in ${colors[activeInsight.severity] || colors.info} mb-6 shadow-sm`}>
+                    <div className="text-2xl">{activeInsight.icon || '✨'}</div>
+                    <div className="flex-1">
+                        <div className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-0.5">AI Strategic Insight ({currentIndex + 1}/{insights.length})</div>
+                        <div className="text-sm font-semibold">{activeInsight.message}</div>
+                    </div>
+                </div>
+            );
+        }
+
+        function WorkspaceSwitcher() {
+            const [workspaces, setWorkspaces] = useState([]);
+            const [activeWs, setActiveWs] = useState(null);
+            const [switching, setSwitching] = useState(false);
+            const [showDropdown, setShowDropdown] = useState(false);
+
+            useEffect(() => {
+                fetch('/api/workspace/list')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success && data.workspaces) {
+                            setWorkspaces(data.workspaces);
+                            setActiveWs(data.workspaces.find(w => w.isActive) || data.workspaces[0]);
+                        }
+                    })
+                    .catch(console.error);
+            }, []);
+
+            const switchWorkspace = async (id) => {
+                if (id === activeWs?.id) return;
+                setSwitching(true);
+                setShowDropdown(false);
+                try {
+                    const res = await fetch('/api/workspace/switch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ targetWorkspaceId: id })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        // Hard reload to flush all dashboard caches and grab new context 
+                        window.location.reload();
+                    } else {
+                        alert(data.error || 'Failed to switch workspace');
+                        setSwitching(false);
+                    }
+                } catch (e) {
+                    alert('Error switching workspace');
+                    setSwitching(false);
+                }
+            };
+
+            if (!activeWs) return null;
+
+            return (
+                <div className="relative">
+                    <button
+                        onClick={() => setShowDropdown(!showDropdown)}
+                        disabled={switching}
+                        className="flex items-center gap-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-4 py-2 rounded-xl transition-all"
+                    >
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 font-black flex items-center justify-center text-xs uppercase shadow-sm">
+                            {activeWs.name.substring(0, 2)}
+                        </div>
+                        <div className="text-left hidden md:block">
+                            <div className="text-sm font-black text-gray-800 leading-tight">{activeWs.name}</div>
+                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{activeWs.plan} Plan</div>
+                        </div>
+                        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </button>
+
+                    {showDropdown && (
+                        <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in">
+                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                                <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">Switch Workspace</span>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto">
+                                {workspaces.map(ws => (
+                                    <button
+                                        key={ws.id}
+                                        onClick={() => switchWorkspace(ws.id)}
+                                        className={"w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 " + (ws.isActive ? 'bg-indigo-50/50' : '')}
+                                    >
+                                        <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black uppercase shadow-sm " + (ws.isActive ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600')}>
+                                            {ws.name.substring(0, 2)}
+                                        </div>
+                                        <div>
+                                            <div className={"text-sm font-black " + (ws.isActive ? 'text-indigo-900' : 'text-gray-800')}>{ws.name}</div>
+                                            <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">{ws.type} • {ws.memberCount} member{ws.memberCount !== 1 ? 's' : ''}</div>
+                                        </div>
+                                        {ws.isActive && <svg className="w-4 h-4 text-indigo-600 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="p-3 bg-gray-50 border-t border-gray-100">
+                                <button className="w-full py-2 text-xs font-bold text-gray-600 hover:text-indigo-600 flex items-center justify-center gap-1 transition-colors">
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+                                    Create New Workspace
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function App() {
+            const [insights, setInsights] = useState([]);
             const [prompt, setPrompt] = useState("");
             const [platform, setPlatform] = useState("");
             const [audience, setAudience] = useState("");
             const [style, setStyle] = useState("");
             const [strategy, setStrategy] = useState(() => {
-                const saved = localStorage.getItem('ai_saas_strategy');
-                return saved ? normalizeStrategy(JSON.parse(saved)) : null;
+                try {
+                    const saved = localStorage.getItem('ai_saas_strategy');
+                    return saved ? normalizeStrategy(JSON.parse(saved)) : null;
+                } catch (e) { return null; }
             });
             const [loading, setLoading] = useState(false);
             const [loadingText, setLoadingText] = useState("GENERATE");
             const [showOptions, setShowOptions] = useState(false);
             const [opportunities, setOpportunities] = useState(() => {
-                const saved = localStorage.getItem('ai_saas_opportunities');
-                return saved ? JSON.parse(saved) : null;
+                try {
+                    const saved = localStorage.getItem('ai_saas_opportunities');
+                    return saved ? JSON.parse(saved) : null;
+                } catch (e) { return null; }
             });
             const [discovering, setDiscovering] = useState(false);
             const [discoveringText, setDiscoveringText] = useState("Auto Discover");
             const [bulkProducts, setBulkProducts] = useState(() => {
-                const saved = localStorage.getItem('ai_saas_bulkProducts');
-                if (!saved) return null;
                 try {
+                    const saved = localStorage.getItem('ai_saas_bulkProducts');
+                    if (!saved) return null;
                     const parsed = JSON.parse(saved);
                     return Array.isArray(parsed) ? parsed.map(normalizeStrategy) : parsed;
                 } catch (e) { return null; }
@@ -787,8 +1061,10 @@ Commercial friendly.
             const [bulkLoading, setBulkLoading] = useState(false);
             const [bulkLoadingText, setBulkLoadingText] = useState("Bulk Generate Factory");
             const [autopilotData, setAutopilotData] = useState(() => {
-                const saved = localStorage.getItem('ai_saas_autopilot');
-                return saved ? JSON.parse(saved) : null;
+                try {
+                    const saved = localStorage.getItem('ai_saas_autopilot');
+                    return saved ? JSON.parse(saved) : null;
+                } catch (e) { return null; }
             });
             const [autopilotLoading, setAutopilotLoading] = useState(false);
             const [autopilotLoadingText, setAutopilotLoadingText] = useState("Run Autopilot Production");
@@ -797,6 +1073,73 @@ Commercial friendly.
             const [runHistory, setRunHistory] = useState(() => loadRunHistory());
             const [pipelineStatus, setPipelineStatus] = useState(null);   // null | { step, label, progress }
             const [pipelineRunning, setPipelineRunning] = useState(false);
+
+            // Fetch AI Strategic Insights
+            useEffect(() => {
+                async function fetchInsights() {
+                    try {
+                        const res = await window.fetch('/api/analytics/insights');
+                        if (!res.ok) return;
+                        const data = await res.json();
+                        if (data.success && data.insights) {
+                            setInsights(data.insights);
+                        }
+                    } catch (e) {
+                        console.error("Failed to fetch insights", e);
+                    }
+                }
+                fetchInsights();
+            }, []);
+
+            // Monetization States
+            const [usageInfo, setUsageInfo] = useState(null);
+            const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+            const [upgradeMessage, setUpgradeMessage] = useState("");
+
+            useEffect(() => {
+                fetch('/api/usage')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success && data.usage && data.plan) {
+                            setUsageInfo({ usage: data.usage, plan: data.plan, members: data.members || [] });
+                        }
+                    })
+                    .catch(console.error);
+            }, []);
+
+            const checkUsageError = (responseStatus, data) => {
+                if (!data) return false;
+                if (responseStatus === 403 || data.error === "Not enough credits" || data.error === "Bulk run limit reached" || data.error === "Autopilot limit reached") {
+                    setUpgradeMessage(data.action || "Upgrade your plan to continue.");
+                    setShowUpgradeModal(true);
+                    return true;
+                }
+                if (data.usage) {
+                    setUsageInfo(prev => prev ? { ...prev, usage: data.usage } : null);
+                }
+                return false;
+            };
+
+            const upgradePlan = async (plan) => {
+                try {
+                    const res = await fetch("/api/billing/create-checkout-session", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            plan,
+                            email: "demo@example.com"
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.url) {
+                        window.location.href = data.url;
+                    } else {
+                        throw new Error(data.error || "Failed to create checkout session");
+                    }
+                } catch (err) {
+                    alert("Error processing upgrade: " + err.message);
+                }
+            };
 
             const PRESET_STYLES = ["Vintage Distressed", "Hand-Drawn", "Bold Graphic", "Retro Vintage", "Minimalist Vector"];
 
@@ -853,12 +1196,99 @@ Commercial friendly.
             }, []);
 
             // UX Foundation States
-            const [error, setError] = useState(null); // { message, type }
-            const [generationTime, setGenerationTime] = useState(null);
+            const [error, setError] = React.useState(null);
+            const [generationTime, setGenerationTime] = React.useState(null);
+
+            // Advanced Discovery State
+            const [advancedKeywords, setAdvancedKeywords] = React.useState(null);
+            const [seedNiche, setSeedNiche] = React.useState("");
+
             const [startTime, setStartTime] = useState(null);
             const [copiedId, setCopiedId] = useState(null);
             const [generatedPrompts, setGeneratedPrompts] = useState({});
             const [collapsedPrompts, setCollapsedPrompts] = useState({});
+            const [analyticsData, setAnalyticsData] = useState(null);
+
+            const chartsRef = React.useRef({ credits: null, feature: null, trend: null });
+
+            const loadAnalytics = async () => {
+                try {
+                    const res = await fetch("/api/analytics/workspace");
+                    const data = await res.json();
+                    if (data.success) {
+                        setAnalyticsData(data);
+                    }
+                } catch (e) {
+                    console.error("Failed to load analytics", e);
+                }
+            };
+
+            useEffect(() => {
+                let interval;
+                if (activeView === 'analytics') {
+                    interval = setInterval(() => {
+                        loadAnalytics();
+                    }, 15000);
+                }
+                return () => clearInterval(interval);
+            }, [activeView]);
+
+            useEffect(() => {
+                if (activeView === 'analytics' && analyticsData && window.Chart) {
+                    // Update Credits
+                    const creditsCanvas = document.getElementById("creditsChart");
+                    if (creditsCanvas) {
+                        if (chartsRef.current.credits) chartsRef.current.credits.destroy();
+                        const ws = analyticsData.workspace;
+                        const used = ws.monthlyCredits - ws.creditsRemaining;
+                        chartsRef.current.credits = new Chart(creditsCanvas, {
+                            type: 'doughnut',
+                            data: {
+                                labels: ['Used', 'Remaining'],
+                                datasets: [{ data: [used, ws.creditsRemaining], backgroundColor: ['#6366f1', '#1f2937'], borderColor: '#111', borderWidth: 2 }]
+                            },
+                            options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#9ca3af', font: { size: 10 } } } } }
+                        });
+                    }
+
+                    // Update Feature
+                    const featureCanvas = document.getElementById("featureChart");
+                    if (featureCanvas) {
+                        if (chartsRef.current.feature) chartsRef.current.feature.destroy();
+                        const labels = Object.keys(analyticsData.analytics.featureUsage);
+                        const values = Object.values(analyticsData.analytics.featureUsage);
+                        chartsRef.current.feature = new Chart(featureCanvas, {
+                            type: 'bar',
+                            data: {
+                                labels,
+                                datasets: [{ label: 'Uses', data: values, backgroundColor: '#8b5cf6', borderRadius: 4 }]
+                            },
+                            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#1f2937' }, ticks: { color: '#9ca3af', stepSize: 1 } }, x: { grid: { display: false }, ticks: { color: '#9ca3af' } } } }
+                        });
+                    }
+
+                    // Update Trend
+                    const trendCanvas = document.getElementById("trendChart");
+                    if (trendCanvas) {
+                        if (chartsRef.current.trend) chartsRef.current.trend.destroy();
+                        const daily = {};
+                        (analyticsData.analytics.timeline || []).forEach(entry => {
+                            const date = new Date(entry.time).toLocaleDateString([], { month: 'short', day: 'numeric' });
+                            daily[date] = (daily[date] || 0) + 1;
+                        });
+                        const tLabels = Object.keys(daily);
+                        const tValues = Object.values(daily);
+                        chartsRef.current.trend = new Chart(trendCanvas, {
+                            type: 'line',
+                            data: {
+                                labels: tLabels,
+                                datasets: [{ label: 'Actions', data: tValues, borderColor: '#10b981', backgroundColor: '#10b98122', fill: true, tension: 0.4 }]
+                            },
+                            options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#1f2937' }, ticks: { color: '#9ca3af', stepSize: 1 } }, x: { grid: { display: false }, ticks: { color: '#9ca3af' } } } }
+                        });
+                    }
+                }
+            }, [activeView, analyticsData]);
 
             const toggleCollapse = (slogan) => {
                 setCollapsedPrompts(prev => ({
@@ -887,6 +1317,11 @@ Commercial friendly.
                     });
 
                     const data = await response.json();
+
+                    if (checkUsageError(response.status, data)) {
+                        setGeneratedPrompts(prev => ({ ...prev, [slogan]: { loading: false, status: "failed" } }));
+                        return;
+                    }
 
                     if (data.success && data.prompt) {
                         logPipelineEvent("GENERATION_SUCCESS", { slogan });
@@ -1012,8 +1447,8 @@ Commercial friendly.
 
                 setLoading(true);
                 setStrategy(null);
-                setOpportunities(null);
-                setBulkProducts(null);
+                // setOpportunities(null); // Preserve
+                // setBulkProducts(null); // Preserve
                 setError(null);
                 setGeneratedPrompts({});
 
@@ -1045,9 +1480,26 @@ Commercial friendly.
                     clearTimeout(timeoutId);
                     const data = await response.json();
 
+                    if (checkUsageError(response.status, data)) {
+                        setLoading(false);
+                        return;
+                    }
+
                     if (data.success) {
                         logPipelineEvent("STRATEGY_GENERATED", { niche: data.data.niche });
-                        setStrategy(normalizeStrategy(data.data));
+                        const stData = normalizeStrategy(data.data);
+                        setStrategy(stData);
+
+                        if (stData.imagePrompts?.length && stData.shirtSlogans?.length) {
+                            const newP = {};
+                            stData.shirtSlogans.forEach((sl, i) => {
+                                if (stData.imagePrompts[i]) {
+                                    newP[sl] = { loading: false, prompt: stData.imagePrompts[i], status: "generated", fallback: false };
+                                }
+                            });
+                            setGeneratedPrompts(newP);
+                        }
+
                         setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
                     } else {
                         console.error("Error:", data.error);
@@ -1067,9 +1519,9 @@ Commercial friendly.
 
             const handleDiscover = async () => {
                 setDiscovering(true);
-                setStrategy(null);
+                // setStrategy(null); // Preserve
                 setOpportunities(null);
-                setBulkProducts(null);
+                // setBulkProducts(null); // Preserve
                 setError(null);
                 const start = Date.now();
                 setStartTime(start);
@@ -1085,6 +1537,11 @@ Commercial friendly.
 
                     clearTimeout(timeoutId);
                     const data = await response.json();
+
+                    if (checkUsageError(response.status, data)) {
+                        setDiscovering(false);
+                        return;
+                    }
 
                     if (data.success) {
                         setOpportunities(data.opportunities);
@@ -1105,10 +1562,51 @@ Commercial friendly.
                 setDiscovering(false);
             };
 
+            const handleAdvancedDiscover = async () => {
+                if (!seedNiche) {
+                    alert("Please enter a seed niche first.");
+                    return;
+                }
+                setDiscovering(true);
+                setAdvancedKeywords(null);
+                setOpportunities(null);
+                setError(null);
+                const start = Date.now();
+                setStartTime(start);
+
+                try {
+                    const response = await fetch("/api/discover-advanced", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ niche: seedNiche })
+                    });
+
+                    const data = await response.json();
+
+                    if (checkUsageError(response.status, data)) {
+                        setDiscovering(false);
+                        return;
+                    }
+
+                    if (data.success) {
+                        setAdvancedKeywords(data.topKeywords);
+                        setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+                    } else {
+                        console.error("Error:", data.error);
+                        setError({ type: 'validation', message: data.error });
+                    }
+                } catch (error) {
+                    console.error("Advanced discovery failed:", error);
+                    setError({ type: 'system', message: 'Failed to run advanced intelligence.' });
+                }
+
+                setDiscovering(false);
+            };
+
             const handleBulkGenerate = async () => {
                 setBulkLoading(true);
-                setStrategy(null);
-                setOpportunities(null);
+                // setStrategy(null); // Preserve
+                // setOpportunities(null); // Preserve
                 setBulkProducts(null);
                 setError(null);
                 const start = Date.now();
@@ -1125,6 +1623,11 @@ Commercial friendly.
 
                     clearTimeout(timeoutId);
                     const data = await response.json();
+
+                    if (checkUsageError(response.status, data)) {
+                        setBulkLoading(false);
+                        return;
+                    }
 
                     if (data.success) {
                         const normalized = data.products.map(normalizeStrategy);
@@ -1152,9 +1655,9 @@ Commercial friendly.
 
             const handleAutopilot = async () => {
                 setAutopilotLoading(true);
-                setStrategy(null);
-                setOpportunities(null);
-                setBulkProducts(null);
+                // setStrategy(null); // Preserve
+                // setOpportunities(null); // Preserve
+                // setBulkProducts(null); // Preserve
                 setAutopilotData(null);
                 setError(null);
                 const start = Date.now();
@@ -1171,6 +1674,11 @@ Commercial friendly.
 
                     clearTimeout(timeoutId);
                     const data = await response.json();
+
+                    if (checkUsageError(response.status, data)) {
+                        setAutopilotLoading(false);
+                        return;
+                    }
 
                     if (data.runSummary && data.products) {
                         setAutopilotData(data);
@@ -1226,6 +1734,12 @@ Commercial friendly.
                     clearTimeout(timeoutId);
                     const data = await response.json();
 
+                    if (checkUsageError(response.status, data)) {
+                        setPipelineRunning(false);
+                        setPipelineStatus(null);
+                        return;
+                    }
+
                     setPipelineStatus({ step: 4, label: PIPELINE_STEPS[3].label, progress: 75 });
                     await stepDelay(400);
                     setPipelineStatus({ step: 5, label: PIPELINE_STEPS[4].label, progress: 90 });
@@ -1260,6 +1774,26 @@ Commercial friendly.
 
             return (
                 <div className="flex h-screen overflow-hidden bg-gray-50">
+                    {showUpgradeModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm animate-fade-in relative">
+                                <button onClick={() => setShowUpgradeModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                                <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4 mx-auto">
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                </div>
+                                <h3 className="text-xl font-black text-center text-gray-900 mb-2">Upgrade Required</h3>
+                                <p className="text-gray-500 text-sm text-center font-medium mb-6">{upgradeMessage}</p>
+                                <button
+                                    onClick={() => upgradePlan("pro")}
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-indigo-500/30"
+                                >
+                                    Upgrade to Pro
+                                </button>
+                            </div>
+                        </div>
+                    )}
                     {/* Sidebar */}
                     <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col hidden md:flex">
                         <div className="p-6 border-b border-gray-800">
@@ -1309,7 +1843,78 @@ Commercial friendly.
                                     History & Analytics
                                     {runHistory.length > 0 && <span className="ml-auto bg-indigo-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full">{runHistory.length}</span>}
                                 </button>
+                                <button
+                                    onClick={async () => {
+                                        setActiveView("analytics");
+                                        await loadAnalytics();
+                                    }}
+                                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm ${activeView === "analytics" ? "bg-teal-600 text-white shadow-lg shadow-teal-900/20" : "text-gray-400 hover:bg-gray-800 hover:text-white"}`}
+                                >
+                                    <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                    Team Analytics
+                                </button>
                             </div>
+
+                            {usageInfo && (
+                                <div className="usage-panel mb-8 bg-[#151c2f] p-4 rounded-xl border border-gray-800 shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 to-emerald-500 opacity-20"></div>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center shadow-inner">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                                            </div>
+                                            <div>
+                                                <div className="text-white text-sm font-black leading-tight tracking-tight">Team Workspace</div>
+                                                <div className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mt-0.5"><span className="text-indigo-400">{usageInfo.plan.name} Tier</span> • {usageInfo.members.length} Members</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-1.5 flex justify-between items-end">
+                                        <div className="text-gray-400 text-[10px] uppercase font-black tracking-wider">Team Credits</div>
+                                        <div className="text-indigo-400 text-xs font-black tracking-widest">{usageInfo.usage.creditsRemaining} <span className="text-gray-600">/ {usageInfo.plan.monthlyCredits}</span></div>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-gray-800 rounded-full overflow-hidden shadow-inner mb-3.5">
+                                        <div className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 rounded-full transition-all duration-500 ease-out" style={{ width: `${(usageInfo.usage.creditsRemaining / usageInfo.plan.monthlyCredits) * 100}%` }}></div>
+                                    </div>
+
+                                    <div className="flex justify-between gap-2 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800/80 mb-4">
+                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxBulkRuns - usageInfo.usage.bulkRunsUsed}</span> bulk limits</div>
+                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxAutopilotRuns - usageInfo.usage.autopilotRunsUsed}</span> alpha limits</div>
+                                    </div>
+
+                                    {/* Members mini-list */}
+                                    <div className="pt-3 border-t border-gray-800/80">
+                                        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-2.5 flex justify-between items-center">
+                                            <span>Active Directory</span>
+                                            <button className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors bg-indigo-500/10 px-2 py-0.5 rounded">
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"></path></svg> Invite
+                                            </button>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            {usageInfo.members.slice(0, 3).map((m, i) => (
+                                                <div key={i} className="flex justify-between items-center bg-gray-800/20 hover:bg-gray-800/40 transition-colors p-2 rounded-lg border border-gray-800/50 group">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black uppercase shadow-sm ${m.role === 'owner' ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
+                                                            {m.userId.substring(0, 2)}
+                                                        </div>
+                                                        <span className="text-xs text-gray-300 font-medium truncate max-w-[80px]">{m.userId === "demo-user" ? "You" : m.userId}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow-sm ${m.role === 'owner' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/20' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
+                                                            {m.role}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <button onClick={() => upgradePlan("pro")} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/30 text-[11px] font-black py-2.5 rounded-lg transition-all uppercase tracking-widest flex items-center justify-center gap-1.5 transform hover:-translate-y-0.5">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Expand Workspace
+                                    </button>
+                                </div>
+                            )}
 
                             <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-4 px-2">Workflow Tools</p>
 
@@ -1426,7 +2031,7 @@ Commercial friendly.
                                         : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}
                                 `}
                             >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                                 {(strategy || bulkProducts || autopilotData) ? "Export CSV Data" : "Waiting for Data..."}
                             </button>
                         </div>
@@ -1439,16 +2044,109 @@ Commercial friendly.
                     {/* Main Content Area */}
                     <main className="flex-1 flex flex-col overflow-hidden relative">
                         {/* Topbar */}
-                        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+                        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm relative">
                             <div>
                                 <h1 className="text-xl font-black text-gray-900 tracking-tight">Design Generator Dashboard</h1>
                                 <p className="text-xs text-gray-500 font-medium mt-0.5">Transform ideas into high-converting pod listings</p>
                             </div>
+                            <WorkspaceSwitcher />
                         </header>
 
                         {/* Scrollable Area */}
                         <div className="flex-1 overflow-y-auto p-4 md:p-8">
                             <div className="max-w-4xl mx-auto space-y-6">
+
+                                {/* ─── Strategic Insights Panel ─── */}
+                                <InsightPanel insights={insights} />
+
+                                {/* ─── One-Click Autopilot Command Center ─── */}
+                                {activeView === 'dashboard' && (
+                                    <div className="animate-fade-in">
+                                        <div className={`relative overflow-hidden rounded-2xl border-2 ${pipelineRunning
+                                            ? 'border-emerald-400 bg-gradient-to-br from-emerald-950 to-gray-900'
+                                            : 'border-emerald-200 bg-gradient-to-br from-gray-900 to-slate-900'
+                                            } shadow-xl p-6 md:p-8 transition-all duration-500`}>
+
+                                            {/* Background glow when running */}
+                                            {pipelineRunning && (
+                                                <div className="absolute inset-0 pointer-events-none">
+                                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-emerald-400/40 blur-xl rounded-full"></div>
+                                                </div>
+                                            )}
+
+                                            <div className="flex flex-col md:flex-row items-center gap-6">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-lg ${pipelineRunning ? 'bg-emerald-400/20 ring-2 ring-emerald-400/50' : 'bg-emerald-500/20'
+                                                            }`}>
+                                                            {pipelineRunning ? (
+                                                                <svg className="w-5 h-5 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                                            ) : (
+                                                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                            )}
+                                                        </div>
+                                                        <div>
+                                                            <h2 className="text-lg font-black text-white">One-Click Autopilot</h2>
+                                                            <p className="text-xs font-bold text-emerald-400/80 uppercase tracking-widest">Full Business Pipeline</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <p className="text-sm text-gray-400 font-medium leading-relaxed mb-4">
+                                                        Discovers niches → generates listings → scores opportunity → forecasts revenue → selects publish candidates. One click, full output.
+                                                    </p>
+
+                                                    {/* Pipeline steps */}
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        {PIPELINE_STEPS.map(s => (
+                                                            <div key={s.step} className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${pipelineStatus && pipelineStatus.step >= s.step
+                                                                ? 'bg-emerald-500/20 text-emerald-400'
+                                                                : 'bg-white/5 text-gray-600'
+                                                                } transition-all`}>
+                                                                {pipelineStatus && pipelineStatus.step > s.step ? (
+                                                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg>
+                                                                ) : (
+                                                                    <span className="w-2.5 h-2.5 flex items-center justify-center">{s.step}</span>
+                                                                )}
+                                                                {s.key}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    {/* Progress bar */}
+                                                    {pipelineStatus && (
+                                                        <div className="mt-4">
+                                                            <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                                                <span className="font-bold text-emerald-400">{pipelineStatus.label}</span>
+                                                                <span>{pipelineStatus.progress}%</span>
+                                                            </div>
+                                                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                                                <div
+                                                                    className="h-full rounded-full transition-all duration-700 ease-out"
+                                                                    style={{ width: `${pipelineStatus.progress}%`, background: 'linear-gradient(90deg, #34d399, #10b981)' }}
+                                                                ></div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex-shrink-0">
+                                                    <button
+                                                        onClick={handleOneClickAutopilot}
+                                                        disabled={pipelineRunning || autopilotLoading || bulkLoading || loading}
+                                                        className="relative bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 disabled:text-emerald-600 text-white font-black py-4 px-8 rounded-xl shadow-lg shadow-emerald-900/50 transition-all transform hover:-translate-y-0.5 active:translate-y-0 text-base uppercase tracking-wide flex items-center gap-2 min-w-[180px] justify-center"
+                                                    >
+                                                        {pipelineRunning ? (
+                                                            <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Running…</>
+                                                        ) : (
+                                                            <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Launch Pipeline</>
+                                                        )}
+                                                    </button>
+                                                    <p className="text-[10px] text-gray-600 text-center mt-2 font-bold uppercase tracking-widest">~60s full run</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Input Panels - Rendered Based on Active View */}
                                 {activeView === 'dashboard' && (
@@ -1548,110 +2246,100 @@ Commercial friendly.
                                     </div>
                                 )}
 
-                                {/* ─── One-Click Autopilot Command Center ─── */}
-                                {activeView === 'dashboard' && (
-                                    <div className="animate-fade-in">
-                                        <div className={`relative overflow-hidden rounded-2xl border-2 ${pipelineRunning
-                                            ? 'border-emerald-400 bg-gradient-to-br from-emerald-950 to-gray-900'
-                                            : 'border-emerald-200 bg-gradient-to-br from-gray-900 to-slate-900'
-                                            } shadow-xl p-6 md:p-8 transition-all duration-500`}>
-
-                                            {/* Background glow when running */}
-                                            {pipelineRunning && (
-                                                <div className="absolute inset-0 pointer-events-none">
-                                                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-1 bg-emerald-400/40 blur-xl rounded-full"></div>
-                                                </div>
-                                            )}
-
-                                            <div className="flex flex-col md:flex-row items-center gap-6">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center gap-3 mb-3">
-                                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-lg ${pipelineRunning ? 'bg-emerald-400/20 ring-2 ring-emerald-400/50' : 'bg-emerald-500/20'
-                                                            }`}>
-                                                            {pipelineRunning ? (
-                                                                <svg className="w-5 h-5 text-emerald-400 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
-                                                            ) : (
-                                                                <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                                                            )}
-                                                        </div>
-                                                        <div>
-                                                            <h2 className="text-lg font-black text-white">One-Click Autopilot</h2>
-                                                            <p className="text-xs font-bold text-emerald-400/80 uppercase tracking-widest">Full Business Pipeline</p>
-                                                        </div>
-                                                    </div>
-
-                                                    <p className="text-sm text-gray-400 font-medium leading-relaxed mb-4">
-                                                        Discovers niches → generates listings → scores opportunity → forecasts revenue → selects publish candidates. One click, full output.
-                                                    </p>
-
-                                                    {/* Pipeline steps */}
-                                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                                        {PIPELINE_STEPS.map(s => (
-                                                            <div key={s.step} className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${pipelineStatus && pipelineStatus.step >= s.step
-                                                                ? 'bg-emerald-500/20 text-emerald-400'
-                                                                : 'bg-white/5 text-gray-600'
-                                                                } transition-all`}>
-                                                                {pipelineStatus && pipelineStatus.step > s.step ? (
-                                                                    <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg>
-                                                                ) : (
-                                                                    <span className="w-2.5 h-2.5 flex items-center justify-center">{s.step}</span>
-                                                                )}
-                                                                {s.key}
-                                                            </div>
-                                                        ))}
-                                                    </div>
-
-                                                    {/* Progress bar */}
-                                                    {pipelineStatus && (
-                                                        <div className="mt-4">
-                                                            <div className="flex justify-between text-xs text-gray-500 mb-1">
-                                                                <span className="font-bold text-emerald-400">{pipelineStatus.label}</span>
-                                                                <span>{pipelineStatus.progress}%</span>
-                                                            </div>
-                                                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                                                <div
-                                                                    className="h-full rounded-full transition-all duration-700 ease-out"
-                                                                    style={{ width: `${pipelineStatus.progress}%`, background: 'linear-gradient(90deg, #34d399, #10b981)' }}
-                                                                ></div>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-
-                                                <div className="flex-shrink-0">
-                                                    <button
-                                                        onClick={handleOneClickAutopilot}
-                                                        disabled={pipelineRunning || autopilotLoading || bulkLoading || loading}
-                                                        className="relative bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-800 disabled:text-emerald-600 text-white font-black py-4 px-8 rounded-xl shadow-lg shadow-emerald-900/50 transition-all transform hover:-translate-y-0.5 active:translate-y-0 text-base uppercase tracking-wide flex items-center gap-2 min-w-[180px] justify-center"
-                                                    >
-                                                        {pipelineRunning ? (
-                                                            <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Running…</>
-                                                        ) : (
-                                                            <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Launch Pipeline</>
-                                                        )}
-                                                    </button>
-                                                    <p className="text-[10px] text-gray-600 text-center mt-2 font-bold uppercase tracking-widest">~60s full run</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
                                 {activeView === 'discovery' && (
                                     <div className="bg-white p-10 rounded-2xl border border-purple-200 shadow-sm flex flex-col items-center justify-center text-center animate-fade-in mb-6">
                                         <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center mb-4 shadow-inner">
                                             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                                         </div>
-                                        <h2 className="text-2xl font-black text-gray-900 mb-3">Autonomous Niche Discovery</h2>
-                                        <p className="text-gray-500 font-medium max-w-xl mb-8">Deploy our AI agents to scan current marketplace trends and algorithmically identify the most profitable, low-competition POD niches.</p>
+                                        <h2 className="text-2xl font-black text-gray-900 mb-3">Advanced Keyword Discovery</h2>
+                                        <p className="text-gray-500 font-medium max-w-xl mb-6">Deploy our AI market intelligence agents to hunt downstream profitable keywords, score buyer intent, and validate competitive gaps algorithmically.</p>
+
+                                        <div className="w-full max-w-md mx-auto mb-6 flex flex-col sm:flex-row gap-3">
+                                            <input
+                                                type="text"
+                                                placeholder="Enter a Seed Niche (e.g. coffee, teachers)"
+                                                value={seedNiche}
+                                                onChange={(e) => setSeedNiche(e.target.value)}
+                                                className="flex-1 bg-gray-50 border border-gray-200 p-3 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm font-bold text-gray-700 placeholder-gray-400 shadow-inner"
+                                            />
+                                            <button
+                                                onClick={handleAdvancedDiscover}
+                                                disabled={loading || discovering || bulkLoading || !seedNiche}
+                                                className="bg-purple-600 hover:bg-purple-700 text-white font-black py-3 px-6 rounded-xl disabled:bg-purple-300 transition-all shadow-md flex items-center justify-center whitespace-nowrap"
+                                            >
+                                                {discovering ? "Mining..." : "Run Analysis"}
+                                            </button>
+                                        </div>
+
+                                        <p className="text-xs text-gray-400 font-bold uppercase tracking-widest mt-4">or use autonomous broad discovery</p>
                                         <button
                                             onClick={handleDiscover}
                                             disabled={loading || discovering || bulkLoading}
-                                            className="bg-purple-600 hover:bg-purple-700 text-white font-black py-4 px-8 rounded-xl disabled:bg-purple-300 transition-all shadow-lg transform hover:-translate-y-0.5 flex items-center gap-3 text-lg"
+                                            className="mt-3 bg-white border-2 border-purple-100 hover:bg-purple-50 hover:border-purple-300 text-purple-700 font-bold py-2.5 px-6 rounded-xl disabled:opacity-50 transition-all flex items-center gap-2 text-sm"
                                         >
-                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
                                             {discoveringText}
                                         </button>
+                                    </div>
+                                )}
+
+
+                                {/* Advanced Keyword Intelligence Grid */}
+                                {advancedKeywords && advancedKeywords.length > 0 && activeView === 'discovery' && (
+                                    <div className="animate-fade-in space-y-6 mb-6">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div>
+                                                <h3 className="text-xl font-black text-gray-900 flex items-center gap-2">
+                                                    <span className="w-8 h-8 rounded-lg bg-green-100 text-green-600 flex items-center justify-center shadow-inner"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd"></path></svg></span>
+                                                    High-Potential Keywords
+                                                </h3>
+                                                <p className="text-sm font-medium text-gray-500 mt-1">Ranked downstream angles for the "{seedNiche}" sector.</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {advancedKeywords.map((kw, i) => (
+                                                <div key={i} className={`bg-white rounded-2xl shadow-sm border overflow-hidden flex flex-col hover:shadow-md transition-shadow ${kw.riskLevel === 'high' ? 'border-red-200' : kw.riskLevel === 'caution' ? 'border-orange-200' : 'border-gray-100 hover:border-gray-300'}`}>
+                                                    <div className={`p-4 border-b flex justify-between items-start ${kw.riskLevel === 'high' ? 'bg-red-50/50' : kw.riskLevel === 'caution' ? 'bg-orange-50/50' : 'bg-gray-50/50'}`}>
+                                                        <h4 className="font-black text-gray-900 text-lg line-clamp-2 pr-2">{kw.keyword}</h4>
+                                                        <div className={`shrink-0 w-12 h-12 flex items-center justify-center rounded-xl shadow-inner text-xl font-black tabular-nums border ${kw.riskLevel === 'high' ? 'bg-red-100 text-red-700 border-red-200' : kw.opportunityScore >= 70 ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                                                            {kw.opportunityScore}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="p-4 grid grid-cols-2 gap-3 mb-auto">
+                                                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-100">
+                                                            <div className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-1">Demand</div>
+                                                            <div className="font-black text-gray-800 tabular-nums text-lg">{kw.demandScore}</div>
+                                                        </div>
+                                                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-100">
+                                                            <div className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-1">Momentum</div>
+                                                            <div className="font-black text-blue-700 tabular-nums text-lg">{kw.trendScore}</div>
+                                                        </div>
+                                                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-100">
+                                                            <div className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-1">Comp</div>
+                                                            <div className="font-black text-gray-800 tabular-nums text-lg">{kw.competitionScore}</div>
+                                                        </div>
+                                                        <div className="bg-gray-50 rounded-lg p-3 text-center border border-gray-100">
+                                                            <div className="text-[10px] font-bold tracking-widest text-gray-400 uppercase mb-1">Intent</div>
+                                                            <div className="font-black text-green-700 tabular-nums text-lg">{kw.buyerIntentScore}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="p-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+                                                        <span className="text-gray-500 bg-white px-2 py-1 rounded shadow-sm border border-gray-100">Type: <span className="text-gray-800">{kw.intentType}</span></span>
+
+                                                        {kw.riskLevel === 'high' ? (
+                                                            <span className="text-red-700 bg-red-100 px-2 py-1 rounded shadow-sm border border-red-200 flex items-center gap-1"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg> IP Risk</span>
+                                                        ) : kw.riskLevel === 'caution' ? (
+                                                            <span className="text-orange-700 bg-orange-100 px-2 py-1 rounded shadow-sm border border-orange-200 flex items-center gap-1"><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg> Caution</span>
+                                                        ) : (
+                                                            <span className="text-emerald-700 bg-emerald-100 px-2 py-1 rounded shadow-sm border border-emerald-200 flex items-center gap-1"><svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg> Safe</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
 
@@ -1704,6 +2392,64 @@ Commercial friendly.
                                             }
                                         }}
                                     />
+                                )}
+
+                                {/* Team Analytics Dashboard */}
+                                {activeView === 'analytics' && (
+                                    <div className="animate-fade-in mb-6">
+                                        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-200">
+                                            <div className="w-12 h-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center shadow-inner">
+                                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                            </div>
+                                            <div>
+                                                <h2 className="text-2xl font-black text-gray-900">Team Analytics Dashboard</h2>
+                                                <p className="text-sm font-medium text-gray-500 mt-0.5">Workspace health, performance projections, and action tracking.</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="analytics-grid">
+                                            <div className="analytics-card">
+                                                <h3 className="analytics-title">Credits Usage</h3>
+                                                <div style={{ height: '220px', width: '100%' }}>
+                                                    <canvas id="creditsChart"></canvas>
+                                                </div>
+                                            </div>
+
+                                            <div className="analytics-card">
+                                                <h3 className="analytics-title">Feature Usage</h3>
+                                                <div style={{ height: '220px', width: '100%' }}>
+                                                    <canvas id="featureChart"></canvas>
+                                                </div>
+                                            </div>
+
+                                            <div className="analytics-card">
+                                                <h3 className="analytics-title">Activity Trend</h3>
+                                                <div style={{ height: '220px', width: '100%' }}>
+                                                    <canvas id="trendChart"></canvas>
+                                                </div>
+                                            </div>
+
+                                            <div className="analytics-card" style={{ gridColumn: '1 / -1' }}>
+                                                <h3 className="analytics-title text-indigo-400 flex items-center gap-2">
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"></path></svg>
+                                                    Team Leaderboard
+                                                </h3>
+                                                <div id="leaderboard">
+                                                    {analyticsData && analyticsData.analytics && analyticsData.analytics.memberActivity ? Object.entries(analyticsData.analytics.memberActivity)
+                                                        .sort((a, b) => b[1] - a[1])
+                                                        .map(([user, count], i) => (
+                                                            <div key={user} className="leader-item">
+                                                                <span>
+                                                                    <strong className={`mr-2 border rounded-full w-6 h-6 inline-flex items-center justify-center text-[10px] ${i === 0 ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30' : i === 1 ? 'bg-gray-400/20 text-gray-400 border-gray-400/30' : i === 2 ? 'bg-amber-700/20 text-amber-600 border-amber-700/30' : 'bg-gray-800 text-gray-500 border-gray-700'}`}>#{i + 1}</strong>
+                                                                    {user === "demo-user" ? "You" : user}
+                                                                </span>
+                                                                <strong className="text-white text-lg">{count} <span className="text-gray-500 text-xs font-medium ml-1">actions</span></strong>
+                                                            </div>
+                                                        )) : 'Loading...'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 )}
 
                                 {/* Error State */}
@@ -1916,7 +2662,25 @@ Commercial friendly.
                                                             <button
                                                                 onClick={() => {
                                                                     setPrompt(prod.niche);
-                                                                    setStrategy(null);
+                                                                    const strategyData = normalizeStrategy(prod);
+                                                                    setStrategy(strategyData);
+
+                                                                    // Populate prompts from bulk product
+                                                                    if (strategyData.imagePrompts && strategyData.imagePrompts.length > 0 && strategyData.shirtSlogans && strategyData.shirtSlogans.length > 0) {
+                                                                        const newPrompts = {};
+                                                                        strategyData.shirtSlogans.forEach((slogan, idx) => {
+                                                                            if (strategyData.imagePrompts[idx]) {
+                                                                                newPrompts[slogan] = {
+                                                                                    loading: false,
+                                                                                    prompt: strategyData.imagePrompts[idx],
+                                                                                    status: "generated",
+                                                                                    fallback: false
+                                                                                };
+                                                                            }
+                                                                        });
+                                                                        setGeneratedPrompts(newPrompts);
+                                                                    }
+
                                                                     setActiveView('dashboard');
                                                                     window.scrollTo({ top: 0, behavior: 'smooth' });
                                                                 }}
@@ -1978,13 +2742,19 @@ Commercial friendly.
                                                                 {opp.whyItSells}
                                                             </p>
                                                             <TrendBadge trend={opp.trend} />
+                                                            <RevenueBox product={opp} />
                                                         </div>
                                                         <div className="flex items-center justify-between border-t border-gray-100 pt-4 mt-auto">
-                                                            <div className="flex gap-4">
-                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Demand</span> <span className="font-black text-gray-800">{opp.research_demand}</span></div>
-                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Comp</span> <span className="font-black text-gray-800">{opp.research_competition}</span></div>
-                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Trend</span> <span className="font-black text-gray-800">{opp.trend_score}</span></div>
+                                                            <div className="flex gap-4 flex-wrap">
+                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Est. Demand</span> <span className="font-black text-gray-800">{opp.research_demand}</span></div>
+                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Est. Competition</span> <span className="font-black text-gray-800">{opp.research_competition}</span></div>
+                                                                <div className="text-xs"><span className="text-gray-400 uppercase font-bold text-[9px]">Est. Trend</span> <span className="font-black text-gray-800">{opp.trend_score}</span></div>
                                                                 <div className="text-xs hidden sm:block"><span className="text-gray-400 uppercase font-bold text-[9px]">Trigger</span> <span className="font-bold text-gray-600 italic">"{opp.emotionalTrigger}"</span></div>
+                                                                {opp.metricsSource && (
+                                                                    <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ml-auto ${opp.metricsSource === 'ai_estimated' ? 'bg-indigo-50 text-indigo-500 border-indigo-200' : 'bg-gray-100 text-gray-400 border-gray-200'}`}>
+                                                                        {opp.metricsSource === 'ai_estimated' ? '🤖 AI Est.' : '⚙ Simulated'}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                             <button
                                                                 className="bg-purple-100 hover:bg-purple-200 text-purple-800 text-xs font-black uppercase tracking-wider px-4 py-2 rounded-lg transition-colors flex items-center gap-2 border border-purple-200"
@@ -2022,7 +2792,9 @@ Commercial friendly.
                                             </div>
                                             <button
                                                 onClick={() => {
-                                                    const text = `NICHE: ${strategy.niche}\nAUDIENCE: ${strategy.targetAudience}\n\n--- SLOGANS ---\n${strategy.shirtSlogans.join('\n')}\n\n--- AMAZON LISTING ---\n${strategy.amazonListing.title}\n${strategy.amazonListing.brandName}\n${strategy.amazonListing.bulletPoint1}\n${strategy.amazonListing.bulletPoint2}\n${strategy.amazonListing.description}\n${strategy.amazonListing.keywords.join(', ')}\n\n--- PROMPTS ---\n${strategy.imagePrompts.join('\n\n')}`;
+                                                    const audience = strategy.targetAudiences?.join(', ') || strategy.targetAudience || 'N/A';
+                                                    const rev = strategy.projectedRevenue ? `$${strategy.projectedRevenue.toLocaleString()}/mo` : 'N/A';
+                                                    const text = `NICHE: ${strategy.niche}\nSCORE: ${strategy.niche_score}/100\nEST. REVENUE: ${rev}\nAUDIENCE: ${audience}\n\n--- SLOGANS ---\n${strategy.shirtSlogans?.join('\n') || ''}\n\n--- AMAZON LISTING ---\nTITLE: ${strategy.amazonListing?.title || ''}\nBRAND: ${strategy.amazonListing?.brandName || ''}\nBULLET 1: ${strategy.amazonListing?.bulletPoint1 || ''}\nBULLET 2: ${strategy.amazonListing?.bulletPoint2 || ''}\nDESCRIPTION: ${strategy.amazonListing?.description || ''}\nKEYWORDS: ${strategy.amazonListing?.keywords?.join(', ') || ''}\n\n--- DESIGN LOGIC ---\n${strategy.designDirections?.join('\n') || strategy.imagePrompts?.join('\n\n') || ''}`;
                                                     handleCopy('master_all', text);
                                                 }}
                                                 className="bg-gray-900 hover:bg-black text-white text-xs font-bold py-3 px-5 rounded-xl shadow-md shadow-gray-900/20 flex items-center justify-center gap-2 transition-all uppercase tracking-wider min-w-[240px]"
@@ -2296,15 +3068,26 @@ Commercial friendly.
 
                                                         const basePromptText = generatedData.prompt;
 
-                                                        // Inject the active style into the DESIGN STYLE: line of structured prompts
+                                                        // Style Injection:
+                                                        // [STYLE] token → replaced with the selected style button name
+                                                        // Niche-specific description after the dash is preserved
                                                         const injectStyle = (text, style) => {
-                                                            // Match "DESIGN STYLE:" followed by anything up to the next newline
-                                                            const styleLineRx = /(DESIGN STYLE:\s*)([^\n]*)/i;
-                                                            if (styleLineRx.test(text)) {
-                                                                return text.replace(styleLineRx, `$1${style}`);
+                                                            // Primary: replace [STYLE] token (new format)
+                                                            if (text.includes('[STYLE]')) {
+                                                                return text.replace('[STYLE]', style);
                                                             }
-                                                            // Fallback: style appended for very short / legacy prompts
-                                                            return `${text}, ${style} style, transparent background, 300 DPI, vector design`;
+                                                            // Fallback: swap label in existing "Style: Name — description"
+                                                            if (/(Style:\s*)[^\n]*/i.test(text)) {
+                                                                return text.replace(
+                                                                    /Style:\s*([^—\n]+)?/i,
+                                                                    (match, label) => {
+                                                                        const rest = match.slice(match.indexOf('—'));
+                                                                        return rest ? `Style: ${style} ${rest}` : `Style: ${style}`;
+                                                                    }
+                                                                );
+                                                            }
+                                                            // Last resort: insert after Text: line
+                                                            return text.replace(/(Text:\s*"[^"]*")/i, `$1\nStyle: ${style}`);
                                                         };
 
                                                         const isStructured = basePromptText.includes('\n') || basePromptText.length > 150;

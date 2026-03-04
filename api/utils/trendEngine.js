@@ -8,7 +8,8 @@
  * - Provide strict schema contract for pipeline stability
  */
 
-const cache = new Map();
+const { cache } = require("./trendCache");
+
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
 
 /**
@@ -18,11 +19,9 @@ async function getTrendSignals(niche, platform = 'amazon', region = 'US') {
     const cacheKey = `${niche}:${platform}:${region}`.toLowerCase();
 
     // 1. Check Cache
-    if (cache.has(cacheKey)) {
-        const entry = cache.get(cacheKey);
-        if (Date.now() - entry.timestamp < CACHE_TTL) {
-            return entry.data;
-        }
+    const cachedEntry = cache.get(cacheKey);
+    if (cachedEntry) {
+        return cachedEntry;
     }
 
     // 2. Signal Acquisition with Fallback Simulation
@@ -33,11 +32,8 @@ async function getTrendSignals(niche, platform = 'amazon', region = 'US') {
     // 3. Normalize and Weight
     const trendData = calculateTrendScore(signals);
 
-    // 4. Update Cache
-    cache.set(cacheKey, {
-        timestamp: Date.now(),
-        data: trendData
-    });
+    // 4. Update Cache (ttl is passed as the 3rd arg to our new memory cache adapter)
+    cache.set(cacheKey, trendData, CACHE_TTL);
 
     return trendData;
 }
