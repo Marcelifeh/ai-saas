@@ -1803,7 +1803,7 @@ Commercial friendly.
                             </h2>
                         </div>
 
-                        <div className="p-4 flex-1">
+                        <div className="p-4 flex-1 overflow-y-auto">
                             <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-4 px-2">Views</p>
 
                             <div className="space-y-1 mb-8">
@@ -1855,68 +1855,7 @@ Commercial friendly.
                                 </button>
                             </div>
 
-                            {usageInfo && (
-                                <div className="usage-panel mb-8 bg-[#151c2f] p-4 rounded-xl border border-gray-800 shadow-xl relative overflow-hidden">
-                                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 to-emerald-500 opacity-20"></div>
-                                    <div className="flex justify-between items-center mb-4">
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center shadow-inner">
-                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                                            </div>
-                                            <div>
-                                                <div className="text-white text-sm font-black leading-tight tracking-tight">Team Workspace</div>
-                                                <div className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mt-0.5"><span className="text-indigo-400">{usageInfo.plan.name} Tier</span> • {usageInfo.members.length} Members</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="mb-1.5 flex justify-between items-end">
-                                        <div className="text-gray-400 text-[10px] uppercase font-black tracking-wider">Team Credits</div>
-                                        <div className="text-indigo-400 text-xs font-black tracking-widest">{usageInfo.usage.creditsRemaining} <span className="text-gray-600">/ {usageInfo.plan.monthlyCredits}</span></div>
-                                    </div>
-                                    <div className="h-1.5 w-full bg-gray-800 rounded-full overflow-hidden shadow-inner mb-3.5">
-                                        <div className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 rounded-full transition-all duration-500 ease-out" style={{ width: `${(usageInfo.usage.creditsRemaining / usageInfo.plan.monthlyCredits) * 100}%` }}></div>
-                                    </div>
-
-                                    <div className="flex justify-between gap-2 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800/80 mb-4">
-                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxBulkRuns - usageInfo.usage.bulkRunsUsed}</span> bulk limits</div>
-                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxAutopilotRuns - usageInfo.usage.autopilotRunsUsed}</span> alpha limits</div>
-                                    </div>
-
-                                    {/* Members mini-list */}
-                                    <div className="pt-3 border-t border-gray-800/80">
-                                        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-2.5 flex justify-between items-center">
-                                            <span>Active Directory</span>
-                                            <button className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors bg-indigo-500/10 px-2 py-0.5 rounded">
-                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"></path></svg> Invite
-                                            </button>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            {usageInfo.members.slice(0, 3).map((m, i) => (
-                                                <div key={i} className="flex justify-between items-center bg-gray-800/20 hover:bg-gray-800/40 transition-colors p-2 rounded-lg border border-gray-800/50 group">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black uppercase shadow-sm ${m.role === 'owner' ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
-                                                            {m.userId.substring(0, 2)}
-                                                        </div>
-                                                        <span className="text-xs text-gray-300 font-medium truncate max-w-[80px]">{m.userId === "demo-user" ? "You" : m.userId}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow-sm ${m.role === 'owner' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/20' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
-                                                            {m.role}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <button onClick={() => upgradePlan("pro")} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/30 text-[11px] font-black py-2.5 rounded-lg transition-all uppercase tracking-widest flex items-center justify-center gap-1.5 transform hover:-translate-y-0.5">
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Expand Workspace
-                                    </button>
-                                </div>
-                            )}
-
-                            <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-4 px-2">Workflow Tools</p>
+                            <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-3 px-2 mt-2">Workflow Tools</p>
 
                             <button
                                 onClick={() => {
@@ -2025,7 +1964,7 @@ Commercial friendly.
                                     URL.revokeObjectURL(url);
                                 }}
                                 disabled={!strategy && !bulkProducts && !autopilotData}
-                                className={`w-full py-3 px-4 rounded-xl font-bold flex items-center gap-3 transition-all text-sm
+                                className={`w-full mb-6 py-3 px-4 rounded-xl font-bold flex items-center gap-3 transition-all text-sm
                                     ${(strategy || bulkProducts || autopilotData)
                                         ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
                                         : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}
@@ -2034,6 +1973,69 @@ Commercial friendly.
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                                 {(strategy || bulkProducts || autopilotData) ? "Export CSV Data" : "Waiting for Data..."}
                             </button>
+
+                            {usageInfo && (
+                                <div className="usage-panel mb-8 bg-[#151c2f] p-4 rounded-xl border border-gray-800 shadow-xl relative overflow-hidden">
+                                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-600 to-emerald-500 opacity-20"></div>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center shadow-inner">
+                                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                                            </div>
+                                            <div>
+                                                <div className="text-white text-sm font-black leading-tight tracking-tight">Team Workspace</div>
+                                                <div className="text-gray-400 text-[10px] font-bold tracking-widest uppercase mt-0.5"><span className="text-indigo-400">{usageInfo.plan.name} Tier</span> • {usageInfo.members.length} Members</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-1.5 flex justify-between items-end">
+                                        <div className="text-gray-400 text-[10px] uppercase font-black tracking-wider">Team Credits</div>
+                                        <div className="text-indigo-400 text-xs font-black tracking-widest">{usageInfo.usage.creditsRemaining} <span className="text-gray-600">/ {usageInfo.plan.monthlyCredits}</span></div>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-gray-800 rounded-full overflow-hidden shadow-inner mb-3.5">
+                                        <div className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400 rounded-full transition-all duration-500 ease-out" style={{ width: `${(usageInfo.usage.creditsRemaining / usageInfo.plan.monthlyCredits) * 100}%` }}></div>
+                                    </div>
+
+                                    <div className="flex justify-between gap-2 p-2.5 rounded-lg bg-gray-900/50 border border-gray-800/80 mb-4">
+                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxBulkRuns - usageInfo.usage.bulkRunsUsed}</span> bulk limits</div>
+                                        <div className="text-gray-400 text-[10px] font-medium"><span className="text-white font-black text-xs mr-1">{usageInfo.plan.maxAutopilotRuns - usageInfo.usage.autopilotRunsUsed}</span> alpha limits</div>
+                                    </div>
+
+                                    {/* Members mini-list */}
+                                    <div className="pt-3 border-t border-gray-800/80">
+                                        <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-2.5 flex justify-between items-center">
+                                            <span>Active Directory</span>
+                                            <button className="text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors bg-indigo-500/10 px-2 py-0.5 rounded">
+                                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4"></path></svg> Invite
+                                            </button>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            {usageInfo.members.slice(0, 3).map((m, i) => (
+                                                <div key={i} className="flex justify-between items-center bg-gray-800/20 hover:bg-gray-800/40 transition-colors p-2 rounded-lg border border-gray-800/50 group">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black uppercase shadow-sm ${m.role === 'owner' ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white' : 'bg-gray-700 text-gray-300'}`}>
+                                                            {m.userId.substring(0, 2)}
+                                                        </div>
+                                                        <span className="text-xs text-gray-300 font-medium truncate max-w-[80px]">{m.userId === "demo-user" ? "You" : m.userId}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded shadow-sm ${m.role === 'owner' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/20' : 'bg-gray-800 text-gray-400 border border-gray-700'}`}>
+                                                            {m.role}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <button onClick={() => upgradePlan("pro")} className="w-full mt-4 bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/30 text-[11px] font-black py-2.5 rounded-lg transition-all uppercase tracking-widest flex items-center justify-center gap-1.5 transform hover:-translate-y-0.5">
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Expand Workspace
+                                    </button>
+                                </div>
+                            )}
+
+
                         </div>
 
                         <div className="p-4 border-t border-gray-800 text-xs text-gray-500 font-medium text-center">
