@@ -498,7 +498,7 @@ safe (boolean, true if family friendly)`
         for (const nicheData of niches) {
             const trend = await getTrendSignals(nicheData.niche);
 
-            for (let i = 0; i < 2; i++) {
+            for (let i = 0; i < 1; i++) {
                 const generation = await client.chat.completions.create({
                     model: 'gpt-4o-mini',
                     response_format: { type: 'json_object' },
