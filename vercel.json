@@ -25,6 +25,10 @@
         {
             "src": "public/index.html",
             "use": "@vercel/static"
+        },
+        {
+            "src": "public/logo.svg",
+            "use": "@vercel/static"
         }
     ],
     "routes": [
@@ -87,6 +91,10 @@
         {
             "src": "/api/billing/webhook",
             "dest": "/api/analytics.js"
+        },
+        {
+            "src": "/logo.svg",
+            "dest": "/public/logo.svg"
         },
         {
             "src": "/(.*)",
