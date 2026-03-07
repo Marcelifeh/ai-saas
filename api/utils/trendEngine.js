@@ -117,22 +117,23 @@ const SUBREDDITS = [
 
 async function getRedditTrends() {
     const titles = [];
+    const sources = SUBREDDITS.slice(0, 3); // Max 3 to respect speed limits
 
-    for (const sub of SUBREDDITS) {
+    await Promise.allSettled(sources.map(async (sub) => {
         try {
             const res = await fetch(
-                `https://www.reddit.com/r/${sub}/hot.json?limit=20`
+                `https://www.reddit.com/r/${sub}/hot.json?limit=15`
             );
-
             const json = await res.json();
-
-            json.data.children.forEach((post) => {
-                titles.push(post.data.title);
-            });
+            if (json && json.data && json.data.children) {
+                json.data.children.forEach((post) => {
+                    titles.push(post.data.title);
+                });
+            }
         } catch (err) {
             console.error("Reddit error:", err);
         }
-    }
+    }));
 
     return titles;
 }
@@ -210,18 +211,15 @@ Output ONLY a raw, valid JSON array of 30 short string phrases. NO markdown bloc
  **************************************************************/
 
 async function embedTexts(texts) {
-    const embeddings = [];
+    if (!texts || texts.length === 0) return [];
 
-    for (const text of texts) {
-        const response = await getClient().embeddings.create({
-            model: "text-embedding-3-small",
-            input: text,
-        });
+    // Batch process all texts in 1 API call instead of 30 sequential calls
+    const response = await getClient().embeddings.create({
+        model: "text-embedding-3-small",
+        input: texts,
+    });
 
-        embeddings.push(response.data[0].embedding);
-    }
-
-    return embeddings;
+    return response.data.map((d) => d.embedding);
 }
 
 /**************************************************************
@@ -317,34 +315,36 @@ function scoreNiche(niche) {
  * VIRAL POTENTIAL DETECTION
  **************************************************************/
 
-async function detectViralPotential(niche) {
+async function detectViralPotentials(niches) {
     const prompt = `
-Rate the viral meme potential (1-10) of this phrase:
+Rate the viral meme potential (1-10) of these POD niches.
+Return ONLY a valid JSON array of numbers, with exact same length as the input (${niches.length}).
 
-"${niche}"
-
-Consider:
-- humor
-- relatability
-- meme culture
-- identity expression
-
-Return only a number.
+Niches:
+${niches.map((n, i) => `${i + 1}. ${n}`).join('\n')}
 `;
 
     const completion = await safeCompletion({
         model: "gpt-4o-mini",
-        temperature: 0.4,
+        temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
     });
 
-    if (completion.error) {
-        return 5; // average viral score fallback
+    const fallback = niches.map(() => 5);
+    if (completion.error) return fallback;
+
+    let text = completion.choices[0].message.content.trim();
+    if (text.startsWith('\`\`\`json')) text = text.substring(7);
+    if (text.startsWith('\`\`\`')) text = text.substring(3);
+    if (text.endsWith('\`\`\`')) text = text.substring(0, text.length - 3);
+
+    try {
+        const arr = JSON.parse(text.trim());
+        if (Array.isArray(arr) && arr.length === niches.length) return arr;
+        return fallback;
+    } catch {
+        return fallback;
     }
-
-    const score = parseFloat(completion.choices[0].message.content);
-
-    return score || 5;
 }
 
 /**************************************************************
@@ -353,20 +353,24 @@ Return only a number.
 
 async function evaluateClusters(clusters) {
     const results = [];
+    const representatives = clusters.map(c => c[0]);
 
-    for (const cluster of clusters) {
-        const representative = cluster[0];
+    // 1 Batch LLM Call instead of 10 sequential calls
+    const viralScores = await detectViralPotentials(representatives);
+
+    for (let i = 0; i < clusters.length; i++) {
+        const representative = representatives[i];
+        const cluster = clusters[i];
 
         const profitScore = scoreNiche(representative);
-
-        const viralScore = await detectViralPotential(representative);
+        const viralScore = viralScores[i] || 5;
 
         results.push({
             niche: representative,
             cluster,
             profitScore,
             viralScore,
-            finalScore: profitScore * 0.7 + viralScore * 3,
+            finalScore: Math.round(profitScore * 0.7 + viralScore * 3),
         });
     }
 
@@ -377,7 +381,15 @@ async function evaluateClusters(clusters) {
  * MASTER DISCOVERY ENGINE
  **************************************************************/
 
+const { cache } = require('./trendCache');
+
 async function discoverTrends() {
+    const cached = cache.get('global_trends_v2');
+    if (cached) {
+        console.log("Serving Discovery Engine from Memory Cache");
+        return cached;
+    }
+
     console.log("Collecting signals...");
     const signals = await collectTrendSignals();
 
@@ -392,11 +404,14 @@ async function discoverTrends() {
 
     const top = scored.slice(0, 10);
 
-    return {
+    const finalData = {
         timestamp: new Date(),
         signals,
         niches: top,
     };
+
+    cache.set('global_trends_v2', finalData, 30 * 60 * 1000); // Cache for 30 minutes
+    return finalData;
 }
 
 module.exports = {
@@ -406,7 +421,7 @@ module.exports = {
     generateNiches,
     clusterNiches,
     scoreNiche,
-    detectViralPotential,
+    detectViralPotentials,
     discoverTrends,
     getTrendSignals: async (niche) => {
         return {
