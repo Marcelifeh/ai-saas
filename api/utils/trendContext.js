@@ -48,8 +48,8 @@ const TREND_ANGLES = [
 
 const TRENDING_SEARCH_TOPICS = [
     "pickleball", "girl dinner", "gym rats", "booktok", "quiet luxury",
-    "cozy gaming", "feral girl summer", "corporate buzzwords", "homesteading",
-    "neurospicy", "plant killer", "introvert energy", "side hustle"
+    "cozy gaming", "feral girl summer", "homesteading",
+    "neurospicy", "plant killer", "introvert energy", "true crime podcasts"
 ];
 
 function getRandomItems(arr, count) {

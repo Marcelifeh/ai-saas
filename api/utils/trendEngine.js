@@ -105,13 +105,14 @@ async function getGoogleTrends() {
  **************************************************************/
 
 const SUBREDDITS = [
-    "sidehustle",
-    "entrepreneur",
-    "printondemand",
-    "streetwear",
-    "fitness",
-    "smallbusiness",
-    "etsy",
+    "popculturechat",
+    "hobbies",
+    "CasualConversation",
+    "memes",
+    "AskReddit",
+    "nostalgia",
+    "gaming",
+    "careerguidance"
 ];
 
 async function getRedditTrends() {
@@ -159,21 +160,23 @@ async function generateNiches(signals) {
     const contextSignals = signals.slice(0, 15).join("\n");
 
     const prompt = `
-You are a print-on-demand trend analyst.
+You are an elite Print-on-Demand (POD) market researcher and trend spotter.
 
-Using these trending signals:
-
+Here are the latest cultural trending signals, extracted from Google Trends and viral Reddit discussions today:
+---
 ${contextSignals}
+---
 
-Generate 30 unique niche communities suitable for POD apparel.
+Your exact task is to synthesize these raw signals and generate a JSON array of 30 highly specific, highly profitable, and commercially viable micro-niches for POD apparel (shirts, mugs, hoodies).
 
-Rules:
-- Focus on micro communities
-- Prefer humor or identity expression
-- Avoid generic niches like "dog lover"
-- Return short phrases only
+CRITICAL RULES FOR NICHES:
+1. **NO META-BUSINESS NICHES:** Do NOT generate niches about "entrepreneurs", "job seekers", "side hustles", or "freelancers" unless the signal specifically dictates it. People do not buy shirts about being a "freelance failure". 
+2. **USE IDENTITIES & PASSIONS:** Generate niches based on what people proudly identify as (e.g., "Overstimulated Toddler Moms", "Introverted Book Readers Who Love True Crime", "Sarcastic NICU Nurses", "Cozy Gamers Who Need Sleep", "Plant Parents With ADHD").
+3. **CROSS-NICHING IS REQUIRED:** Combine two distinct concepts to create a blue-ocean niche. (e.g., "Skateboarding + Vintage Frogs" -> "Retro Frog Skater Aesthetics").
+4. **DESIGNABLE:** The niche must be something a graphic designer can easily visualize.
+5. **AVOID BASIC CLIQUÉS:** No generic "Dog Mom", "Coffee Lover", or "Gym Rat". Be wildly specific and modern.
 
-Return as JSON array.
+Output ONLY a raw, valid JSON array of 30 short string phrases. NO markdown blocks. NO explanations. NO formatting. Just the array.
 `;
 
     const completion = await safeCompletion({
@@ -186,13 +189,19 @@ Return as JSON array.
         return ["funny dog shirts", "developer humor", "coffee addict"]; // safe fallback array
     }
 
-    const text = completion.choices[0].message.content;
+    const text = completion.choices[0].message.content.trim();
 
     try {
-        const niches = JSON.parse(text);
+        let cleanText = text;
+        if (cleanText.startsWith('\`\`\`json')) cleanText = cleanText.substring(7);
+        if (cleanText.startsWith('\`\`\`')) cleanText = cleanText.substring(3);
+        if (cleanText.endsWith('\`\`\`')) cleanText = cleanText.substring(0, cleanText.length - 3);
+
+        const niches = JSON.parse(cleanText.trim());
         return niches.slice(0, 30);
-    } catch {
-        return text.split("\n").map((x) => x.trim());
+    } catch (e) {
+        console.error("Niche parse error on raw output:", text);
+        return ["Introverted Bookworms", "Sarcastic Nurses", "Cozy Gamers with Anxiety"];
     }
 }
 
