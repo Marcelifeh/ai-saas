@@ -1519,10 +1519,10 @@ Commercial friendly.
             const currentPlatKey = (strategy && (strategy.platform || strategy.detectedPlatform)) || 'amazon';
             const currentPlatMeta = PLAT_META[currentPlatKey] || PLAT_META.amazon;
 
-            // Fetch fresh trends from /api/discover once every 24 hours
+            // Fetch fresh trends from /api/discover once every 30 mins
             useEffect(() => {
-                const CACHE_KEY = 'ai_saas_trends_cache';
-                const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+                const CACHE_KEY = 'ai_saas_trends_cache_v2';
+                const TTL_MS = 30 * 60 * 1000; // 30 minutes
                 try {
                     const cached = localStorage.getItem(CACHE_KEY);
                     if (cached) {
