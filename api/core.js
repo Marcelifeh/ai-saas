@@ -46,6 +46,7 @@ async function safeCompletion(params) {
 module.exports = async function handler(req, res) {
     const url = (req.url || '').split('?')[0];
 
+    if (url === '/api/health') return handleHealth(req, res);
     if (url === '/api/discover') return requireAuth(handleDiscover)(req, res);
     if (url === '/api/generate') return requireAuth(handleGenerate)(req, res);
     if (url === '/api/bulk-generate') return requireAuth(handleBulkGenerate)(req, res);
@@ -57,6 +58,16 @@ module.exports = async function handler(req, res) {
 
     return res.status(404).json({ error: 'Not found' });
 };
+
+// ─── /api/health ──────────────────────────────────────────────────────────────
+async function handleHealth(req, res) {
+    try {
+        const client = getClient();
+        return res.status(200).json({ status: "ok", openai: !!process.env.OPENAI_API_KEY });
+    } catch (err) {
+        return res.status(500).json({ status: "error", message: err.message });
+    }
+}
 
 // ─── /api/discover ────────────────────────────────────────────────────────────
 async function handleDiscover(req, res) {
@@ -281,7 +292,7 @@ async function handleBulkGenerate(req, res) {
 
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: 'Bulk discovery failed', details: err.message });
+        return res.status(500).json({ success: false, niches: [], error: 'Bulk discovery failed', details: err.message });
     }
 }
 
@@ -294,9 +305,9 @@ async function handleGenerateChunk(req, res) {
 
     try {
         const { niches, isAutopilot } = req.body;
-        if (!niches || !Array.isArray(niches)) return res.status(400).json({ error: 'Niches array required' });
+        if (!niches || !Array.isArray(niches)) return res.status(400).json({ success: false, products: [], error: 'Niches array required' });
 
-        const results = await Promise.all(niches.map(async (nicheData) => {
+        const settledResults = await Promise.allSettled(niches.map(async (nicheData) => {
             try {
                 const trend = await getTrendSignals(nicheData.niche);
 
@@ -358,6 +369,10 @@ async function handleGenerateChunk(req, res) {
             }
         }));
 
+        const results = settledResults
+            .filter(r => r.status === 'fulfilled' && r.value)
+            .map(r => r.value);
+
         let validResults = results.filter(Boolean);
         validResults.forEach(p => logRun(p));
 
@@ -365,7 +380,7 @@ async function handleGenerateChunk(req, res) {
 
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: 'Chunk generation failed', details: err.message });
+        return res.status(500).json({ success: false, products: [], error: 'Chunk generation failed', details: err.message });
     }
 }
 
@@ -477,7 +492,7 @@ async function handleAutopilot(req, res) {
 
     } catch (err) {
         console.error(err);
-        return res.status(500).json({ error: 'Autopilot discovery failed', details: err.message });
+        return res.status(500).json({ success: false, niches: [], error: 'Autopilot discovery failed', details: err.message });
     }
 }
 
