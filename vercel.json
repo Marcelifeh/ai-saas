@@ -61,6 +61,14 @@
             "dest": "/api/core.js"
         },
         {
+            "src": "/api/generate-chunk",
+            "dest": "/api/core.js"
+        },
+        {
+            "src": "/api/health",
+            "dest": "/api/core.js"
+        },
+        {
             "src": "/api/auth/demo",
             "dest": "/api/auth.js"
         },
