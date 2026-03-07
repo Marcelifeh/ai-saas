@@ -1988,7 +1988,13 @@ Commercial friendly.
                         setBulkLoading(false);
                         return;
                     }
-                    if (!discData.success) throw new Error(discData.error);
+                    if (!discRes.ok) {
+                        throw new Error(`Factory server error: ${discRes.status}`);
+                    }
+                    if (!discData.success) {
+                        console.warn("Factory returned unsuccessful status:", discData.error);
+                        // Continue execution using the safe fallback array provided by backend
+                    }
 
                     const niches = discData.niches || [];
                     const chunks = chunkArray(niches, 3); // Process 3 niches per Vercel request
@@ -2022,8 +2028,8 @@ Commercial friendly.
                     }
 
                 } catch (error) {
-                    console.error(error);
-                    setError({ type: 'system', message: 'A system error occurred connecting to the factory server.' });
+                    console.error("Factory connection error:", error);
+                    setError({ type: 'system', message: 'A system error occurred connecting to the factory server. ' + error.message });
                 }
 
                 setBulkLoading(false);
@@ -2045,7 +2051,13 @@ Commercial friendly.
                         setAutopilotLoading(false);
                         return;
                     }
-                    if (!discData.success) throw new Error(discData.error);
+                    if (!discRes.ok) {
+                        throw new Error(`Autopilot server error: ${discRes.status}`);
+                    }
+                    if (!discData.success) {
+                        console.warn("Autopilot returned unsuccessful status:", discData.error);
+                        // Continue execution using the safe fallback array provided by backend
+                    }
 
                     const niches = discData.niches || [];
                     const chunks = chunkArray(niches, 3);
@@ -2091,8 +2103,8 @@ Commercial friendly.
                     }
 
                 } catch (error) {
-                    console.error(error);
-                    setError({ type: 'system', message: 'A system error occurred connecting to the autopilot server.' });
+                    console.error("Autopilot connection error:", error);
+                    setError({ type: 'system', message: 'A system error occurred connecting to the autopilot server. ' + error.message });
                 }
 
                 setAutopilotLoading(false);
