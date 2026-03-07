@@ -45,7 +45,7 @@ async function batchEvaluateKeywords(keywords, niche) {
 
     const completion = await client.chat.completions.create({
         model: 'gpt-4o-mini',
-        temperature: 0, // locked for stability
+        temperature: 0.6, // slight variance for exploration
         max_tokens: 1200,
         messages: [
             {

@@ -19,6 +19,7 @@ const { discoverHighPotentialKeywords } = require('./utils/advancedDiscovery');
 const { getUserWorkspace } = require('./utils/userWorkspace');
 const { getWorkspace } = require('./utils/workspaceStore');
 const { PLANS } = require('./utils/plans');
+const { getDynamicContext } = require('./utils/trendContext');
 
 // ─── Route Dispatcher ─────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
@@ -47,11 +48,13 @@ async function handleDiscover(req, res) {
 
         const completion = await client.chat.completions.create({
             model: 'gpt-4o-mini',
-            temperature: 0,
+            temperature: 0.85,
             messages: [
                 {
                     role: 'system',
                     content: `You are a POD market analyst with deep knowledge of Amazon Merch on Demand.
+
+${getDynamicContext()}
 
 Find 5 profitable print-on-demand niches that:
 - have strong buyer identity
@@ -73,7 +76,7 @@ estimatedBuyerIntent (0-100 — how purchase-ready is the audience)
 
 Return JSON array only. No markdown formatting or explanation.`
                 },
-                { role: 'user', content: 'Find 5 profitable Amazon POD niches. Return valid JSON array only.' }
+                { role: 'user', content: 'Find 5 profitable Amazon POD niches based on the dynamic context provided. Return valid JSON array only.' }
             ]
         });
 
@@ -264,12 +267,13 @@ async function handleBulkGenerate(req, res) {
 
         const discovery = await client.chat.completions.create({
             model: 'gpt-4o-mini',
+            temperature: 0.7,
             response_format: { type: 'json_object' },
             messages: [
-                { role: 'system', content: 'You are a POD niche discovery engine. Always output valid JSON.' },
+                { role: 'system', content: `You are a POD niche discovery engine. ${getDynamicContext()} Always output valid JSON.` },
                 {
                     role: 'user',
-                    content: `Find 3 profitable Amazon POD niches.
+                    content: `Find 3 profitable Amazon POD niches based on the current trends and seasons.
 Return a JSON object with a single key "niches" containing an array of objects.
 
 Fields per object:
@@ -469,12 +473,13 @@ async function handleAutopilot(req, res) {
 
         const discovery = await client.chat.completions.create({
             model: 'gpt-4o-mini',
+            temperature: 0.75,
             response_format: { type: 'json_object' },
             messages: [
-                { role: 'system', content: 'You discover profitable POD niches. Always output valid JSON.' },
+                { role: 'system', content: `You discover profitable POD niches. ${getDynamicContext()} Always output valid JSON.` },
                 {
                     role: 'user',
-                    content: `Find 5 profitable Amazon POD niches.
+                    content: `Find 5 profitable Amazon POD niches based on the active trend context.
 Return a JSON object with a single key "niches" containing an array of objects.
 
 Object Fields:

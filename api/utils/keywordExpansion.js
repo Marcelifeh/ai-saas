@@ -1,6 +1,6 @@
 /**
- * Keyword Expansion Engine
- * Generates diverse angles from a single seed niche.
+ * Keyword Expansion Engine — Phase 36 V2
+ * Generates diverse angles from a single seed niche with randomized modern subcultures.
  */
 
 function expandKeywords(niche) {
@@ -8,48 +8,36 @@ function expandKeywords(niche) {
 
     const baseNiche = String(niche).trim().toLowerCase();
 
-    const modifiers = [
-        "funny",
-        "vintage",
-        "retro",
-        "gift for",
-        "minimalist",
-        "aesthetic",
-        "cute",
-        "sarcastic",
-        "motivational",
-        "trending",
-        "viral",
-        "custom",
-        "personalized"
+    const allModifiers = [
+        // Classic
+        "funny", "vintage", "retro", "gift for", "minimalist", "aesthetic", "sarcastic",
+        // Modern & Internet Culture
+        "introvert", "ADHD", "quiet luxury", "cozy", "feral", "Y2K", "gothic", "cute",
+        // Lifestyles
+        "gym rat", "plant parent", "dog mom", "booktok", "burnout", "overstimulated"
     ];
 
-    const buyerIntents = [
-        "t-shirt",
-        "shirt",
-        "gift",
-        "design",
-        "merch",
-        "apparel",
-        "hoodie",
-        "poster"
+    const allIntents = [
+        "t-shirt", "shirt", "hoodie", "sweatshirt", "merch", "apparel", "gift", "design"
     ];
+
+    // Shuffle and pick subset to avoid generating thousands of keywords, focusing on novelty each run
+    const activeModifiers = [...allModifiers].sort(() => 0.5 - Math.random()).slice(0, 8);
+    const activeIntents = [...allIntents].sort(() => 0.5 - Math.random()).slice(0, 4);
 
     const keywords = [];
 
     // Add base niche with intents
-    buyerIntents.forEach(intent => {
+    activeIntents.forEach(intent => {
         keywords.push(`${baseNiche} ${intent}`);
     });
 
-    // Add modified niche with intents (mix a subset to prevent explosion in size for now)
-    modifiers.forEach(mod => {
-        buyerIntents.slice(0, 3).forEach(intent => {
+    // Add modified niche with intents
+    activeModifiers.forEach(mod => {
+        activeIntents.slice(0, 2).forEach(intent => {
             keywords.push(`${mod} ${baseNiche} ${intent}`);
         });
     });
-
-    // Semantic Clustering could be added here later to remove near-duplicates
 
     return [...new Set(keywords)];
 }
