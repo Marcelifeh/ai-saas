@@ -15,9 +15,13 @@
 const OpenAI = require("openai");
 const googleTrends = require("google-trends-api");
 
-const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+let clientInstance = null;
+function getClient() {
+    if (!clientInstance) {
+        clientInstance = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return clientInstance;
+}
 
 /**************************************************************
  * UTILITIES
@@ -159,7 +163,7 @@ Rules:
 Return as JSON array.
 `;
 
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
         model: "gpt-4o-mini",
         temperature: 0.85,
         messages: [{ role: "user", content: prompt }],
@@ -183,7 +187,7 @@ async function embedTexts(texts) {
     const embeddings = [];
 
     for (const text of texts) {
-        const response = await client.embeddings.create({
+        const response = await getClient().embeddings.create({
             model: "text-embedding-3-small",
             input: text,
         });
@@ -302,7 +306,7 @@ Consider:
 Return only a number.
 `;
 
-    const completion = await client.chat.completions.create({
+    const completion = await getClient().chat.completions.create({
         model: "gpt-4o-mini",
         temperature: 0.4,
         messages: [{ role: "user", content: prompt }],
