@@ -1964,51 +1964,66 @@ Commercial friendly.
                 setDiscovering(false);
             };
 
+            const chunkArray = (arr, size) => {
+                const chunks = [];
+                for (let i = 0; i < arr.length; i += size) {
+                    chunks.push(arr.slice(i, i + size));
+                }
+                return chunks;
+            };
+
             const handleBulkGenerate = async () => {
                 setBulkLoading(true);
-                // setStrategy(null); // Preserve
-                // setOpportunities(null); // Preserve
                 setBulkProducts(null);
                 setError(null);
                 const start = Date.now();
                 setStartTime(start);
 
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 58000); // 58s for bulk
-
                 try {
-                    const response = await fetch("/api/bulk-generate", {
-                        method: "POST",
-                        signal: controller.signal
-                    });
+                    // 1. Get Discovered Niches
+                    const discRes = await fetch("/api/bulk-generate", { method: "POST" });
+                    const discData = await discRes.json();
 
-                    clearTimeout(timeoutId);
-                    const data = await response.json();
-
-                    if (checkUsageError(response.status, data)) {
+                    if (checkUsageError(discRes.status, discData)) {
                         setBulkLoading(false);
                         return;
                     }
+                    if (!discData.success) throw new Error(discData.error);
 
-                    if (data.success) {
-                        const normalized = data.products.map(normalizeStrategy);
-                        logPipelineEvent("BULK_GENERATED", { count: normalized.length });
-                        setBulkProducts(normalized);
-                        setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+                    const niches = discData.niches || [];
+                    const chunks = chunkArray(niches, 3); // Process 3 niches per Vercel request
+                    let allProducts = [];
+
+                    // 2. Incrementally generate listings in chunks
+                    for (const chunk of chunks) {
+                        const chunkRes = await fetch("/api/generate-chunk", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ niches: chunk, isAutopilot: false })
+                        });
+                        const chunkData = await chunkRes.json();
+                        if (chunkData.success && chunkData.products) {
+                            allProducts = [...allProducts, ...chunkData.products];
+                            // Optional: could do partial visual updates here
+                        } else {
+                            console.error("Chunk failed:", chunkData.error);
+                        }
+                    }
+
+                    const normalized = allProducts.map(normalizeStrategy);
+                    logPipelineEvent("BULK_GENERATED", { count: normalized.length });
+                    setBulkProducts(normalized);
+                    setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
+
+                    if (normalized.length > 0) {
                         const rec = createRunRecord(normalized, 'bulk');
                         saveRun(rec);
                         setRunHistory(loadRunHistory());
-                    } else {
-                        console.error("Error:", data.error);
-                        setError({ type: 'validation', message: data.error });
                     }
+
                 } catch (error) {
                     console.error(error);
-                    if (error.name === 'AbortError') {
-                        setError({ type: 'recoverable', message: 'Bulk generation timed out. Building multiple products takes time, please try again.' });
-                    } else {
-                        setError({ type: 'system', message: 'A system error occurred connecting to the factory server.' });
-                    }
+                    setError({ type: 'system', message: 'A system error occurred connecting to the factory server.' });
                 }
 
                 setBulkLoading(false);
@@ -2016,48 +2031,68 @@ Commercial friendly.
 
             const handleAutopilot = async () => {
                 setAutopilotLoading(true);
-                // setStrategy(null); // Preserve
-                // setOpportunities(null); // Preserve
-                // setBulkProducts(null); // Preserve
                 setAutopilotData(null);
                 setError(null);
                 const start = Date.now();
                 setStartTime(start);
 
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for autopilot
-
                 try {
-                    const response = await fetch("/api/autopilot", {
-                        method: "POST",
-                        signal: controller.signal
-                    });
+                    // 1. Get Discovered Niches
+                    const discRes = await fetch("/api/autopilot", { method: "POST" });
+                    const discData = await discRes.json();
 
-                    clearTimeout(timeoutId);
-                    const data = await response.json();
-
-                    if (checkUsageError(response.status, data)) {
+                    if (checkUsageError(discRes.status, discData)) {
                         setAutopilotLoading(false);
                         return;
                     }
+                    if (!discData.success) throw new Error(discData.error);
 
-                    if (data.runSummary && data.products) {
-                        setAutopilotData(data);
+                    const niches = discData.niches || [];
+                    const chunks = chunkArray(niches, 3);
+                    let allProducts = [];
+
+                    // 2. Incrementally generate listings in chunks
+                    for (const chunk of chunks) {
+                        const chunkRes = await fetch("/api/generate-chunk", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ niches: chunk, isAutopilot: true })
+                        });
+                        const chunkData = await chunkRes.json();
+                        if (chunkData.success && chunkData.products) {
+                            allProducts = [...allProducts, ...chunkData.products];
+                        }
+                    }
+
+                    if (allProducts.length > 0) {
+                        const runSummary = {
+                            productsGenerated: allProducts.length,
+                            publishCount: allProducts.filter(p => p.decision === 'PUBLISH').length,
+                            testCount: allProducts.filter(p => p.decision === 'TEST').length,
+                            skipCount: allProducts.filter(p => p.decision === 'SKIP').length,
+                            runTimeSeconds: Math.round((Date.now() - start) / 1000)
+                        };
+
+                        // Sort by decision
+                        allProducts.sort((a, b) => {
+                            const decValue = { 'PUBLISH': 3, 'TEST': 2, 'SKIP': 1 };
+                            const diff = (decValue[b.decision] || 0) - (decValue[a.decision] || 0);
+                            return diff !== 0 ? diff : (b.publishPriority || 0) - (a.publishPriority || 0);
+                        });
+
+                        const finalData = { runSummary, products: allProducts };
+                        setAutopilotData(finalData);
                         setGenerationTime(((Date.now() - start) / 1000).toFixed(1));
-                        const rec = createRunRecord(data.products, 'autopilot');
+                        const rec = createRunRecord(allProducts, 'autopilot');
                         saveRun(rec);
                         setRunHistory(loadRunHistory());
                     } else {
-                        console.error("Error:", data.error);
-                        setError({ type: 'validation', message: data.error || "Autopilot failed to return valid data." });
+                        setError({ type: 'validation', message: "Autopilot failed to return valid data." });
                     }
+
                 } catch (error) {
                     console.error(error);
-                    if (error.name === 'AbortError') {
-                        setError({ type: 'recoverable', message: 'Autopilot timed out. Manufacturing a full pipeline takes time, please try again.' });
-                    } else {
-                        setError({ type: 'system', message: 'A system error occurred connecting to the autopilot server.' });
-                    }
+                    setError({ type: 'system', message: 'A system error occurred connecting to the autopilot server.' });
                 }
 
                 setAutopilotLoading(false);
