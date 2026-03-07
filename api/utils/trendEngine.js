@@ -17,10 +17,23 @@ const googleTrends = require("google-trends-api");
 
 let clientInstance = null;
 function getClient() {
+    if (!process.env.OPENAI_API_KEY) {
+        throw new Error("Missing OPENAI_API_KEY environment variable. API requests cannot proceed.");
+    }
     if (!clientInstance) {
         clientInstance = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     }
     return clientInstance;
+}
+
+async function safeCompletion(params) {
+    try {
+        const client = getClient();
+        return await client.chat.completions.create(params);
+    } catch (err) {
+        console.error("LLM Generation failure:", err);
+        return { error: true, message: err.message || "LLM temporarily unavailable" };
+    }
 }
 
 /**************************************************************
@@ -163,11 +176,15 @@ Rules:
 Return as JSON array.
 `;
 
-    const completion = await getClient().chat.completions.create({
+    const completion = await safeCompletion({
         model: "gpt-4o-mini",
         temperature: 0.85,
         messages: [{ role: "user", content: prompt }],
     });
+
+    if (completion.error) {
+        return ["funny dog shirts", "developer humor", "coffee addict"]; // safe fallback array
+    }
 
     const text = completion.choices[0].message.content;
 
@@ -306,11 +323,15 @@ Consider:
 Return only a number.
 `;
 
-    const completion = await getClient().chat.completions.create({
+    const completion = await safeCompletion({
         model: "gpt-4o-mini",
         temperature: 0.4,
         messages: [{ role: "user", content: prompt }],
     });
+
+    if (completion.error) {
+        return 5; // average viral score fallback
+    }
 
     const score = parseFloat(completion.choices[0].message.content);
 

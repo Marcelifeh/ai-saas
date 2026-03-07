@@ -21,6 +21,27 @@ const { getWorkspace } = require('./utils/workspaceStore');
 const { PLANS } = require('./utils/plans');
 const { getDynamicContext } = require('./utils/trendContext');
 
+let openaiInstance = null;
+function getClient() {
+    if (!process.env.OPENAI_API_KEY) {
+        throw new Error("Missing OPENAI_API_KEY environment variable. API requests cannot proceed.");
+    }
+    if (!openaiInstance) {
+        openaiInstance = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 55000 });
+    }
+    return openaiInstance;
+}
+
+async function safeCompletion(params) {
+    try {
+        const client = getClient();
+        return await client.chat.completions.create(params);
+    } catch (err) {
+        console.error("LLM Generation failure in core:", err);
+        return { error: true, message: err.message || "LLM temporarily unavailable" };
+    }
+}
+
 // ─── Route Dispatcher ─────────────────────────────────────────────────────────
 module.exports = async function handler(req, res) {
     const url = (req.url || '').split('?')[0];
@@ -119,9 +140,8 @@ async function handleGenerate(req, res) {
         if (!prompt) return res.status(400).json({ success: false, error: 'Prompt missing' });
 
         const detectedPlatform = detectPlatform(platform);
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 55000 });
 
-        const aiResponse = await openai.chat.completions.create({
+        const aiResponse = await safeCompletion({
             model: 'gpt-4o-mini',
             temperature: 0.7,
             max_tokens: 4000,
@@ -193,6 +213,10 @@ Avoid parody of any existing brand or product.
                 }
             ]
         });
+
+        if (aiResponse.error) {
+            return res.status(503).json({ success: false, error: 'AI generation service unavailable', action: 'Please try again momentarily' });
+        }
 
         const text = aiResponse.choices[0].message.content;
         let parsed;
@@ -272,12 +296,11 @@ async function handleGenerateChunk(req, res) {
         const { niches, isAutopilot } = req.body;
         if (!niches || !Array.isArray(niches)) return res.status(400).json({ error: 'Niches array required' });
 
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const results = await Promise.all(niches.map(async (nicheData) => {
             try {
                 const trend = await getTrendSignals(nicheData.niche);
 
-                const generation = await client.chat.completions.create({
+                const generation = await safeCompletion({
                     model: 'gpt-4o-mini',
                     response_format: { type: 'json_object' },
                     messages: [
@@ -295,6 +318,8 @@ async function handleGenerateChunk(req, res) {
                         }
                     ]
                 });
+
+                if (generation.error) return null;
 
                 let gen;
                 try { gen = JSON.parse(generation.choices[0].message.content); }
@@ -355,9 +380,7 @@ async function handleGeneratePrompt(req, res) {
         const { slogan, niche, audience, style, platform } = req.body;
         if (!slogan || !niche) return res.status(400).json({ success: false, error: 'Slogan and niche missing' });
 
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-        const aiResponse = await openai.chat.completions.create({
+        const aiResponse = await safeCompletion({
             model: 'gpt-4o-mini',
             response_format: { type: 'json_object' },
             temperature: 0.8,
@@ -382,6 +405,10 @@ IMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line.
                 { role: 'user', content: `Create the image prompt for this slogan: "${slogan}" (Niche: ${niche})` }
             ]
         });
+
+        if (aiResponse.error) {
+            return res.status(200).json({ success: false, prompt: null, fallback: true, error: 'AI unavailable', action: 'Use client-side fallback' });
+        }
 
         let content = aiResponse.choices[0].message.content.trim();
         const jsonMatch = content.match(/\{[\s\S]*\}/);
