@@ -4,7 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AI POD Strategy & Slogan Generator</title>
+    <title>TrendForge AI</title>
+    <meta name="description"
+        content="TrendForge AI — Turn trends into revenue. Discover profitable niches, generate designs, and automate publishing with AI.">
+    <meta property="og:title" content="TrendForge AI">
+    <meta property="og:description"
+        content="Turn trends into revenue with AI-powered niche discovery and design automation.">
+    <meta property="og:type" content="website">
+    <link rel="icon" type="image/svg+xml" href="/logo.svg">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & ReactDOM -->
@@ -1797,10 +1804,10 @@ Commercial friendly.
                     {/* Sidebar */}
                     <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col hidden md:flex">
                         <div className="p-6 border-b border-gray-800">
-                            <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-                                <span className="bg-blue-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-xs font-mono">AI</span>
-                                Design Director
-                            </h2>
+                            <div className="flex items-center gap-3">
+                                <img src="/logo.svg" alt="TrendForge AI" className="w-8 h-8" />
+                                <h2 className="text-xl font-black text-white tracking-tight">TrendForge AI</h2>
+                            </div>
                         </div>
 
                         <div className="p-4 flex-1 overflow-y-auto">
@@ -2039,7 +2046,7 @@ Commercial friendly.
                         </div>
 
                         <div className="p-4 border-t border-gray-800 text-xs text-gray-500 font-medium text-center">
-                            POD Strategy Engine v2.0
+                            TrendForge AI v2.0
                         </div>
                     </aside>
 
@@ -2047,9 +2054,12 @@ Commercial friendly.
                     <main className="flex-1 flex flex-col overflow-hidden relative">
                         {/* Topbar */}
                         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10 shadow-sm relative">
-                            <div>
-                                <h1 className="text-xl font-black text-gray-900 tracking-tight">Design Generator Dashboard</h1>
-                                <p className="text-xs text-gray-500 font-medium mt-0.5">Transform ideas into high-converting pod listings</p>
+                            <div className="flex items-center gap-4">
+                                <img src="/logo.svg" alt="TrendForge AI" className="w-10 h-10" />
+                                <div>
+                                    <h1 className="text-xl font-black text-gray-900 tracking-tight">TrendForge AI Dashboard</h1>
+                                    <p className="text-xs text-gray-500 font-medium mt-0.5">Turn trends into revenue.</p>
+                                </div>
                             </div>
                             <WorkspaceSwitcher />
                         </header>

@@ -7,7 +7,7 @@ function generateWorkspaceInsights(workspaceId) {
     // const analytics = getWorkspaceAnalytics(workspaceId);
 
     if (runs.length === 0) {
-        return [{ type: 'info', message: "Welcome to the AI Design Director. Run a generation to see strategic insights.", severity: 'info', icon: '✨' }];
+        return [{ type: 'info', message: "Welcome to TrendForge AI. Run a generation to see strategic insights.", severity: 'info', icon: '✨' }];
     }
 
     // 1. Strategic Focus
