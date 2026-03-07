@@ -292,18 +292,18 @@ estimatedBuyerIntent (0-100 — how purchase-ready this audience is)`
 
         const parsedDiscovery = JSON.parse(discovery.choices[0].message.content);
         const niches = parsedDiscovery.niches || [];
-        const results = [];
 
-        for (const nicheData of niches) {
-            const trend = await getTrendSignals(nicheData.niche);
+        const results = await Promise.all(niches.map(async (nicheData) => {
+            try {
+                const trend = await getTrendSignals(nicheData.niche);
 
-            const generation = await client.chat.completions.create({
-                model: 'gpt-4o-mini',
-                response_format: { type: 'json_object' },
-                messages: [
-                    {
-                        role: 'system',
-                        content: `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:
+                const generation = await client.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        {
+                            role: 'system',
+                            content: `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:
 {
     "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],
     "imagePrompts": ["", "", "", "", "", "", "", "", "", ""],
@@ -323,52 +323,58 @@ Commercial friendly.
 300 DPI.
 
 IMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line. Do NOT replace it.`
-                    },
-                    {
-                        role: 'user',
-                        content: `Create a POD shirt concept for:\n\nNiche: ${nicheData.niche}\nAudience: ${nicheData.targetAudience}\n\nReturn valid JSON exactly as structured.`
-                    }
-                ]
-            });
+                        },
+                        {
+                            role: 'user',
+                            content: `Create a POD shirt concept for:\n\nNiche: ${nicheData.niche}\nAudience: ${nicheData.targetAudience}\n\nReturn valid JSON exactly as structured.`
+                        }
+                    ]
+                });
 
-            let gen;
-            try { gen = JSON.parse(generation.choices[0].message.content); }
-            catch (err) { console.error('Failed to parse generation for niche', nicheData.niche); continue; }
+                let gen;
+                try { gen = JSON.parse(generation.choices[0].message.content); }
+                catch (err) { console.error('Failed to parse generation for niche', nicheData.niche); return null; }
 
-            const cachedMetrics = getAiMetrics(nicheData.niche);
-            let market;
-            if (cachedMetrics) {
-                market = cachedMetrics;
-            } else {
-                const aiSignals = {
-                    estimatedDemandStrength: nicheData.estimatedDemandStrength,
-                    estimatedCompetition: nicheData.estimatedCompetition,
-                    estimatedTrend: nicheData.estimatedTrend,
-                    estimatedBuyerIntent: nicheData.estimatedBuyerIntent
+                const cachedMetrics = getAiMetrics(nicheData.niche);
+                let market;
+                if (cachedMetrics) {
+                    market = cachedMetrics;
+                } else {
+                    const aiSignals = {
+                        estimatedDemandStrength: nicheData.estimatedDemandStrength,
+                        estimatedCompetition: nicheData.estimatedCompetition,
+                        estimatedTrend: nicheData.estimatedTrend,
+                        estimatedBuyerIntent: nicheData.estimatedBuyerIntent
+                    };
+                    market = generateMarketSignals(nicheData.niche, trend, aiSignals);
+                    setAiMetrics(nicheData.niche, market);
+                }
+                const score = scoreWithMarketIntel(nicheData, market, trend);
+                const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
+
+                let product = {
+                    niche: nicheData.niche, audience: nicheData.targetAudience, whyItSells: nicheData.whyItSells,
+                    safe: nicheData.safe, trend, projectedRevenue, revenueCategory, ...market, ...gen, ...score,
+                    metricsSource: score.metricsSource || market.metricsSource || 'simulated'
                 };
-                market = generateMarketSignals(nicheData.niche, trend, aiSignals);
-                setAiMetrics(nicheData.niche, market);
+                product = enforceCompliance(product);
+                logRun(product);
+                return product;
+            } catch (err) {
+                console.error("Error generating product for", nicheData.niche, err);
+                return null;
             }
-            const score = scoreWithMarketIntel(nicheData, market, trend);
-            const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
+        }));
 
-            let product = {
-                niche: nicheData.niche, audience: nicheData.targetAudience, whyItSells: nicheData.whyItSells,
-                safe: nicheData.safe, trend, projectedRevenue, revenueCategory, ...market, ...gen, ...score,
-                metricsSource: score.metricsSource || market.metricsSource || 'simulated'
-            };
-            product = enforceCompliance(product);
-            logRun(product);
-            results.push(product);
-        }
+        let validResults = results.filter(Boolean);
 
-        results.sort((a, b) => {
+        validResults.sort((a, b) => {
             const decValue = { 'PUBLISH': 3, 'TEST': 2, 'SKIP': 1 };
             const diff = (decValue[b.decision] || 0) - (decValue[a.decision] || 0);
             return diff !== 0 ? diff : (b.publishPriority || 0) - (a.publishPriority || 0);
         });
 
-        return res.json({ success: true, usage: guard.usage, products: results });
+        return res.json({ success: true, usage: guard.usage, products: validResults });
 
     } catch (err) {
         console.error(err);
@@ -498,12 +504,11 @@ safe (boolean, true if family friendly)`
 
         const parsedDiscovery = JSON.parse(discovery.choices[0].message.content);
         const niches = parsedDiscovery.niches || [];
-        const products = [];
 
-        for (const nicheData of niches) {
-            const trend = await getTrendSignals(nicheData.niche);
+        let products = await Promise.all(niches.map(async (nicheData) => {
+            try {
+                const trend = await getTrendSignals(nicheData.niche);
 
-            for (let i = 0; i < 1; i++) {
                 const generation = await client.chat.completions.create({
                     model: 'gpt-4o-mini',
                     response_format: { type: 'json_object' },
@@ -538,9 +543,14 @@ description (string)`
                 };
                 product = enforceCompliance(product);
                 logRun(product);
-                products.push(product);
+                return product;
+            } catch (err) {
+                console.error("Autopilot generation failed for", nicheData.niche, err);
+                return null;
             }
-        }
+        }));
+
+        products = products.filter(Boolean);
 
         const runSummary = {
             productsGenerated: products.length,
