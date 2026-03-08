@@ -2271,8 +2271,9 @@ Commercial friendly.
 
                                     <button
                                         onClick={() => {
-                                            if (!strategy && !bulkProducts && !autopilotData) {
-                                                alert("Please generate data first.");
+                                            const exportData = (activeView === 'dashboard' ? strategy : (activeView === 'bulk' ? bulkProducts : (activeView === 'autopilot' ? autopilotData : null)));
+                                            if (!exportData) {
+                                                alert("Please generate data in this view first.");
                                                 return;
                                             }
 
@@ -2290,7 +2291,7 @@ Commercial friendly.
                                                 return `"${String(text).replace(/"/g, '""')}"`;
                                             };
 
-                                            if (strategy) {
+                                            if (activeView === 'dashboard' && strategy) {
                                                 strategy.shirtSlogans.forEach(slogan => {
                                                     const row = [
                                                         csvSafe(strategy.niche),
@@ -2314,7 +2315,7 @@ Commercial friendly.
                                                     ];
                                                     rows.push(row.join(","));
                                                 });
-                                            } else if (bulkProducts) {
+                                            } else if (activeView === 'bulk' && bulkProducts) {
                                                 bulkProducts.forEach(prod => {
                                                     prod.shirtSlogans.forEach(slogan => {
                                                         const row = [
@@ -2340,7 +2341,7 @@ Commercial friendly.
                                                         rows.push(row.join(","));
                                                     });
                                                 });
-                                            } else if (autopilotData) {
+                                            } else if (activeView === 'autopilot' && autopilotData) {
                                                 autopilotData.products.forEach(prod => {
                                                     const row = [
                                                         csvSafe(prod.niche),
@@ -2375,15 +2376,15 @@ Commercial friendly.
                                             link.click();
                                             URL.revokeObjectURL(url);
                                         }}
-                                        disabled={!strategy && !bulkProducts && !autopilotData}
+                                        disabled={!(activeView === 'dashboard' ? strategy : (activeView === 'bulk' ? bulkProducts : (activeView === 'autopilot' ? autopilotData : null)))}
                                         className={`w-full mb-6 py-3 px-4 rounded-xl font-bold flex items-center gap-3 transition-all text-sm
-                                    ${(strategy || bulkProducts || autopilotData)
+                                    ${((activeView === 'dashboard' ? strategy : (activeView === 'bulk' ? bulkProducts : (activeView === 'autopilot' ? autopilotData : null))))
                                                 ? "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20"
                                                 : "bg-gray-800 text-gray-600 cursor-not-allowed border border-gray-700"}
                                 `}
                                     >
                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                                        {(strategy || bulkProducts || autopilotData) ? "Export CSV Data" : "Waiting for Data..."}
+                                        {((activeView === 'dashboard' ? strategy : (activeView === 'bulk' ? bulkProducts : (activeView === 'autopilot' ? autopilotData : null)))) ? "Export CSV Data" : "Waiting for Data..."}
                                     </button>
 
                                     {usageInfo && (
