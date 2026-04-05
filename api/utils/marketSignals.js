@@ -1,0 +1,105 @@
+/**
+ * Market Signals Engine — Phase 36
+ *
+ * Priority order for signal sourcing:
+ * 1. AI-provided signals (ai_estimated) — preferred
+ * 2. Trend engine signals (trend object) — partial grounding
+ * 3. Hash-based simulation (simulated) — fallback only
+ *
+ * metricsSource provenance flag is attached to every output.
+ */
+
+/**
+ * Build market signal object, preferring AI-provided values
+ *
+ * @param {string} niche
+ * @param {object} trendSigs - From trendEngine
+ * @param {object} aiSignals - From AI response (Phase 36)
+ * @returns Normalized market signals with provenance flag
+ */
+function generateMarketSignals(niche, trendSigs = null, aiSignals = null) {
+    // Phase 36: use AI-provided signals if available
+    if (aiSignals && typeof aiSignals.estimatedDemandStrength === 'number') {
+        return {
+            searchVolume: clamp(aiSignals.estimatedDemandStrength),
+            competitionDensity: clamp(aiSignals.estimatedCompetition),
+            trendMomentum: trendSigs ? trendSigs.score : clamp(aiSignals.estimatedTrend),
+            buyerIntent: clamp(aiSignals.estimatedBuyerIntent),
+            opportunityIndex: computeOpportunityIndex(
+                trendSigs ? trendSigs.score : clamp(aiSignals.estimatedTrend),
+                clamp(aiSignals.estimatedDemandStrength),
+                clamp(aiSignals.estimatedCompetition)
+            ),
+            metricsSource: 'ai_estimated'
+        };
+    }
+
+    // Fallback: hash-based simulation
+    const baseStr = niche ? String(niche).toLowerCase() : 'default';
+    const base = hashString(baseStr);
+
+    const searchVolume = normalize(base * 1.3);
+    const competitionDensity = normalize(base * 0.9 + 20);
+    const trendMomentum = trendSigs ? trendSigs.score : normalize(Math.abs(Math.sin(base)) * 100);
+    const buyerIntent = normalize(60 + Math.cos(base) * 20);
+
+    return {
+        searchVolume,
+        competitionDensity,
+        trendMomentum,
+        buyerIntent,
+        opportunityIndex: computeOpportunityIndex(trendMomentum, searchVolume, competitionDensity),
+        metricsSource: 'simulated'
+    };
+}
+
+function computeOpportunityIndex(trend, demand, competition) {
+    return Math.round(trend * 0.5 + demand * 0.3 + (100 - competition) * 0.2);
+}
+
+function scoreWithMarketIntel(intel, market, trendSigs = null) {
+    const demandScore = market.searchVolume;
+    const competitionScore = market.competitionDensity;
+    const trendScore = trendSigs ? trendSigs.score : market.trendMomentum;
+    const buyerIntent = market.buyerIntent;
+
+    const opportunityScore =
+        trendScore * 0.5 +
+        demandScore * 0.3 +
+        (100 - competitionScore) * 0.2;
+
+    const finalScore = opportunityScore + (intel.safe ? 10 : -10);
+
+    // Publish Priority: Trend acceleration weighted
+    const trendAccel = trendSigs?.signals?.growthAcceleration || 50;
+    const publishPriority = Math.round(opportunityScore * 0.7 + trendAccel * 0.3);
+
+    let decision = 'TEST';
+    if (finalScore >= 75) decision = 'PUBLISH';
+    if (finalScore < 50) decision = 'SKIP';
+
+    return {
+        niche_score: Math.round(finalScore),
+        publishPriority,
+        decision,
+        metricsSource: market.metricsSource || 'simulated'
+    };
+}
+
+function clamp(num) {
+    return Math.max(5, Math.min(95, Math.round(Number(num) || 50)));
+}
+
+function normalize(num) {
+    return Math.max(5, Math.min(95, Math.round(num % 100)));
+}
+
+function hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(hash % 100);
+}
+
+module.exports = { generateMarketSignals, scoreWithMarketIntel };

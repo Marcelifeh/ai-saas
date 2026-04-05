@@ -1,0 +1,27 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Base Hexagon -->
+  <path d="M128 16L224 72V184L128 240L32 184V72L128 16Z" fill="url(#hex_grad)" />
+  
+  <!-- Subtle inner shadow/highlight effect -->
+  <path d="M128 16L224 72V184L128 240L32 184V72L128 16Z" fill="black" fill-opacity="0.1" />
+
+  <!-- Trend Arrow -->
+  <!-- Starts lower left, goes up, down, then up and out right -->
+  <path d="M48 160L96 112L120 136L192 64H144V48H208V112H192V64L120 136L96 112L32 176L48 160Z" fill="url(#arrow_grad)" />
+  <!-- A thicker, solid arrow pointing up and to the right -->
+  <path d="M48 160L92 112L124 144L200 60V100H220V40H160V60H200L124 144L92 112L32 176" stroke="url(#arrow_grad_main)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M160 40H220V100" stroke="url(#arrow_grad_main)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <defs>
+    <linearGradient id="hex_grad" x1="32" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4F26B5"/>
+      <stop offset="50%" stop-color="#211244"/>
+      <stop offset="100%" stop-color="#0E5E41"/>
+    </linearGradient>
+    <linearGradient id="arrow_grad_main" x1="48" y1="160" x2="220" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#23D97F"/>
+      <stop offset="50%" stop-color="#23D97F"/>
+      <stop offset="100%" stop-color="#80FF00"/>
+    </linearGradient>
+  </defs>
+</svg>
