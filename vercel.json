@@ -3,10 +3,5 @@
     "framework": "nextjs",
     "buildCommand": "cd apps/app && npm install && npm run build",
     "outputDirectory": "apps/app/.next",
-    "installCommand": "npm install",
-    "functions": {
-        "apps/app/app/api/**": {
-            "maxDuration": 60
-        }
-    }
+    "installCommand": "npm install"
 }
