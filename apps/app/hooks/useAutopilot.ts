@@ -80,7 +80,7 @@ export function useAutopilot() {
             }
 
             if (!res.ok || !parsed.success) {
-                throw new Error(parsed.error || "Autopilot failed to start");
+                throw new Error((parsed as any).details || parsed.error || "Autopilot failed to start");
             }
             const enriched = {
                 ...parsed,

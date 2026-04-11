@@ -1942,7 +1942,7 @@ export async function refineWithGPT4o(
   if (slogans.length === 0) return [];
 
   const response = await chatCompletionSafe({
-    model: "gpt-4o",
+    model: "gpt-4o-mini",
     temperature: 0.85,
     response_format: { type: "json_object" },
     messages: [

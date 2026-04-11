@@ -128,7 +128,7 @@ export function useDiscover() {
             }
 
             if (!res.ok || !parsed.success) {
-                throw new Error(parsed.error || "Failed to load discoveries");
+                throw new Error((parsed as any).details || parsed.error || "Failed to load discoveries");
             }
 
             const payload: DiscoveryData = {

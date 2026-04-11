@@ -89,7 +89,7 @@ export function useFactory() {
                 throw new Error(message);
             }
 
-            if (!res.ok || !result.success) throw new Error(result.error || "Generation failed");
+            if (!res.ok || !result.success) throw new Error((result as any).details || result.error || "Generation failed");
             return result.data;
         } catch (err: unknown) {
             if (err instanceof Error) {
@@ -130,7 +130,7 @@ export function useFactory() {
                 throw new Error(message);
             }
 
-            if (!res.ok || !result.success) throw new Error(result.error || "Bulk discovery failed");
+            if (!res.ok || !result.success) throw new Error((result as any).details || result.error || "Bulk discovery failed");
             return result.niches;
         } catch (err: unknown) {
             if (err instanceof Error) {
@@ -171,7 +171,7 @@ export function useFactory() {
                 throw new Error(message);
             }
 
-            if (!res.ok || !result.success) throw new Error(result.error || "Chunk generation failed");
+            if (!res.ok || !result.success) throw new Error((result as any).details || result.error || "Chunk generation failed");
             return result.products;
         } catch (err: unknown) {
             if (err instanceof Error) {
