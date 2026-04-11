@@ -1,9 +1,19 @@
 {
-  "name": "ai-saas",
+  "name": "trendforge-ai-monorepo",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "workers/*"
+  ],
+  "description": "TrendForge AI SaaS Monorepo",
   "main": "index.js",
   "scripts": {
+    "dev": "cd apps/app && npm run dev",
+    "build": "cd apps/app && npm run build",
+    "start": "cd apps/app && npm run start",
+    "lint": "cd apps/app && npm run lint",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,6 +25,7 @@
     "openai": "^6.22.0"
   },
   "devDependencies": {
-    "vercel": "^50.25.0"
+  "prisma": "5.22.0",
+  "vercel": "^50.25.0"
   }
 }

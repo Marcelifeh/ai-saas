@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-cyan: #00f0ff;
+  --color-brand-purple: #7000ff;
+  --color-brand-green: #00ffa3;
+  --color-brand-pink: #ff0055;
+}
+
+@layer base {
+  body {
+    background-color: #0a0a0a;
+    color: #ffffff;
+  }
+}

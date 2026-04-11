@@ -1,0 +1,20 @@
+{
+    "name": "autopilot-worker",
+    "version": "1.0.0",
+    "private": true,
+    "main": "dist/index.js",
+    "scripts": {
+        "start": "node dist/index.js",
+        "dev": "ts-node src/index.ts",
+        "build": "tsc"
+    },
+    "dependencies": {
+        "@trendforge/db": "*",
+        "@trendforge/queue": "*",
+        "dotenv": "^16.4.5"
+    },
+    "devDependencies": {
+        "ts-node": "^10.9.2",
+        "typescript": "^5.4.5"
+    }
+}

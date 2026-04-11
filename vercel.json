@@ -1,112 +1,12 @@
 {
     "version": 2,
-    "builds": [
-        {
-            "src": "api/core.js",
-            "use": "@vercel/node",
-            "config": {
-                "maxDuration": 60
-            }
-        },
-        {
-            "src": "api/auth.js",
-            "use": "@vercel/node",
-            "config": {
-                "maxDuration": 10
-            }
-        },
-        {
-            "src": "api/analytics.js",
-            "use": "@vercel/node",
-            "config": {
-                "maxDuration": 30
-            }
-        },
-        {
-            "src": "public/index.html",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "public/logo.svg",
-            "use": "@vercel/static"
+    "framework": "nextjs",
+    "buildCommand": "cd apps/app && npm install && npm run build",
+    "outputDirectory": "apps/app/.next",
+    "installCommand": "npm install",
+    "functions": {
+        "apps/app/app/api/**": {
+            "maxDuration": 60
         }
-    ],
-    "routes": [
-        {
-            "src": "/api/generate",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/bulk-generate",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/discover",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/discover-advanced",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/generate-prompt",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/autopilot",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/usage",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/generate-chunk",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/health",
-            "dest": "/api/core.js"
-        },
-        {
-            "src": "/api/auth/demo",
-            "dest": "/api/auth.js"
-        },
-        {
-            "src": "/api/workspace/list",
-            "dest": "/api/auth.js"
-        },
-        {
-            "src": "/api/workspace/switch",
-            "dest": "/api/auth.js"
-        },
-        {
-            "src": "/api/workspace/invite",
-            "dest": "/api/auth.js"
-        },
-        {
-            "src": "/api/analytics/insights",
-            "dest": "/api/analytics.js"
-        },
-        {
-            "src": "/api/analytics/workspace",
-            "dest": "/api/analytics.js"
-        },
-        {
-            "src": "/api/billing/create-checkout-session",
-            "dest": "/api/analytics.js"
-        },
-        {
-            "src": "/api/billing/webhook",
-            "dest": "/api/analytics.js"
-        },
-        {
-            "src": "/logo.svg",
-            "dest": "/public/logo.svg"
-        },
-        {
-            "src": "/(.*)",
-            "dest": "/public/index.html"
-        }
-    ]
+    }
 }
