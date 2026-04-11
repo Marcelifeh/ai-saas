@@ -14,6 +14,7 @@ async function getAuthToken(req: NextRequest | Request) {
         const token = await getToken({
             req: req as NextRequest,
             secret: NEXTAUTH_SECRET,
+            secureCookie: process.env.NODE_ENV === "production",
         });
         if (!token) return null;
         // Shape it to match the session.user interface the rest of the code expects
