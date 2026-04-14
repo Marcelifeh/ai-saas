@@ -1,12 +1,15 @@
-import { redirect } from 'next/navigation'
-import { auth } from './api/auth/[...nextauth]/route'
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "@/lib/auth/authOptions";
+
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
-    const session = await auth()
+    const session = await getServerSession(authOptions);
 
     if (session) {
-        redirect('/dashboard')
+        redirect("/dashboard");
     } else {
-        redirect('/login')
+        redirect("/login");
     }
 }
