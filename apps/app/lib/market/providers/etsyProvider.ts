@@ -1,6 +1,35 @@
 import { MarketData } from "./types";
 import { getServerEnv } from "@/lib/utils/serverEnv";
 
+function getMedian(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function extractEtsyPrice(item: any): number {
+    const detected = item?.rich_snippet?.bottom?.detected_extensions;
+    if (typeof detected?.price_from === "number" && typeof detected?.price_to === "number") {
+        return (detected.price_from + detected.price_to) / 2;
+    }
+
+    if (typeof detected?.price_from === "number") {
+        return detected.price_from;
+    }
+
+    return 0;
+}
+
+function extractEtsyReviews(item: any): number {
+    const detected = item?.rich_snippet?.bottom?.detected_extensions;
+    if (typeof detected?.reviews === "number") {
+        return detected.reviews;
+    }
+
+    return 0;
+}
+
 /**
  * Etsy Market Data Provider v1.3
  * Uses SerpAPI to fetch live search results.
@@ -16,20 +45,28 @@ export async function fetchEtsyData(keyword: string): Promise<MarketData> {
 
     try {
         const params = new URLSearchParams({
-            engine: "etsy",
-            q: keyword,
-            api_key: apiKey
+            engine: "google",
+            q: `site:etsy.com/listing ${keyword}`,
+            api_key: apiKey,
+            google_domain: "google.com",
+            num: "20",
         });
 
-        const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-        const data = await response.json();
+        const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+        });
+        const data = await response.json().catch(() => null);
 
-        if (!data.organic_results || data.error) {
-            console.warn(`[EtsyProvider] Live API Error: ${data.error || 'No results'}. Falling back to Mock.`);
+        if (!response.ok || !data?.organic_results || data?.error) {
+            console.warn(`[EtsyProvider] Live API Error: ${data?.error || `HTTP ${response.status}` || "No results"}. Falling back to Mock.`);
             return mockEtsyFallback(keyword);
         }
 
-        const rawResults = data.organic_results || [];
+        const rawResults = (data.organic_results || []).filter((item: any) => {
+            const link = typeof item?.link === "string" ? item.link : "";
+            return link.includes("etsy.com/listing");
+        });
         const listingsRaw = data.search_information?.total_results || 0;
         
         // 1. Institutional Cap: 15k Listing limit for Etsy
@@ -37,15 +74,8 @@ export async function fetchEtsyData(keyword: string): Promise<MarketData> {
 
         // 2. Outlier-Resistant Median Filter (Top 20 results)
         const sample = rawResults.slice(0, 20);
-        const prices = sample.map((p: any) => p.price?.amount || 0).filter((p: number) => p > 0);
-        const reviews = sample.map((p: any) => p.reviews || 0);
-
-        const getMedian = (arr: number[]) => {
-            if (arr.length === 0) return 0;
-            const sorted = [...arr].sort((a, b) => a - b);
-            const mid = Math.floor(sorted.length / 2);
-            return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-        };
+        const prices = sample.map(extractEtsyPrice).filter((value: number) => value > 0);
+        const reviews = sample.map(extractEtsyReviews).filter((value: number) => value > 0);
 
         return {
             keyword,

@@ -1,6 +1,46 @@
 import { MarketData } from "./types";
 import { getServerEnv } from "@/lib/utils/serverEnv";
 
+function getMedian(values: number[]): number {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function extractAmazonPrice(item: any): number {
+    if (typeof item?.extracted_price === "number") {
+        return item.extracted_price;
+    }
+
+    if (typeof item?.price === "object" && typeof item.price?.value === "number") {
+        return item.price.value;
+    }
+
+    if (typeof item?.price === "string") {
+        const parsed = Number(item.price.replace(/[^0-9.]/g, ""));
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+
+    return 0;
+}
+
+function extractAmazonReviews(item: any): number {
+    if (typeof item?.reviews === "number") {
+        return item.reviews;
+    }
+
+    if (typeof item?.ratings_total === "number") {
+        return item.ratings_total;
+    }
+
+    if (typeof item?.rating_count === "number") {
+        return item.rating_count;
+    }
+
+    return 0;
+}
+
 /**
  * Amazon Market Data Provider v1.3
  * Uses SerpAPI to fetch live search results.
@@ -17,17 +57,20 @@ export async function fetchAmazonData(keyword: string): Promise<MarketData> {
     try {
         const params = new URLSearchParams({
             engine: "amazon",
-            q: keyword,
+            k: keyword,
             api_key: apiKey,
             amazon_domain: "amazon.com",
             type: "search"
         });
 
-        const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`);
-        const data = await response.json();
+        const response = await fetch(`https://serpapi.com/search.json?${params.toString()}`, {
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+        });
+        const data = await response.json().catch(() => null);
 
-        if (!data.organic_results || data.error) {
-            console.warn(`[AmazonProvider] Live API Error: ${data.error || 'No results'}. Falling back to Mock.`);
+        if (!response.ok || !data?.organic_results || data?.error) {
+            console.warn(`[AmazonProvider] Live API Error: ${data?.error || `HTTP ${response.status}` || "No results"}. Falling back to Mock.`);
             return mockAmazonFallback(keyword);
         }
 
@@ -39,15 +82,8 @@ export async function fetchAmazonData(keyword: string): Promise<MarketData> {
 
         // 2. Outlier-Resistant Median Filter (Top 20 results)
         const sample = rawResults.slice(0, 20);
-        const prices = sample.map((p: any) => p.price?.value || 0).filter((p: number) => p > 0);
-        const reviews = sample.map((p: any) => p.reviews || 0);
-
-        const getMedian = (arr: number[]) => {
-            if (arr.length === 0) return 0;
-            const sorted = [...arr].sort((a, b) => a - b);
-            const mid = Math.floor(sorted.length / 2);
-            return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-        };
+        const prices = sample.map(extractAmazonPrice).filter((value: number) => value > 0);
+        const reviews = sample.map(extractAmazonReviews).filter((value: number) => value > 0);
 
         return {
             keyword,
