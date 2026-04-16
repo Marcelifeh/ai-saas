@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "cd apps/app && npm run dev",
     "build": "cd apps/app && npm run build",
+    "vercel-build": "node scripts/vercel-build.js",
     "start": "cd apps/app && npm run start",
     "lint": "cd apps/app && npm run lint",
     "test": "echo \"Error: no test specified\" && exit 1"
