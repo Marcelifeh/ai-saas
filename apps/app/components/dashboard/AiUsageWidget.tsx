@@ -87,7 +87,9 @@ export function AiUsageWidget() {
     }
 
     const used = usage.totalTokens24h;
-    const limit = limits?.totalTokens24h ?? null;
+    const rawLimit = limits?.totalTokens24h ?? null;
+    const isUnlimited = rawLimit === null || rawLimit >= Number.MAX_SAFE_INTEGER;
+    const limit = isUnlimited ? null : rawLimit;
     const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : null;
 
     const planLabel = plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "Current";
@@ -115,7 +117,9 @@ export function AiUsageWidget() {
                         percent !== null && percent >= 90 ? 'text-red-300/90' : percent !== null && percent >= 70 ? 'text-yellow-300/90' : 'text-emerald-300/80'
                     }`}>AI usage today</div>
                     <div className="text-sm font-semibold text-gray-100">
-                        {limit
+                        {isUnlimited
+                            ? `${used.toLocaleString()} tokens used today · Unlimited`
+                            : limit
                             ? `${used.toLocaleString()} / ${limit.toLocaleString()} tokens on your ${planLabel} plan`
                             : `${used.toLocaleString()} tokens used in the last 24h`}
                     </div>
@@ -127,7 +131,13 @@ export function AiUsageWidget() {
                 </div>
             </div>
             <div className="flex flex-col gap-2 w-full sm:w-64">
-                {percent !== null && (
+                {isUnlimited ? (
+                    <div className="flex items-center justify-end">
+                        <span className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            ∞ Unlimited · Admin
+                        </span>
+                    </div>
+                ) : percent !== null && (
                     <>
                         <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
                             <div
