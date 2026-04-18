@@ -17,7 +17,7 @@ export async function POST(req: Request): Promise<Response> {
 
     if (!stripe || !webhookSecret) {
         console.error("Stripe webhook is not fully configured.");
-        return NextResponse.json({ received: true }, { status: 200 });
+        return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
     }
 
     const signature = req.headers.get("stripe-signature");
@@ -43,7 +43,8 @@ export async function POST(req: Request): Promise<Response> {
                 const userId =
                     (session.metadata?.userId) ||
                     (session.client_reference_id);
-                const plan = (session.metadata?.plan) || "pro";
+                const plan = session.metadata?.plan;
+                if (!plan) break;
 
                 if (!userId) break;
 
@@ -57,11 +58,25 @@ export async function POST(req: Request): Promise<Response> {
                 await upsertSubscription(userId, plan, customerId, subscriptionId, undefined);
                 break;
             }
+            case "customer.subscription.deleted": {
+                const subscription = event.data.object;
+                const userId = subscription.metadata?.userId || undefined;
+                if (!userId) break;
+                try {
+                    await prisma.subscription.updateMany({
+                        where: { userId },
+                        data: { plan: "free", stripeSubId: null },
+                    });
+                } catch (err: unknown) {
+                    if (!isMissingSubscriptionTableError(err)) throw err;
+                }
+                break;
+            }
             case "customer.subscription.created":
             case "customer.subscription.updated": {
                 const subscription = event.data.object;
                 const userId = (subscription.metadata?.userId) || undefined;
-                const plan = (subscription.metadata?.plan) || "pro";
+                const plan = subscription.metadata?.plan || "pro";
 
                 if (!userId) break;
 

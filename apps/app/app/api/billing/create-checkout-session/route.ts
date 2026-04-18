@@ -104,25 +104,35 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
 
         const originEnv =
             process.env.NEXT_PUBLIC_APP_URL ||
-            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+            (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
 
-        const checkoutSession = await stripe.checkout.sessions.create({
-            mode: "subscription",
-            customer: customerId,
-            line_items: [
-                {
-                    price: activePriceId,
-                    quantity: 1,
+        if (!originEnv) {
+            return NextResponse.json(
+                { success: false, error: "NEXT_PUBLIC_APP_URL or VERCEL_URL must be set in production." },
+                { status: 500 }
+            );
+        }
+
+        const checkoutSession = await stripe.checkout.sessions.create(
+            {
+                mode: "subscription",
+                customer: customerId,
+                line_items: [
+                    {
+                        price: activePriceId,
+                        quantity: 1,
+                    },
+                ],
+                success_url: `${originEnv}/dashboard/settings?billing=success`,
+                cancel_url: `${originEnv}/dashboard/settings?billing=cancelled`,
+                client_reference_id: userId,
+                metadata: {
+                    userId,
+                    plan: planKey,
                 },
-            ],
-            success_url: `${originEnv}/dashboard/settings?billing=success`,
-            cancel_url: `${originEnv}/dashboard/settings?billing=cancelled`,
-            client_reference_id: userId,
-            metadata: {
-                userId,
-                plan: planKey,
             },
-        });
+            { idempotencyKey: `checkout-${userId}-${planKey}` }
+        );
 
         // Record or update a pending subscription shell so we can attach metadata later
         if (!existingSub) {

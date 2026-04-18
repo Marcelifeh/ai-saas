@@ -3,6 +3,9 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET;
+if (!NEXTAUTH_SECRET && process.env.NODE_ENV === "production") {
+    throw new Error("NEXTAUTH_SECRET environment variable is required in production.");
+}
 
 /**
  * Retrieves the JWT token from the request cookies.
