@@ -83,6 +83,21 @@ import {
   transformStatement,
   type NicheCategory,
 } from "./sloganEnhancer";
+import {
+  assignArchetypeToSlogan,
+  getCommunityKnowledge,
+  truthResonanceScore,
+} from "./communityKnowledgeEngine";
+import {
+  communityAuthenticityScore,
+  generateBehavioralAISlogans,
+  generateDeterministicBehavioralSlogans,
+  matchesTemplateDeathFilter,
+  passesChestPrintFilter,
+  rejectTemplateStructures,
+  wearabilityCompressionScore,
+} from "./behavioralSloganEngine";
+import { getBehavioralProfile } from "./behavioralLexicon";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -2082,6 +2097,9 @@ function scoreSlogan(
     .replace(/[.]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
+  const behavioralProfile = getBehavioralProfile(niche);
+  const assignedArchetype = assignArchetypeToSlogan(cleanedSlogan, niche);
+  const communityKnowledge = getCommunityKnowledge(niche, behavioralProfile);
 
   const wearability = computeWearability(cleanedSlogan);
   const memorability = computeMemorability(cleanedSlogan);
@@ -2106,6 +2124,9 @@ function scoreSlogan(
   const viralReadiness = computeViralReadiness(slogan);
   const clusterAlignment = computeClusterAlignment(slogan, clusters);
   const conversationalScore = computeConversationalScore(cleanedSlogan);
+  const chestPrintScore = wearabilityCompressionScore(cleanedSlogan);
+  const authenticityScore = communityAuthenticityScore(cleanedSlogan, behavioralProfile, niche);
+  const truthScore = truthResonanceScore(cleanedSlogan, niche, assignedArchetype.key, behavioralProfile);
   const modeBoost = mode === "viral" ? 5 : mode === "edgy" ? 3 : 0;
   // Apply Overused Word Penalty (Suppression without banning)
   let overusedPenalty = 0;
@@ -2120,8 +2141,8 @@ function scoreSlogan(
   try {
     const nlow = (niche || "").toLowerCase().trim();
     if (nlow && cleanedSlogan.toLowerCase().includes(nlow)) {
-      // Stronger penalty for anchor spam
-      overusedPenalty += 8;
+      const hasCommunityReference = communityKnowledge.insiderPhrases.some((value) => cleanedSlogan.toLowerCase().includes(value.toLowerCase()));
+      overusedPenalty += hasCommunityReference ? 5 : 14;
     }
   } catch (_) { /* ignore */ }
 
@@ -2132,11 +2153,15 @@ function scoreSlogan(
     }
   }
 
+  if (!passesChestPrintFilter(cleanedSlogan)) {
+    overusedPenalty += 35;
+  }
+
   // Boost truly human / conversational phrases
   const humanBoost = isHumanPhrase(cleanedSlogan) ? 10 : 0;
 
   const rawBase =
-    wearability * 0.12 +
+    wearability * 0.08 +
     memorability * 0.10 +
     identityScore * 0.1 +
     emotionScore * 0.08 +
@@ -2156,6 +2181,9 @@ function scoreSlogan(
     patternBoost * 0.05 +
     viralReadiness * 0.3 +
     conversationalScore * 0.12 +
+    chestPrintScore * 0.28 +
+    authenticityScore * 0.22 +
+    truthScore * 0.18 +
     humanBoost +
     clusterAlignment * 0.4 +
     modeBoost -
@@ -2647,11 +2675,16 @@ function buildEliteSloganEngine(input: SloganEngineInput): SloganEngineResult {
   const persona = inferPersona(niche, audience);
   const salesSignals = normalizeSalesSignals(rawSignals);
 
-  const rawSlogans = generateDynamicSlogans(input).filter((s) => !isGeneric(s));
+  const seededInputSlogans = normalizeStrings(input.shirtSlogans);
+  const deterministicBehavioral = generateDeterministicBehavioralSlogans(niche, audience);
+  const rawSlogans = rejectTemplateStructures(
+    dedupeStrings([...seededInputSlogans, ...deterministicBehavioral, ...generateDynamicSlogans(input)]),
+  ).filter((s) => !isGeneric(s));
   const clusters: EmotionCluster[] = detectEmotionalClustersForNiche(niche);
 
   const ranked: RankedSlogan[] = rawSlogans.map((slogan) => {
     const clean = cleanSlogan(slogan);
+    const behavioralProfile = getBehavioralProfile(niche, audience);
     const scored = scoreSlogan(clean, salesSignals, mode, niche, {});
     const reasons = buildReasons(scored);
     const bucket = chooseBucket(scored.finalScore, scored.hookScore);
@@ -2662,19 +2695,24 @@ function buildEliteSloganEngine(input: SloganEngineInput): SloganEngineResult {
       pattern,
       persona: persona.label,
       personaKey: persona.key,
-      tags: deriveTags(clean, niche, audience),
+      tags: dedupeStrings([
+        ...deriveTags(clean, niche, audience),
+        ...behavioralProfile.slang.slice(0, 2),
+        ...behavioralProfile.emotionalTriggers.slice(0, 1),
+      ]).slice(0, 8),
       reasons,
       salesSignals,
       bucket,
       hasSalesEvidence: (salesSignals.confidence ?? 0) > 0 || Object.keys(salesSignals).length > 0,
     };
-  });
+  }).filter((entry) => !matchesTemplateDeathFilter(entry.slogan) && passesChestPrintFilter(entry.slogan));
 
   // Apply dynamic normalization across the initial batch so component weights are meaningful
   const normalizedBatch = applyBatchNormalization(ranked);
 
   // use normalized batch for downstream sorting/collections
-  const sorted = diversifyRanked(dedupeRanked(sortRanked(normalizedBatch)), niche);
+  const sorted = diversifyRanked(dedupeRanked(sortRanked(normalizedBatch)), niche)
+    .filter((entry) => !matchesTemplateDeathFilter(entry.slogan));
   const collections = buildCollections(sorted);
   
   const ELITE_THRESHOLD = 72;
@@ -2700,189 +2738,22 @@ export function enhanceSlogans(input: SloganEngineInput): SloganEngineResult {
 
 export async function runEliteSloganEngine(input: SloganEngineInput): Promise<SloganEngineResult> {
   const base = buildEliteSloganEngine(input);
-
-  // ── Phase 1: Load learned pattern weights from DB ──────────────────────────
-  const patternBoostMap = new Map<string, number>();
-  try {
-    const nicheKey = input.niche.trim().toLowerCase().slice(0, 60);
-    const patterns = await prisma.sloganPattern.findMany({
-      where: { niche: nicheKey },
-      orderBy: { score: "desc" },
-      take: 30,
-    });
-    for (const p of patterns) {
-      // Composite boost: Bayesian score factor + CTR engagement + conversion sales proof
-      // score 1.0 = neutral, >1 = proven, <1 = underperformer
-      const scoreAdj = clamp((p.score - 1.0) * 18, -15, 20);
-      const ctrBoost = ((p as unknown as Record<string, number>).ctr ?? 0) * 50;
-      const convBoost = ((p as unknown as Record<string, number>).conversion ?? 0) * 100;
-      const boost = Math.round(clamp(scoreAdj + ctrBoost + convBoost, -15, 25));
-      patternBoostMap.set(p.pattern.toLowerCase(), boost);
-    }
-  } catch (_) { /* non-blocking — DB may not be seeded yet */ }
-
-  // ── Phase 2: Apply boosts and re-rank ─────────────────────────────────────
   let ranked = base.ranked;
-  if (patternBoostMap.size > 0) {
-    ranked = base.ranked.map((r) => {
-      const patternKey = (r.pattern || detectPattern(r.slogan)).toLowerCase();
-      const boost = patternBoostMap.get(patternKey) ?? 0;
-      if (boost === 0) return r;
-      return { ...r, score: clamp(r.score + boost, 0, 100) };
-    });
-    ranked = dedupeRanked(sortRanked(ranked));
-  }
 
-  // Load learned weights and apply to current ranked set to bias by real performance
+  // Behavior-first generation: profile -> AI synthesis -> scoring
   try {
-    const learnedWeights = await loadPatternWeights(input.niche);
-    if (learnedWeights && Object.keys(learnedWeights).length > 0) {
-      ranked = ranked.map((r) => {
-        const boosted = applyLearningBoost(r.slogan, r.score, learnedWeights, input.niche);
-        const explored = applyExploration(boosted, 0.08); // small epsilon
-        return { ...r, score: clamp(Math.round(explored), 0, 100), finalScore: clamp(Math.round(explored), 0, 100) } as RankedSlogan;
-      });
-      ranked = dedupeRanked(sortRanked(ranked));
-    }
-  } catch (_) { /* non-blocking */ }
-
-  // ── Phase 2.5: AI-generated niche-specific slogans ─────────────────────────
-  try {
-    // Sanitize niche before passing to LLM — remove any celebrity/brand names
     const safeNiche = runSafetyEngine(input.niche).sanitizedNiche;
     const nicheCategories = detectNicheCategories(input.niche);
-
-    const dominantClusters = base.ranked
-      .flatMap((r) => r.tags ?? [])
-      .reduce<Record<string, number>>((acc, tag) => { acc[tag] = (acc[tag] ?? 0) + 1; return acc; }, {});
-    const topClusterNames = Object.entries(dominantClusters)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([k]) => k);
-
-    // ── Pattern Expansion (LLM-driven pattern family growth)
-    // Use Behavioral Trigger Engine to bias LLM towards behavior-first patterns
-    const behaviors = extractBehaviorSignals(input.niche);
-    try {
-      const expandedPatterns = await expandPatternFamilies(safeNiche, 6, behaviors).catch(() => []);
-      const validPatterns = (expandedPatterns || []).filter(isValidPattern).slice(0, 6);
-      // --- Mutate top pattern families to discover new idea classes
-      let mutatedPatterns: string[] = [];
-      try {
-        // Prefer DB top patterns (if present), otherwise infer from current ranked set
-        let baseFamilies = (await getTopPatterns(safeNiche)).map((p: any) => (p.pattern || String(p).slice(0, 60)));
-        if (!baseFamilies || baseFamilies.length === 0) {
-          baseFamilies = [...new Set(base.ranked?.slice(0, 12).map((r: any) => r.pattern || detectPattern(r.slogan)))] as string[];
-        }
-        baseFamilies = baseFamilies.slice(0, 5);
-
-        for (const fam of baseFamilies) {
-          const muts = await mutatePatternFamily(fam, safeNiche, 8, behaviors).catch(() => []);
-          if (muts && muts.length > 0) mutatedPatterns.push(...muts);
-        }
-      } catch (_) { /* non-blocking mutation failure */ }
-
-        const validMutations = mutatedPatterns.filter(isValidPattern).slice(0, 18);
-      if (validMutations.length > 0) {
-        if (!process.env.DISABLE_PATTERN_PERSIST) {
-          void Promise.allSettled(validMutations.map((p) => learnPattern(p, undefined, input.niche)));
-        }
-        // Generate behavioral-first slogans from mutations via LLM (primary)
-        const behaviors = extractBehaviorSignals(input.niche);
-        let mutatedCandidates: string[] = [];
-        try {
-          mutatedCandidates = await generateBehavioralSlogans({ niche: input.niche, behaviors: behaviors.concat(validMutations.slice(0, 6)), count: 48 });
-        } catch (_) {
-          mutatedCandidates = buildFromPatterns(validMutations, input.niche).slice(0, 48).filter(isHumanPhrase);
-        }
-        if (mutatedCandidates.length > 0) {
-          const salesSignals = normalizeSalesSignals(input.salesSignals);
-          const mutatedRanked = mutatedCandidates
-            .filter((s) => !isGeneric(s))
-            .map((slogan) => {
-              const scored = scoreSlogan(slogan, salesSignals, base.mode as SloganMode, input.niche, {});
-              const mergedFinal = clamp(scored.finalScore, 0, 100);
-              const pattern = detectPattern(slogan);
-              const reasons = buildReasons({ ...scored, finalScore: mergedFinal } as any);
-              const bucket = chooseBucket(mergedFinal, scored.hookScore);
-              return {
-                ...scored,
-                score: mergedFinal,
-                finalScore: mergedFinal,
-                slogan,
-                pattern,
-                persona: base.persona,
-                personaKey: base.personaKey,
-                tags: deriveTags(slogan, input.niche, input.audience),
-                reasons,
-                salesSignals,
-                bucket,
-                hasSalesEvidence: false,
-              } as RankedSlogan;
-            });
-
-        ranked = dedupeRanked(sortRanked([...mutatedRanked, ...ranked]));
-        ranked = applyBatchNormalization(ranked);
-        }
-      }
-      if (validPatterns.length > 0) {
-        // Persist candidate patterns for future learning (non-blocking)
-        // Respect DISABLE_PATTERN_PERSIST to avoid DB writes during test runs
-        if (!process.env.DISABLE_PATTERN_PERSIST) {
-          void Promise.allSettled(validPatterns.map((p) => learnPattern(p, undefined, input.niche)));
-        }
-
-        // Primary: ask LLM to generate behavior-aware slogans from returned patterns
-        const behaviors = extractBehaviorSignals(input.niche);
-        let expandedCandidates: string[] = [];
-        try {
-          expandedCandidates = await generateBehavioralSlogans({ niche: input.niche, behaviors: behaviors.concat(validPatterns.slice(0, 4)), count: 24 });
-          expandedCandidates = expandedCandidates.filter(isHumanPhrase);
-        } catch (_) {
-          expandedCandidates = buildFromPatterns(validPatterns, input.niche).slice(0, 24).filter(isHumanPhrase);
-        }
-        if (expandedCandidates.length > 0) {
-          const salesSignals = normalizeSalesSignals(input.salesSignals);
-          const expandedRanked = expandedCandidates
-            .filter((s) => !isGeneric(s))
-            .map((slogan) => {
-              const scored = scoreSlogan(slogan, salesSignals, base.mode as SloganMode, input.niche, {});
-              const mergedFinal = clamp(scored.finalScore, 0, 100);
-              const pattern = detectPattern(slogan);
-              const reasons = buildReasons({ ...scored, finalScore: mergedFinal } as any);
-              const bucket = chooseBucket(mergedFinal, scored.hookScore);
-              return {
-                ...scored,
-                score: mergedFinal,
-                finalScore: mergedFinal,
-                slogan,
-                pattern,
-                persona: base.persona,
-                personaKey: base.personaKey,
-                tags: deriveTags(slogan, input.niche, input.audience),
-                reasons,
-                salesSignals,
-                bucket,
-                hasSalesEvidence: false,
-              } as RankedSlogan;
-            });
-
-          ranked = dedupeRanked(sortRanked([...expandedRanked, ...ranked]));
-          ranked = applyBatchNormalization(ranked);
-        }
-      }
-    } catch (_) { /* non-blocking pattern expansion failure */ }
-
-    const rawAiSlogans = await generateAISlogans(
-      safeNiche,
-      input.audience,
-      base.persona,
-      base.mode as SloganMode,
-      topClusterNames,
-    );
+    const profile = getBehavioralProfile(safeNiche, input.audience);
+    const rawAiSlogans = await generateBehavioralAISlogans({
+      niche: safeNiche,
+      audience: input.audience,
+      profile,
+      count: 36,
+    });
 
     // Enhancement layer: safety filter → punchier transforms → cross-niche sort
-    const { slogans: aiSlogans } = filterAndEnhanceSlogans(rawAiSlogans, input.niche);
+    const { slogans: aiSlogans } = filterAndEnhanceSlogans(rejectTemplateStructures(rawAiSlogans), input.niche);
 
     if (aiSlogans.length > 0) {
       const salesSignals = normalizeSalesSignals(input.salesSignals);
@@ -2895,8 +2766,10 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         });
       });
 
-      const aiRanked: RankedSlogan[] = aiSlogans
+      const aiRanked: RankedSlogan[] = rejectTemplateStructures(aiSlogans)
         .filter((slogan) => !isGeneric(slogan))
+        .filter((slogan) => !matchesTemplateDeathFilter(slogan))
+        .filter((slogan) => passesChestPrintFilter(slogan))
         .map((slogan) => {
         const scored = scoreSlogan(slogan, salesSignals, base.mode as SloganMode, input.niche, wordFreq, []);
         // Merit-based bonuses (no flat +8 bias):
@@ -2924,17 +2797,18 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
           hasSalesEvidence: false,
         };
       });
-        ranked = dedupeRanked(sortRanked([...aiRanked, ...ranked]));
-        // Re-normalize after merging AI-generated slogans and applying pattern boosts
-        ranked = applyBatchNormalization(ranked);
+      ranked = dedupeRanked(sortRanked([...aiRanked, ...ranked]));
+      // Re-normalize after merging behavior-first AI slogans
+      ranked = applyBatchNormalization(ranked);
     }
   } catch (_) { /* non-blocking — AI generation is additive only */ }
 
   // Apply post-generation safety filter to the full ranked set
-  // (template slogans can't contain IP, but filter is cheap and defensive)
   ranked = ranked.filter((r) => isSafeSlogan(r.slogan));
 
-  // Remove overly-generic brandy lines before final ranking
+  // Template death filter is hard rejection, not a score penalty.
+  ranked = ranked.filter((r) => !matchesTemplateDeathFilter(r.slogan));
+  ranked = ranked.filter((r) => passesChestPrintFilter(r.slogan));
   ranked = ranked.filter((r) => !isTooGeneric(r.slogan));
 
   // ── Phase 2.75: Cost-controlled LLM refinement of top candidates ───────
@@ -2955,6 +2829,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         for (let i = 0; i < toRefine.length; i++) {
           const original = refineCandidates.find((c) => c.slogan === toRefine[i]);
           const newText = cleanSlogan(refined[i] || toRefine[i]);
+          if (matchesTemplateDeathFilter(newText) || !passesChestPrintFilter(newText)) continue;
           const scored = scoreSlogan(newText, salesSignals, base.mode as SloganMode, input.niche, {});
           const mergedFinal = clamp(Math.round(scored.finalScore), 0, 100);
           rescored.push({
@@ -2991,13 +2866,11 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   const finalSloganObjs = eliteSloganObjs.length >= 5 ? eliteSloganObjs.slice(0, 5) : ranked.slice(0, 5);
   const topSlogans = dedupeStrings(finalSloganObjs.map((r) => r.slogan));
 
-  // ── Phase 4: Write best-performing pattern back to DB for future runs ──────
-    try {
+  // ── Phase 4: Market sync (pattern persistence intentionally skipped) ───────
+  try {
     const topSlogan = topSlogans[0];
     if (topSlogan) {
-      const tasks: Promise<any>[] = [syncMarketplace(input.niche, topSlogan)];
-      if (!process.env.DISABLE_PATTERN_PERSIST) tasks.push(learnPattern(detectPattern(topSlogan), topSlogan, input.niche));
-      await Promise.allSettled(tasks);
+      await Promise.allSettled([syncMarketplace(input.niche, topSlogan)]);
     }
   } catch (_) { /* non-blocking */ }
 
@@ -3097,13 +2970,8 @@ export async function generateHighPotentialSlogans(
 // (previous simple wrapper removed — use generateHighPotentialSlogans with execMode/context)
 
 export function generateDynamicSlogans(input: SloganEngineInput): string[] {
-  const { niche, audience, mode: modeInput } = input;
-  const mode = normalizeMode(modeInput);
-  const persona = inferPersona(niche, audience);
-  const lexicon = buildNicheLexicon(input, persona, mode);
-  const identities = dedupeStrings([...deriveNicheIdentities(niche, persona.key), ...lexicon.anchors]).slice(0, 6);
-  const emotions = dedupeStrings([...deriveNicheEmotions(niche, persona.key), ...lexicon.emotionWords]).slice(0, 6);
-  return dedupeStrings(buildNicheSlogans(niche, identities, emotions, mode, audience, normalizeSalesSignals(input.salesSignals))).slice(0, 24);
+  const { niche, audience } = input;
+  return rejectTemplateStructures(generateDeterministicBehavioralSlogans(niche, audience)).slice(0, 24);
 }
 
 export function extractPersonas(niche: string, audience?: string): string[] {

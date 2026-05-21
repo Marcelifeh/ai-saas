@@ -25,7 +25,7 @@ for (const line of envText.split("\n")) {
     if (!process.env[key]) process.env[key] = val;
 }
 
-const { PrismaClient } = require("@prisma/client");
+const { PrismaClient } = require("../packages/db/generated/client");
 const prisma = new PrismaClient();
 
 // All statements are separated by "---STMT---" so we never split inside SQL strings.

@@ -1,6 +1,6 @@
-// Use @prisma/client directly. The generated client lives at the monorepo root
-// node_modules because prisma generate was run from the root workspace.
-import { PrismaClient } from "@prisma/client";
+// Use the package-local generated client so Windows builds do not rewrite
+// the shared root node_modules Prisma engine during app prebuild.
+import { PrismaClient } from "../../../../packages/db/generated/client";
 
 const prismaClientSingleton = () => new PrismaClient();
 

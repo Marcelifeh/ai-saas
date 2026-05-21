@@ -1,5 +1,5 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "../../../../packages/db/generated/client";
 import { prisma } from "@/lib/db/prisma";
 import { globalCache } from "@/lib/utils/cache";
 import { hasServerEnv } from "@/lib/utils/serverEnv";
