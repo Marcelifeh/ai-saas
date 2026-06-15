@@ -1,6 +1,7 @@
 import "server-only";
 import { globalCache } from "../utils/cache";
 import { getServerEnv } from "@/lib/utils/serverEnv";
+import { safeJson } from "@/lib/utils/safeJson";
 import { getDynamicContext } from "./trendContext";
 import { chatCompletionSafe, createEmbeddingsSafe } from "./aiGateway";
 import {
@@ -22,6 +23,7 @@ const REDDIT_SNAPSHOT_KEY = "hot_titles_top3";
 const REDDIT_SNAPSHOT_TTL_MS = 90 * 60 * 1000;
 const HACKER_NEWS_SNAPSHOT_KEY = "top_stories_titles";
 const HACKER_NEWS_TTL_MS = 45 * 60 * 1000;
+const REDDIT_USER_AGENT = "TrendForgeAI/1.0 (+https://trendforge.local)";
 
 // v1.2 Institutional Signal Weights
 const SIGNAL_WEIGHTS = {
@@ -611,6 +613,16 @@ const SUBREDDITS = [
     "careerguidance"
 ];
 
+interface RedditListingResponse {
+    data?: {
+        children?: Array<{
+            data?: {
+                title?: unknown;
+            };
+        }>;
+    };
+}
+
 export async function getRedditTrends(): Promise<TrendSignalSourceResult> {
     const health = await getSourceHealth("reddit");
     if (isSourceInCooldown(health)) {
@@ -632,12 +644,26 @@ export async function getRedditTrends(): Promise<TrendSignalSourceResult> {
     await Promise.allSettled(sources.map(async (sub) => {
         try {
             const res = await fetch(
-                `https://www.reddit.com/r/${sub}/hot.json?limit=15`
+                `https://www.reddit.com/r/${sub}/hot.json?limit=15`,
+                {
+                    headers: {
+                        accept: "application/json",
+                        "user-agent": REDDIT_USER_AGENT,
+                    },
+                },
             );
-            const json = await res.json();
-            if (json && json.data && json.data.children) {
-                json.data.children.forEach((post: any) => {
-                    titles.push(post.data.title);
+            if (!res.ok) {
+                throw new Error(`Reddit returned ${res.status}${res.statusText ? " " + res.statusText : ""}`);
+            }
+
+            const json = await safeJson<RedditListingResponse>(res);
+            const posts = json.data?.children;
+            if (Array.isArray(posts)) {
+                posts.forEach((post) => {
+                    const title = post.data?.title;
+                    if (typeof title === "string" && title.trim().length > 0) {
+                        titles.push(title);
+                    }
                 });
             }
         } catch (err) {

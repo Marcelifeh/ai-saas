@@ -5,13 +5,14 @@ import { detectPlatform, PLATFORM_RULES } from "../ai/promptBuilder";
 import { globalCache } from "../utils/cache";
 import { chatCompletionSafe } from "../ai/aiGateway";
 import { TrendSignalSourceResult } from "../ai/trendEngine";
-import { enhanceSlogans, runEliteSloganEngine, normalizeImagePrompts, refineWithGPT4o } from "../ai/sloganEngine";
+import { runEliteSloganEngine, normalizeImagePrompts } from "../ai/sloganEngine";
 import { getPersistedSalesSignalsForRankedSlogans, mergeSalesSignalsInputs } from "./salesFeedbackService";
 import { checkCompliance, filterSafeSlogans } from "./complianceEngine";
 import { prisma } from "../db/prisma";
 import { getMarketData } from "../market/marketAggregator";
 import { computeOpportunity, classifyNicheIntent } from "../market/opportunityEngine";
 import { generateMarketInsights } from "../ai/marketInsightEngine";
+import { logError } from "../utils/logger";
 
 export interface BulkDiscoveryResult {
     niches: any[];
@@ -83,28 +84,20 @@ function alignImagePromptsToSlogans(targetSlogans: string[], sourceSlogans: unkn
 async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string) {
     const sloganMode = detectSloganMode(style);
 
-    // Fast sync pass — only used to get initial rankings for sales-signal lookup
-    const initialRanked = enhanceSlogans({
-        niche,
-        audience,
-        style,
-        shirtSlogans: parsed?.shirtSlogans,
-        imagePrompts: parsed?.imagePrompts,
-        salesSignals: parsed?.salesSignals,
-        mode: sloganMode,
-    }).ranked;
-
     const learnedSalesSignals = await getPersistedSalesSignalsForRankedSlogans({
         userId,
         niche,
         platform,
-        rankedSlogans: initialRanked,
+        rankedSlogans: [],
+    }).catch((err: unknown) => {
+        logError("Learned sales signals skipped", err);
+        return {};
     });
 
     const mergedSalesSignals = mergeSalesSignalsInputs(parsed?.salesSignals, learnedSalesSignals);
 
     // Full async engine: applies DB pattern-score boosts + merged sales signals
-    let sloganEngine = await runEliteSloganEngine({
+    const sloganEngine = await runEliteSloganEngine({
         niche,
         audience,
         style,
@@ -113,24 +106,6 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         salesSignals: mergedSalesSignals,
         mode: sloganMode,
     });
-
-    // Elite Refinement Pass (gpt-4o) for Top candidates
-    const topScored = sloganEngine.ranked.slice(0, 5).map(r => r.slogan);
-    if (topScored.length > 0) {
-        const refinedSlogans = await refineWithGPT4o(topScored, niche, audience);
-        
-        // Re-inject refined slogans into the engine result (requires a second ranking pass)
-        const refinedEngine = await runEliteSloganEngine({
-            niche,
-            audience,
-            style,
-            shirtSlogans: [...refinedSlogans, ...sloganEngine.slogans],
-            imagePrompts: parsed?.imagePrompts,
-            salesSignals: mergedSalesSignals,
-            mode: sloganMode,
-        });
-        sloganEngine = refinedEngine;
-    }
 
     const alignedImagePrompts = alignImagePromptsToSlogans(
         sloganEngine.slogans,
