@@ -119,7 +119,7 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
     const alignedPromptsFiltered = alignImagePromptsToSlogans(
         finalSlogans,
         sloganEngine.slogans,
-        normalizeImagePrompts(sloganEngine.slogans, alignedImagePrompts, style, niche),
+        normalizeImagePrompts(sloganEngine.slogans, alignedImagePrompts, style, niche, sloganEngine.dynamicProfile),
     );
     const complianceReport = checkCompliance({
         niche,

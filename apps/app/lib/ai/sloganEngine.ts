@@ -660,6 +660,7 @@ function cleanSlogan(text: string): string {
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/\s+/g, " ")
+    .replace(/\s*[.]+$/g, "")
     .trim();
 }
 
@@ -3232,7 +3233,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   const base = createEmptyResult(input);
 
   try {
-    const dynamicProfile = await buildDynamicNicheProfile(input.niche);
+    const dynamicProfile = await buildDynamicNicheProfile(input.niche, input.audience);
     const dynamicSlogans = await generateSlogansFromDynamicProfile(dynamicProfile, 20);
     const dynamicRanked = rankDynamicProfileSlogans(dynamicSlogans, input, dynamicProfile, base);
     if (dynamicRanked.length > 0) {
@@ -3404,6 +3405,38 @@ function buildPromptDescription(style?: string, niche?: string): string {
   return `A bold commercial t-shirt composition with niche-specific supporting graphics and a clear typographic focal point for ${nicheValue}.`;
 }
 
+function profileVisualCueText(profile?: DynamicNicheProfile): string {
+  const visualCulture = profile?.visualCulture || [];
+  const rituals = profile?.rituals || [];
+  const source = visualCulture.length >= 4 ? visualCulture : [...visualCulture, ...rituals];
+  const cues = dedupeStrings(source)
+    .map((cue) => cue.replace(/\s+/g, " ").replace(/[.;\s]+$/g, "").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  if (cues.length === 0) return "";
+  return ` Use profile-inferred visual cues when relevant: ${cues.join("; ")}. Treat them as a menu, not mandatory props`;
+}
+
+function coupleVisualsToBehavior(description: string, slogan: string, niche?: string, profile?: DynamicNicheProfile): string {
+  const context = `${niche || ""} ${slogan}`.toLowerCase();
+  let cleaned = description.replace(/[.\s]+$/g, "");
+
+  // Short-form audiences recognize the interface and ritual, not obsolete media shorthand.
+  if (/short[- ]form|scroll|algorithm|screen time|clips?|comments?/.test(context)) {
+    cleaned = cleaned
+      .replace(/\b(?:film|movie) reels?\b/gi, "phone screen")
+      .replace(/\bclapperboards?\b/gi, "caption card");
+    cleaned += ". Prefer profile-derived interface or ritual cues over generic film/TV symbols";
+  }
+
+  if (/true crime|alibi|detective|evidence|interrogation|case\b/.test(context)) {
+    cleaned += ". Keep any investigative references non-graphic and viewer-centered; no blood, skulls, weapons, bodies, victim imagery, or active crime scene";
+  }
+
+  return `${cleaned}.${profileVisualCueText(profile)}. Supporting graphics must reinforce the concrete behavior or punchline in the text, not merely illustrate the broad topic`;
+}
+
 function normalizePromptBody(body: string): string {
   return body
     .replace(/\s+/g, " ")
@@ -3474,11 +3507,12 @@ function buildStructuredImagePrompt(slogan: string, description: string, style?:
   ].join("\n");
 }
 
-export function normalizeImagePrompts(slogans: string[], prompts: unknown, style?: string, niche?: string): string[] {
+export function normalizeImagePrompts(slogans: string[], prompts: unknown, style?: string, niche?: string, profile?: DynamicNicheProfile): string[] {
   const rawPrompts = Array.isArray(prompts) ? prompts : [];
   return slogans.map((slogan, i) => {
     const base = typeof rawPrompts[i] === "string" && rawPrompts[i].trim() ? rawPrompts[i].trim() : "";
-    const description = extractPromptDescription(base, slogan, style, niche) || buildPromptDescription(style, niche);
+    const rawDescription = extractPromptDescription(base, slogan, style, niche) || buildPromptDescription(style, niche);
+    const description = coupleVisualsToBehavior(rawDescription, slogan, niche, profile);
     const structured = buildStructuredImagePrompt(slogan, description, style);
     return structured.replace(/\[STYLE\]/g, describeStyle(style));
   });

@@ -21,14 +21,24 @@ const SIGNAL_STOP_WORDS = new Set([
   "gamer",
   "gamers",
   "gaming",
+  "app",
+  "apps",
   "cozy",
+  "content",
   "culture",
   "community",
+  "crime",
+  "fan",
+  "fans",
   "people",
   "player",
   "players",
+  "sarcastic",
   "thing",
   "things",
+  "true",
+  "video",
+  "videos",
 ]);
 
 function safeString(value: unknown): string {
@@ -72,12 +82,15 @@ async function callAIJson<T extends Record<string, unknown>>(prompt: string): Pr
   }
 }
 
-export async function buildDynamicNicheProfile(niche: string): Promise<DynamicNicheProfile> {
+export async function buildDynamicNicheProfile(niche: string, audience?: string): Promise<DynamicNicheProfile> {
   const prompt = `
 Analyze this t-shirt niche as a real human subculture.
 
 NICHE:
 ${niche}
+
+AUDIENCE / SUBCULTURE QUALIFIER:
+${audience?.trim() || "Not supplied; infer the narrowest plausible participating audience."}
 
 Return ONLY valid JSON:
 {
@@ -100,6 +113,12 @@ Rules:
 - Do not use generic marketing words.
 - Do not force keywords.
 - Preserve every meaningful dimension in compound niches.
+- Treat the niche and audience together. A phrase such as "sarcastic fans of true-crime short-form video apps" has at least three interacting dimensions: content interest, humor style, and media-consumption behavior.
+- Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
+- Return at least 6 rituals and make most of them observable, repeated actions with a context, trigger, or consequence (for example, an intended five-minute scroll becoming a late night).
+- Prefer consumption behavior and community rituals over pretending the wearer performs the profession or activity shown in the content.
+- Humor about sensitive subject matter must target the viewer's habits, algorithms, commentary, or absurd decisions—not victims or harm.
+- Return at least 6 visualCulture items. Make them concrete objects, interfaces, textures, tools, settings, or recurring visual details inferred from the rituals.
 - Avoid mood-only abstractions like relaxing, comfort, aesthetic, vibes, self-care, or community unless tied to a specific action or object.
 - Do not return broad interests or aesthetics by themselves. "indie games", "retro games", "comfort", "cozy lighting", and "cute setup" are too shallow unless attached to a repeated behavior.
 - Every ritual, contradiction, frustration, status signal, embarrassing truth, and obsession should name an action, choice, object, mechanic, chore, collection, avoidance, or recurring decision.
@@ -111,6 +130,7 @@ Rules:
 - For embarrassingTruths, ask: what would members admit only to each other?
 - For obsessions, ask: what do they spend too much time doing, collecting, organizing, optimizing, checking, or avoiding?
 - If a field sounds like a mood board, rewrite it as a behavior.
+- visualCulture must name objects and interfaces the audience actually handles or sees during those rituals; avoid legacy, decorative, or literal topic symbols unless the profile supports them. Do not use wall art, posters, skulls, blood, weapons, bodies, or crime-scene props as filler.
 `;
 
   const json = await callAIJson<DynamicProfileJson>(prompt);
@@ -184,6 +204,12 @@ Rules:
 - Do NOT write category descriptions or product taglines such as "[interest], [mood]" or "[category] meets [comfort]".
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
 - Each slogan must come from a ritual, contradiction, frustration, status signal, embarrassing truth, obsession, or insider behavior in the profile.
+- Express a behavior and its recognizable truth or consequence; do not merely pair the topic with an opinion.
+- Do not imply the wearer performs a profession when the profile says they consume, watch, read, listen, scroll, or discuss it.
+- For sensitive topics, joke about audience behavior, platform culture, implausible decisions, or bad excuses—not victims or violence.
+- At least three quarters of the slogans should work without naming the niche or its broad category.
+- No more than one quarter of slogans may include broad category labels from the niche such as "true crime", "crime", "murder", "sports", "fashion", "pets", or equivalent topic names.
+- Before returning, discard slogans whose main meaning is only "I like this topic" or "this topic is dramatic/funny/interesting"; replace them with a line built from a ritual, repeated choice, interface, object, or social behavior.
 - Strongly prefer slogans that repurpose insider language, mechanics, acronyms, or category terms into a niche-specific joke.
 - Prefer concrete actions, objects, mechanics, recurring chores, and insider decisions over vibe words.
 - Keep slogans short, wearable, and human.
@@ -368,9 +394,15 @@ const categoryDescriptionWords = [
 
 const concreteBehaviorWords = [
   "arranging",
+  "binging",
+  "binge",
   "decorating",
   "checking",
+  "commenting",
   "collecting",
+  "scrolling",
+  "sharing",
+  "watching",
   "organizing",
   "sorting",
   "fishing",
@@ -392,7 +424,34 @@ const concreteBehaviorWords = [
   "daily",
   "snacks",
   "pajamas",
+  "algorithm",
+  "comments",
+  "clips",
+  "watch",
+  "history",
 ];
+
+function broadCategoryLabelCount(slogan: string, profile: DynamicNicheProfile): number {
+  const text = slogan.toLowerCase();
+  const niche = profile.niche.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const words = niche
+    .split(/\s+/)
+    .filter((word) => word.length > 3 && !["fans", "sarcastic", "short", "form", "apps"].includes(word));
+  const phraseHits = [
+    "true crime",
+    "short form",
+    "short-form",
+    "video apps",
+  ].filter((phrase) => niche.includes(phrase.replace("-", " ")) && text.includes(phrase)).length;
+  const wordHits = new Set(words.filter((word) => text.includes(word))).size;
+  return phraseHits * 2 + wordHits;
+}
+
+function hasConcreteBehaviorEvidence(slogan: string, profile: DynamicNicheProfile): boolean {
+  return ritualRecognitionScore(slogan, profile) >= 30 ||
+    truthResonanceScore(slogan, profile) >= 50 ||
+    concreteBehaviorWords.some((word) => slogan.toLowerCase().includes(word));
+}
 
 export function genericMoodPenalty(slogan: string, profile: DynamicNicheProfile): number {
   const text = slogan.toLowerCase();
@@ -473,9 +532,20 @@ export function scoreDynamicSlogan(
       categoryPenalty,
   ));
 
-  if (moodPenalty > 0 && contradiction < 25 && ritual < 25 && insider < 35) return Math.min(rawScore, 82);
-  if (contradiction < 25 && ritual < 25 && insider < 35 && truth < 45) return Math.min(rawScore, 86);
-  if (truth < 35 && authenticity < 35) return Math.min(rawScore, 82);
-  if (truth < 45 && specificity < 50) return Math.min(rawScore, 88);
-  return rawScore;
+  // Keep headroom so "excellent" remains distinguishable from "perfect".
+  // The weighted signals are intentionally saturating; compressing the upper
+  // range prevents several capped components from turning every survivor into 100.
+  const calibratedScore = Math.min(92, Math.round(12 + rawScore * 0.80));
+  const broadLabelHits = broadCategoryLabelCount(slogan, profile);
+  const hasBehaviorEvidence = hasConcreteBehaviorEvidence(slogan, profile);
+
+  if (moodPenalty > 0 && contradiction < 25 && ritual < 25 && insider < 35) return Math.min(calibratedScore, 72);
+  if (contradiction < 25 && ritual < 25 && insider < 35 && truth < 45) return Math.min(calibratedScore, 76);
+  if (truth < 35 && authenticity < 35) return Math.min(calibratedScore, 70);
+  if (truth < 45 && specificity < 50) return Math.min(calibratedScore, 80);
+  if (broadLabelHits >= 3 && !hasBehaviorEvidence) return Math.min(calibratedScore, 78);
+  if (broadLabelHits >= 2 && !hasBehaviorEvidence) return Math.min(calibratedScore, 82);
+  if (broadLabelHits >= 3 && ritual < 30) return Math.min(calibratedScore, 84);
+  if (broadLabelHits >= 2 && ritual < 30) return Math.min(calibratedScore, 87);
+  return calibratedScore;
 }
