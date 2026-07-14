@@ -3,6 +3,7 @@ export type DynamicNicheProfile = {
   dimensions: string[];
   audience: string;
   rituals: string[];
+  microRituals?: string[];
   contradictions: string[];
   frustrations: string[];
   statusSignals: string[];
@@ -97,6 +98,7 @@ Return ONLY valid JSON:
   "dimensions": [],
   "audience": "",
   "rituals": [],
+  "microRituals": [],
   "contradictions": [],
   "frustrations": [],
   "statusSignals": [],
@@ -116,6 +118,7 @@ Rules:
 - Treat the niche and audience together. A phrase such as "sarcastic fans of true-crime short-form video apps" has at least three interacting dimensions: content interest, humor style, and media-consumption behavior.
 - Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
 - Return at least 6 rituals and make most of them observable, repeated actions with a context, trigger, or consequence (for example, an intended five-minute scroll becoming a late night).
+- Return at least 8 microRituals. These must be small "that's me" moments, not category summaries: reading comments before watching, guessing the ending halfway through, sending bizarre cases to friends, falling asleep with a podcast, rewinding because comments distracted them, staying up because autoplay started another clip.
 - Prefer consumption behavior and community rituals over pretending the wearer performs the profession or activity shown in the content.
 - Humor about sensitive subject matter must target the viewer's habits, algorithms, commentary, or absurd decisions—not victims or harm.
 - Return at least 6 visualCulture items. Make them concrete objects, interfaces, textures, tools, settings, or recurring visual details inferred from the rituals.
@@ -124,6 +127,7 @@ Rules:
 - Every ritual, contradiction, frustration, status signal, embarrassing truth, and obsession should name an action, choice, object, mechanic, chore, collection, avoidance, or recurring decision.
 - Prefer oddly specific subculture behavior over category labels.
 - For rituals, ask: what do they repeatedly do that outsiders would not immediately understand?
+- For microRituals, ask: what tiny action, interruption, excuse, object, time of day, or social habit would make someone in the niche instantly say "that's me"?
 - For contradictions, ask: what behavior makes outsiders laugh or say "why would you do that?"
 - For statusSignals, ask: how do members quietly signal expertise or taste?
 - For insiderLanguage, include subculture terms, mechanics, acronyms, UI words, genre labels, and phrases outsiders may not know.
@@ -140,6 +144,7 @@ Rules:
     dimensions: safeStringArray(json.dimensions),
     audience: safeString(json.audience) || niche,
     rituals: safeStringArray(json.rituals),
+    microRituals: safeStringArray(json.microRituals),
     contradictions: safeStringArray(json.contradictions),
     frustrations: safeStringArray(json.frustrations),
     statusSignals: safeStringArray(json.statusSignals),
@@ -169,6 +174,9 @@ ${profile.dimensions.join(", ")}
 
 RITUALS:
 ${profile.rituals.join("\n")}
+
+MICRO-RITUALS:
+${(profile.microRituals || []).join("\n")}
 
 CONTRADICTIONS:
 ${profile.contradictions.join("\n")}
@@ -205,8 +213,11 @@ Rules:
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
 - Each slogan must come from a ritual, contradiction, frustration, status signal, embarrassing truth, obsession, or insider behavior in the profile.
 - Express a behavior and its recognizable truth or consequence; do not merely pair the topic with an opinion.
+- Expose the behavior instead of explaining the personality. "Dinner Can Wait, The Comments Can't" is stronger than "Obsessed With True Crime And Snacks".
+- Prefer micro-rituals that reveal a tiny recognizable moment: comments before the clip, autoplay after midnight, rewinding because the comments distracted them, sending a bizarre case to a friend, explaining an obscure case at dinner, falling asleep with a podcast.
 - Do not imply the wearer performs a profession when the profile says they consume, watch, read, listen, scroll, or discuss it.
-- For sensitive topics, joke about audience behavior, platform culture, implausible decisions, or bad excuses—not victims or violence.
+- For sensitive topics, joke about audience behavior, platform culture, implausible decisions, or bad excuses—not victims, suspects, gore, harm, or violence.
+- Avoid fandom nicknames, show-specific catchphrases, branded community labels, or slogans that require a specific podcast/show/creator fandom to understand.
 - At least three quarters of the slogans should work without naming the niche or its broad category.
 - No more than one quarter of slogans may include broad category labels from the niche such as "true crime", "crime", "murder", "sports", "fashion", "pets", or equivalent topic names.
 - Before returning, discard slogans whose main meaning is only "I like this topic" or "this topic is dramatic/funny/interesting"; replace them with a line built from a ritual, repeated choice, interface, object, or social behavior.
@@ -237,7 +248,24 @@ const bannedPatternLeakage = [
   /\beat\s+sleep\b/i,
   /\bbuilt for\b/i,
   /\bno drama\b/i,
+  /\bguilty pleasure\b/i,
+  /\bfurbab(?:y|ies)\b/i,
+  /\bfur bab(?:y|ies)\b/i,
+  /\bliving that\b/i,
   /\blives matter\b/i,
+  /\bvictims?\b/i,
+  /\bsuspects?\b/i,
+  /\bgore\b/i,
+  /\bmurderinos?\b/i,
+  /\bswifties?\b/i,
+  /\bpotterheads?\b/i,
+  /\btrekkies?\b/i,
+  /\bwhovians?\b/i,
+  /\bbeyhive\b/i,
+  /\bbarbz\b/i,
+  /\blittle monsters\b/i,
+  /\b[a-z0-9-]+\s+(?:army|hive|nation|stans?|fandom)\b/i,
+  /\b(?:team|club|crew|squad)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/,
 ];
 
 export function rejectsPatternLeakage(slogan: string): boolean {
@@ -248,6 +276,7 @@ function profileSignals(profile: DynamicNicheProfile): string[] {
   return [
     ...profile.dimensions,
     ...profile.rituals,
+    ...(profile.microRituals || []),
     ...profile.contradictions,
     ...profile.frustrations,
     ...profile.statusSignals,
@@ -279,6 +308,53 @@ function signalWordHitCount(slogan: string, signals: string[]): number {
   }).length;
 }
 
+function nicheStopWords(profile: DynamicNicheProfile): Set<string> {
+  return new Set([
+    ...SIGNAL_STOP_WORDS,
+    ...profile.niche.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2),
+    ...profile.audience.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2),
+    "family",
+    "families",
+    "fashion",
+    "sports",
+    "retro",
+    "vintage",
+    "exotic",
+    "pets",
+    "pet",
+    "dog",
+    "dogs",
+    "mom",
+    "moms",
+    "jersey",
+    "jerseys",
+  ]);
+}
+
+function distinctiveSignalHitCount(slogan: string, signals: string[], profile: DynamicNicheProfile): number {
+  const text = slogan.toLowerCase();
+  const stopWords = nicheStopWords(profile);
+
+  return signals.filter((signal) => {
+    const normalized = signal.toLowerCase().trim();
+    if (!normalized) return false;
+    if (normalized.length > 12 && text.includes(normalized)) return true;
+
+    const tokens = normalized
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 3 && !stopWords.has(word));
+    if (tokens.length === 0) return false;
+
+    const hits = tokens.filter((word) => {
+      if (text.includes(word)) return true;
+      const stem = word.replace(/(?:ing|ed|es|s)$/i, "");
+      return stem.length > 3 && text.includes(stem);
+    }).length;
+
+    return tokens.length === 1 ? hits === 1 : hits >= 2;
+  }).length;
+}
+
 function shortSignalHitCount(slogan: string, signals: string[]): number {
   const text = slogan.toLowerCase();
   return signals.filter((signal) => {
@@ -305,6 +381,7 @@ export function dynamicSpecificityScore(slogan: string, profile: DynamicNichePro
 export function truthResonanceScore(slogan: string, profile: DynamicNicheProfile): number {
   const truthSignals = [
     ...profile.rituals,
+    ...(profile.microRituals || []),
     ...profile.contradictions,
     ...profile.frustrations,
     ...profile.statusSignals,
@@ -330,6 +407,7 @@ export function behavioralContradictionScore(slogan: string, profile: DynamicNic
 export function ritualRecognitionScore(slogan: string, profile: DynamicNicheProfile): number {
   const ritualHits = signalWordHitCount(slogan, [
     ...profile.rituals,
+    ...(profile.microRituals || []),
     ...profile.obsessions,
     ...profile.statusSignals,
   ]);
@@ -390,6 +468,19 @@ const categoryDescriptionWords = [
   "aesthetic",
   "community",
   "frames",
+  "conversation starter",
+  "fashion statement",
+  "timeless",
+  "ultimate",
+];
+
+const explanatoryDescriptionPatterns = [
+  /\bi\s+find\s+humou?r\s+in\b/i,
+  /\bi\s+(?:like|love|enjoy|prefer)\s+(?:this|the|my)?\s*[a-z\s-]*(?:because|for|so)\b/i,
+  /\bobsessed\s+with\s+[a-z\s-]+\s+and\s+[a-z\s-]+(?:\s*[,!.]?|\s+no regrets)\b/i,
+  /\bobsessed\s+with\s+[a-z\s-]+,\s+not\s+[a-z\s-]+\b/i,
+  /\bmy favorite\s+(?:case|episode|clip|story)\??\s+the one\b/i,
+  /\bthe only\s+(?:drama|chaos|content|thing)\s+i\s+need\b/i,
 ];
 
 const concreteBehaviorWords = [
@@ -429,6 +520,53 @@ const concreteBehaviorWords = [
   "clips",
   "watch",
   "history",
+  "autoplay",
+  "rewind",
+  "rewinding",
+  "pause",
+  "pausing",
+  "podcast",
+  "playlist",
+  "episode",
+  "dinner",
+  "wine",
+  "group chat",
+  "search history",
+  "midnight",
+  "3am",
+  "3 am",
+];
+
+const instantRecognitionWords = [
+  "comments",
+  "comment",
+  "autoplay",
+  "algorithm",
+  "scroll",
+  "scrolling",
+  "rewind",
+  "rewinding",
+  "pause",
+  "pausing",
+  "playlist",
+  "podcast",
+  "episode",
+  "clip",
+  "clips",
+  "search history",
+  "group chat",
+  "dinner",
+  "wine",
+  "snacks",
+  "midnight",
+  "late-night",
+  "3am",
+  "3 am",
+  "wait",
+  "can't",
+  "forgot",
+  "sent",
+  "sending",
 ];
 
 function broadCategoryLabelCount(slogan: string, profile: DynamicNicheProfile): number {
@@ -451,6 +589,16 @@ function hasConcreteBehaviorEvidence(slogan: string, profile: DynamicNicheProfil
   return ritualRecognitionScore(slogan, profile) >= 30 ||
     truthResonanceScore(slogan, profile) >= 50 ||
     concreteBehaviorWords.some((word) => slogan.toLowerCase().includes(word));
+}
+
+function explanatoryDescriptionPenalty(slogan: string, profile: DynamicNicheProfile): number {
+  const text = slogan.toLowerCase();
+  const hasBehavior = hasConcreteBehaviorEvidence(slogan, profile);
+  let penalty = explanatoryDescriptionPatterns.some((pattern) => pattern.test(slogan)) ? 18 : 0;
+  if (/^i\s+(?:am|find|like|love|enjoy|prefer|watch)\b/i.test(slogan) && !hasBehavior) penalty += 10;
+  if (/^obsessed with\b/i.test(slogan)) penalty += ritualRecognitionScore(slogan, profile) < 30 ? 18 : 10;
+  if (/\b(inappropriate places|no regrets|everyone knows)\b/i.test(text)) penalty += 8;
+  return Math.min(35, penalty);
 }
 
 export function genericMoodPenalty(slogan: string, profile: DynamicNicheProfile): number {
@@ -495,6 +643,32 @@ export function screenshotProbabilityScore(slogan: string, profile: DynamicNiche
   return Math.round(Math.min(100, brevity * 0.3 + tension));
 }
 
+export function recognitionLatencyScore(slogan: string, profile: DynamicNicheProfile): number {
+  const text = slogan.toLowerCase();
+  const microHits = distinctiveSignalHitCount(slogan, [
+    ...(profile.microRituals || []),
+    ...profile.rituals,
+    ...profile.embarrassingTruths,
+  ], profile);
+  const markerHits = Math.min(3, instantRecognitionWords.filter((word) => text.includes(word)).length);
+  const hasTemporalOrSocialContext = /\b(?:before|after|during|while|because|until|again|instead|dinner|midnight|3\s?am|late-night|group chat)\b/i.test(text);
+  const hasTension = /[?,:]|\b(?:can't|wait|but|not|instead|before|after|forgot|still)\b/i.test(text);
+  const words = slogan.trim().split(/\s+/).filter(Boolean).length;
+  const concise = words <= 8 ? 12 : words <= 11 ? 6 : -10;
+  const explanationPenalty = explanatoryDescriptionPenalty(slogan, profile);
+  const noDistinctiveMicroRitualCap = microHits === 0 ? 62 : 100;
+
+  return Math.max(0, Math.min(
+    noDistinctiveMicroRitualCap,
+    microHits * 26 +
+      markerHits * 10 +
+      (hasTemporalOrSocialContext ? 14 : 0) +
+      (hasTension ? 12 : 0) +
+      concise -
+      explanationPenalty,
+  ));
+}
+
 export function wearabilityScore(slogan: string): number {
   const trimmed = slogan.trim();
   const words = trimmed.split(/\s+/).filter(Boolean).length;
@@ -518,18 +692,22 @@ export function scoreDynamicSlogan(
   const screenshot = screenshotProbabilityScore(slogan, profile);
   const moodPenalty = genericMoodPenalty(slogan, profile);
   const categoryPenalty = categoryDescriptionPenalty(slogan, profile);
+  const explanationPenalty = explanatoryDescriptionPenalty(slogan, profile);
+  const recognitionLatency = recognitionLatencyScore(slogan, profile);
 
   const rawScore = Math.max(0, Math.round(
     contradiction * 0.24 +
       insider * 0.22 +
-      ritual * 0.18 +
+      ritual * 0.15 +
       truth * 0.14 +
+      recognitionLatency * 0.10 +
       authenticity * 0.10 +
       specificity * 0.06 +
       screenshot * 0.04 +
       wearability * 0.02 -
       moodPenalty -
-      categoryPenalty,
+      categoryPenalty -
+      explanationPenalty,
   ));
 
   // Keep headroom so "excellent" remains distinguishable from "perfect".
@@ -543,6 +721,14 @@ export function scoreDynamicSlogan(
   if (contradiction < 25 && ritual < 25 && insider < 35 && truth < 45) return Math.min(calibratedScore, 76);
   if (truth < 35 && authenticity < 35) return Math.min(calibratedScore, 70);
   if (truth < 45 && specificity < 50) return Math.min(calibratedScore, 80);
+  if (explanationPenalty > 0 && recognitionLatency < 35) return Math.min(calibratedScore, 68);
+  if (recognitionLatency < 30 && ritual < 30 && insider < 35) return Math.min(calibratedScore, 74);
+  if (broadLabelHits >= 3 && recognitionLatency < 35) return Math.min(calibratedScore, 72);
+  if (broadLabelHits >= 2 && recognitionLatency < 35) return Math.min(calibratedScore, 76);
+  if (broadLabelHits >= 2 && recognitionLatency < 65) return Math.min(calibratedScore, 82);
+  if (broadLabelHits >= 1 && recognitionLatency < 30 && ritual < 45) return Math.min(calibratedScore, 78);
+  if (recognitionLatency < 35) return Math.min(calibratedScore, 78);
+  if (recognitionLatency < 45) return Math.min(calibratedScore, 88);
   if (broadLabelHits >= 3 && !hasBehaviorEvidence) return Math.min(calibratedScore, 78);
   if (broadLabelHits >= 2 && !hasBehaviorEvidence) return Math.min(calibratedScore, 82);
   if (broadLabelHits >= 3 && ritual < 30) return Math.min(calibratedScore, 84);
