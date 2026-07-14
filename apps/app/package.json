@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "engine": "tsx scripts/run_engine.ts"
+    "engine": "tsx scripts/run_engine.ts",
+    "benchmark:dynamic": "tsx scripts/benchmark_dynamic_behavior.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
