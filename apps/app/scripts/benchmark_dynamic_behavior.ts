@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import {
   behavioralContradictionScore,
+  buildStructuralFingerprint,
   categoryDescriptionPenalty,
+  classifyRhetoricalFamily,
   type DynamicNicheProfile,
   recognitionLatencyScore,
   rejectsPatternLeakage,
   ritualRecognitionScore,
   scoreDynamicSlogan,
+  thumbnailReadabilityScore,
   truthResonanceScore,
 } from "../lib/ai/dynamicNicheProfile";
 
@@ -20,8 +23,11 @@ type BenchmarkCase = {
     averageRecognitionLatency: number;
     averageRitualRecognition: number;
     averageTruthResonance: number;
+    averageThumbnailReadability: number;
     maxPatternLeakage: number;
     maxCategoryDescriptionPenalty: number;
+    maxStructuralCollisions: number;
+    maxRhetoricalFamilyCount: number;
   };
 };
 
@@ -39,6 +45,9 @@ function summarizeBenchmark(testCase: BenchmarkCase) {
     recognitionLatency: recognitionLatencyScore(slogan, testCase.profile),
     ritualRecognition: ritualRecognitionScore(slogan, testCase.profile),
     truthResonance: truthResonanceScore(slogan, testCase.profile),
+    thumbnailReadability: thumbnailReadabilityScore(slogan),
+    structuralFingerprint: buildStructuralFingerprint(slogan).pattern,
+    rhetoricalFamily: classifyRhetoricalFamily(slogan),
     patternLeakage: rejectsPatternLeakage(slogan) ? 1 : 0,
     categoryDescriptionPenalty: categoryDescriptionPenalty(slogan, testCase.profile),
   }));
@@ -47,6 +56,10 @@ function summarizeBenchmark(testCase: BenchmarkCase) {
     slogan,
     finalScore: scoreDynamicSlogan(slogan, testCase.profile),
   }));
+  const familyCounts = new Map<string, number>();
+  for (const entry of winnerMetrics) {
+    familyCounts.set(entry.rhetoricalFamily, (familyCounts.get(entry.rhetoricalFamily) || 0) + 1);
+  }
 
   const summary = {
     niche: testCase.niche,
@@ -54,8 +67,12 @@ function summarizeBenchmark(testCase: BenchmarkCase) {
     averageRecognitionLatency: average(winnerMetrics.map((entry) => entry.recognitionLatency)),
     averageRitualRecognition: average(winnerMetrics.map((entry) => entry.ritualRecognition)),
     averageTruthResonance: average(winnerMetrics.map((entry) => entry.truthResonance)),
+    averageThumbnailReadability: average(winnerMetrics.map((entry) => entry.thumbnailReadability)),
     patternLeakage: winnerMetrics.reduce((sum, entry) => sum + entry.patternLeakage, 0),
     maxCategoryDescriptionPenalty: Math.max(...winnerMetrics.map((entry) => entry.categoryDescriptionPenalty)),
+    structuralCollisions:
+      winnerMetrics.length - new Set(winnerMetrics.map((entry) => entry.structuralFingerprint)).size,
+    maxRhetoricalFamilyCount: Math.max(...familyCounts.values()),
     weakestWinnerScore: Math.min(...winnerMetrics.map((entry) => entry.finalScore)),
     strongestWeakScore: Math.max(...weakScores.map((entry) => entry.finalScore)),
   };
@@ -83,12 +100,24 @@ function assertBenchmarkResult(result: BenchmarkResult, testCase: BenchmarkCase)
     `${testCase.niche}: truth resonance ${summary.averageTruthResonance} below ${testCase.thresholds.averageTruthResonance}`,
   );
   assert.ok(
+    summary.averageThumbnailReadability >= testCase.thresholds.averageThumbnailReadability,
+    `${testCase.niche}: thumbnail readability ${summary.averageThumbnailReadability} below ${testCase.thresholds.averageThumbnailReadability}`,
+  );
+  assert.ok(
     summary.patternLeakage <= testCase.thresholds.maxPatternLeakage,
     `${testCase.niche}: pattern leakage ${summary.patternLeakage} above ${testCase.thresholds.maxPatternLeakage}`,
   );
   assert.ok(
     summary.maxCategoryDescriptionPenalty <= testCase.thresholds.maxCategoryDescriptionPenalty,
     `${testCase.niche}: category penalty ${summary.maxCategoryDescriptionPenalty} above ${testCase.thresholds.maxCategoryDescriptionPenalty}`,
+  );
+  assert.ok(
+    summary.structuralCollisions <= testCase.thresholds.maxStructuralCollisions,
+    `${testCase.niche}: structural collisions ${summary.structuralCollisions} above ${testCase.thresholds.maxStructuralCollisions}`,
+  );
+  assert.ok(
+    summary.maxRhetoricalFamilyCount <= testCase.thresholds.maxRhetoricalFamilyCount,
+    `${testCase.niche}: rhetorical family concentration ${summary.maxRhetoricalFamilyCount} above ${testCase.thresholds.maxRhetoricalFamilyCount}`,
   );
   assert.ok(
     summary.weakestWinnerScore > summary.strongestWeakScore,
@@ -129,8 +158,11 @@ const benchmarks: BenchmarkCase[] = [
       averageRecognitionLatency: 70,
       averageRitualRecognition: 60,
       averageTruthResonance: 70,
+      averageThumbnailReadability: 80,
       maxPatternLeakage: 0,
       maxCategoryDescriptionPenalty: 0,
+      maxStructuralCollisions: 0,
+      maxRhetoricalFamilyCount: 2,
     },
   },
   {
@@ -165,8 +197,11 @@ const benchmarks: BenchmarkCase[] = [
       averageRecognitionLatency: 25,
       averageRitualRecognition: 70,
       averageTruthResonance: 85,
+      averageThumbnailReadability: 80,
       maxPatternLeakage: 0,
       maxCategoryDescriptionPenalty: 0,
+      maxStructuralCollisions: 0,
+      maxRhetoricalFamilyCount: 2,
     },
   },
   {
@@ -201,8 +236,11 @@ const benchmarks: BenchmarkCase[] = [
       averageRecognitionLatency: 65,
       averageRitualRecognition: 55,
       averageTruthResonance: 75,
+      averageThumbnailReadability: 80,
       maxPatternLeakage: 0,
       maxCategoryDescriptionPenalty: 5,
+      maxStructuralCollisions: 0,
+      maxRhetoricalFamilyCount: 2,
     },
   },
 ];

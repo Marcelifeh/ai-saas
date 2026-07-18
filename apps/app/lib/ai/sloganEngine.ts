@@ -100,6 +100,7 @@ import {
 } from "./behavioralSloganEngine";
 import { getBehavioralProfile, type BehavioralArchetype, type BehavioralProfile } from "./behavioralLexicon";
 import {
+  applyStructuralDiversityRanking,
   buildDynamicNicheProfile,
   behavioralContradictionScore,
   categoryDescriptionPenalty,
@@ -113,8 +114,10 @@ import {
   ritualRecognitionScore,
   scoreDynamicSlogan,
   screenshotProbabilityScore,
+  thumbnailReadabilityScore,
   truthResonanceScore as dynamicTruthResonanceScore,
   type DynamicNicheProfile,
+  type RhetoricalFamily,
   wearabilityScore as dynamicWearabilityScore,
 } from "./dynamicNicheProfile";
 
@@ -182,6 +185,11 @@ export interface RankedSlogan {
   identityLabelPenalty?: number;
   hallmarkPenalty?: number;
   corporateTonePenalty?: number;
+  structuralFingerprint?: string;
+  rhetoricalFamily?: RhetoricalFamily;
+  lexicalOpening?: string;
+  thumbnailReadabilityScore?: number;
+  structuralDiversityPenalty?: number;
 }
 
 export interface SloganCollections {
@@ -3151,7 +3159,7 @@ function rankDynamicProfileSlogans(
 ): RankedSlogan[] {
   const salesSignals = normalizeSalesSignals(input.salesSignals);
 
-  return dedupeStrings(slogans)
+  const individuallyRanked = dedupeStrings(slogans)
     .map(cleanSlogan)
     .filter(Boolean)
     .filter((slogan) => !rejectsPatternLeakage(slogan))
@@ -3168,6 +3176,7 @@ function rankDynamicProfileSlogans(
       const wearability = dynamicWearabilityScore(slogan);
       const moodPenalty = genericMoodPenalty(slogan, profile);
       const descriptionPenalty = categoryDescriptionPenalty(slogan, profile);
+      const thumbnailReadability = thumbnailReadabilityScore(slogan);
       return {
         slogan,
         score: finalScore,
@@ -3217,6 +3226,7 @@ function rankDynamicProfileSlogans(
         ritualCompression: ritualScore,
         insiderSpecificity: insiderScore,
         brevityScore: wearability,
+        thumbnailReadabilityScore: thumbnailReadability,
         screenshotScore,
         nicheAlignmentScore: specificityScore,
         behavioralTruthBonus: 0,
@@ -3227,6 +3237,18 @@ function rankDynamicProfileSlogans(
       };
     })
     .sort((a, b) => b.score - a.score);
+
+  return applyStructuralDiversityRanking(individuallyRanked).map((entry) => ({
+    ...entry,
+    bucket: chooseBucket(entry.score, entry.screenshotScore),
+    reasons: [
+      ...entry.reasons,
+      `Rhetorical family: ${entry.rhetoricalFamily.toLowerCase()}`,
+      entry.structuralDiversityPenalty > 0
+        ? `Structural diversity penalty: ${entry.structuralDiversityPenalty}`
+        : "Structurally distinct in ranked batch",
+    ],
+  }));
 }
 
 export async function runEliteSloganEngine(input: SloganEngineInput): Promise<SloganEngineResult> {

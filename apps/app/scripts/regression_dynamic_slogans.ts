@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  applyStructuralDiversityRanking,
   behavioralContradictionScore,
+  buildStructuralFingerprint,
   categoryDescriptionPenalty,
+  classifyRhetoricalFamily,
   type DynamicNicheProfile,
   genericMoodPenalty,
   insiderWordplayScore,
@@ -10,6 +13,7 @@ import {
   rejectsPatternLeakage,
   ritualRecognitionScore,
   scoreDynamicSlogan,
+  thumbnailReadabilityScore,
   truthResonanceScore,
 } from "../lib/ai/dynamicNicheProfile";
 
@@ -237,6 +241,69 @@ assert.ok(
 assert.ok(
   scoreDynamicSlogan("Retro Fashion: A Timeless Game", retroSportsFashionProfile) < 85,
   "Expected broad tagline language to be capped below breakout-score range",
+);
+
+const dramaComparison = buildStructuralFingerprint("Comic Book Brows: More Drama Than My Life");
+const gameComparison = buildStructuralFingerprint("More Invested In Their Game Than My Life");
+assert.equal(
+  dramaComparison.pattern,
+  gameComparison.pattern,
+  "Expected variable wording inside 'more X than Y' to share a structural fingerprint",
+);
+assert.equal(
+  buildStructuralFingerprint("Commenting On Jerseys, Not Just Stats").pattern,
+  buildStructuralFingerprint("Trading Jerseys, Not Just Stats").pattern,
+  "Expected variable wording inside 'X, not just Y' to share a structural fingerprint",
+);
+assert.equal(
+  buildStructuralFingerprint("Chasing Vintage Dreams, One Game At A Time").pattern,
+  buildStructuralFingerprint("Collecting Memories, One Jersey At A Time").pattern,
+  "Expected variable wording inside 'X, one Y at a time' to share a structural fingerprint",
+);
+assert.equal(
+  classifyRhetoricalFamily("More Invested In Their Game Than My Life"),
+  "COMPARISON",
+  "Expected comparative scaffold classification",
+);
+assert.equal(
+  classifyRhetoricalFamily("My Search History Needs Legal Counsel"),
+  "IDENTITY",
+  "Expected possessive identity classification",
+);
+assert.equal(
+  classifyRhetoricalFamily("Check The Comments Before The Clip"),
+  "PRIORITY",
+  "Expected before/after priority classification",
+);
+
+assert.ok(
+  thumbnailReadabilityScore("Scoreboard Before Small Talk") >
+  thumbnailReadabilityScore("More Invested In Their Game Than My Life"),
+  "Expected a compact visual footprint to improve thumbnail readability",
+);
+
+const structurallyDiversified = applyStructuralDiversityRanking([
+  { slogan: "More Drama Than My Life", score: 92, finalScore: 92 },
+  { slogan: "More Invested In Their Game Than My Life", score: 90, finalScore: 90 },
+  { slogan: "More Coffee Than My Job", score: 88, finalScore: 88 },
+  { slogan: "Scoreboard Before Small Talk", score: 84, finalScore: 84 },
+  { slogan: "My Couch Knows Every Cozy Game", score: 83, finalScore: 83 },
+  { slogan: "Cancel Plans Check The Comments", score: 82, finalScore: 82 },
+]);
+assert.deepEqual(
+  structurallyDiversified.slice(0, 4).map((entry) => entry.slogan),
+  [
+    "More Drama Than My Life",
+    "Scoreboard Before Small Talk",
+    "My Couch Knows Every Cozy Game",
+    "Cancel Plans Check The Comments",
+  ],
+  "Expected distinct rhetorical structures to outrank repeated comparison frames",
+);
+assert.ok(
+  structurallyDiversified.find((entry) => entry.slogan === "More Invested In Their Game Than My Life")!
+    .structuralDiversityPenalty >= 28,
+  "Expected repeated structural fingerprints to receive a material batch penalty",
 );
 
 console.log("Dynamic slogan regression gates passed");

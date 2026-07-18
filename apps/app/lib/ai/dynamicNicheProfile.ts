@@ -14,6 +14,30 @@ export type DynamicNicheProfile = {
   purchaseMotives: string[];
 };
 
+export type RhetoricalFamily =
+  | "COMMAND"
+  | "COMPARISON"
+  | "CONFESSION"
+  | "CONTRAST"
+  | "IDENTITY"
+  | "OBSERVATION"
+  | "PRIORITY"
+  | "QUESTION"
+  | "WARNING";
+
+export interface StructuralFingerprint {
+  family: RhetoricalFamily;
+  pattern: string;
+  opening: string;
+}
+
+export interface StructuralDiversityMetrics {
+  structuralFingerprint: string;
+  rhetoricalFamily: RhetoricalFamily;
+  lexicalOpening: string;
+  structuralDiversityPenalty: number;
+}
+
 type DynamicProfileJson = Partial<Omit<DynamicNicheProfile, "niche">>;
 
 const SIGNAL_STOP_WORDS = new Set([
@@ -223,6 +247,9 @@ Rules:
 - Before returning, discard slogans whose main meaning is only "I like this topic" or "this topic is dramatic/funny/interesting"; replace them with a line built from a ritual, repeated choice, interface, object, or social behavior.
 - Strongly prefer slogans that repurpose insider language, mechanics, acronyms, or category terms into a niche-specific joke.
 - Prefer concrete actions, objects, mechanics, recurring chores, and insider decisions over vibe words.
+- Vary rhetorical structure across the batch. Mix observations, confessions, commands, questions, priorities, contrasts, and identity lines when the profile supports them.
+- Do not repeat the same grammatical frame with different nouns. In particular, generate no more than two comparisons, confessions, identity statements, commands, or questions.
+- Vary sentence openings. Do not begin multiple slogans with the same word.
 - Keep slogans short, wearable, and human.
 - Prefer lived truth over cleverness.
 - Return ONLY JSON:
@@ -669,6 +696,224 @@ export function recognitionLatencyScore(slogan: string, profile: DynamicNichePro
   ));
 }
 
+const narrowCharacters = new Set("fijlrtI1'.,:;!| ");
+const wideCharacters = new Set("mwMW@%&QO");
+
+export function estimateVisualWidth(slogan: string): number {
+  return Math.round([...slogan.trim()].reduce((width, character) => {
+    if (narrowCharacters.has(character)) return width + (character === " " ? 0.5 : 0.55);
+    if (wideCharacters.has(character)) return width + 1.35;
+    if (/[A-Z0-9]/.test(character)) return width + 1.05;
+    return width + 0.9;
+  }, 0) * 10) / 10;
+}
+
+export function thumbnailReadabilityScore(slogan: string): number {
+  const trimmed = slogan.trim();
+  if (!trimmed) return 0;
+
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  const wordScore =
+    words <= 4 ? 100 :
+      words <= 6 ? 90 :
+        words <= 8 ? 75 :
+          words <= 10 ? 55 : 30;
+  const visualWidth = estimateVisualWidth(trimmed);
+  const widthScore =
+    visualWidth <= 26 ? 100 :
+      visualWidth <= 38 ? 90 :
+        visualWidth <= 52 ? 75 :
+          visualWidth <= 66 ? 55 : 30;
+
+  return Math.round(wordScore * 0.55 + widthScore * 0.45);
+}
+
+const commandOpeners = new Set([
+  "ask",
+  "bring",
+  "cancel",
+  "check",
+  "choose",
+  "don’t",
+  "don't",
+  "keep",
+  "let",
+  "never",
+  "pause",
+  "read",
+  "save",
+  "send",
+  "skip",
+  "stop",
+  "trust",
+  "watch",
+  "wear",
+]);
+
+function normalizedWords(slogan: string): string[] {
+  return slogan
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/[^a-z0-9'?]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function classifyRhetoricalFamily(slogan: string): RhetoricalFamily {
+  const normalized = normalizedWords(slogan).join(" ");
+  const firstWord = normalizedWords(slogan)[0] || "";
+
+  if (/^warning\b/.test(normalized)) return "WARNING";
+  if (slogan.includes("?")) return "QUESTION";
+  if (/\b(?:more|less|better|worse)\b.+\bthan\b|\bversus\b|>/.test(normalized)) return "COMPARISON";
+  if (/\b(?:before|after)\b/.test(normalized)) return "PRIORITY";
+  if (commandOpeners.has(firstWord) || /^do not\b/.test(normalized)) return "COMMAND";
+  if (/^(?:i|i'm|i've|i'd|me)\b/.test(normalized)) return "CONFESSION";
+  if (/^(?:my|our)\b/.test(normalized) || /\bis (?:my|our)\b/.test(normalized)) return "IDENTITY";
+  if (/\b(?:but|instead|not|can't|cannot|won't|without|over)\b/.test(normalized)) return "CONTRAST";
+  return "OBSERVATION";
+}
+
+const structuralWords = new Set([
+  "a",
+  "after",
+  "an",
+  "and",
+  "are",
+  "as",
+  "at",
+  "before",
+  "but",
+  "can",
+  "can't",
+  "do",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "more",
+  "not",
+  "of",
+  "on",
+  "or",
+  "over",
+  "than",
+  "the",
+  "to",
+  "with",
+  "without",
+  "won't",
+]);
+
+function genericStructuralPattern(words: string[]): string {
+  return words.map((word) => {
+    if (/^(?:i|i'm|i've|i'd|me|my|our|their|your|we|you)$/.test(word)) return "<PRON>";
+    if (/^\d+$/.test(word)) return "<NUM>";
+    if (structuralWords.has(word)) return word.toUpperCase();
+    if (word.endsWith("ing")) return "<GERUND>";
+    if (word.endsWith("ed")) return "<PAST>";
+    return "<WORD>";
+  }).join(" ");
+}
+
+export function buildStructuralFingerprint(slogan: string): StructuralFingerprint {
+  const words = normalizedWords(slogan);
+  const normalized = words.join(" ");
+  const family = classifyRhetoricalFamily(slogan);
+  const opening = words[0] || "";
+  let pattern: string;
+
+  if (family === "COMPARISON" && /\b(?:more|less|better|worse)\b.+\bthan\b/.test(normalized)) {
+    const comparator = normalized.match(/\b(more|less|better|worse)\b/)?.[1]?.toUpperCase() || "<COMPARE>";
+    pattern = `${comparator} <CLAUSE> THAN <CLAUSE>`;
+  } else if (family === "PRIORITY") {
+    const connector = normalized.includes(" before ") ? "BEFORE" : "AFTER";
+    pattern = `<CLAUSE> ${connector} <CLAUSE>`;
+  } else if (/\bnot just\b/.test(normalized)) {
+    pattern = "<CLAUSE> NOT JUST <CLAUSE>";
+  } else if (/\bone\b.+\bat a time\b/.test(normalized)) {
+    pattern = "<CLAUSE> ONE <CLAUSE> AT A TIME";
+  } else if (family === "CONTRAST" && /\bover\b/.test(normalized)) {
+    pattern = "<CLAUSE> OVER <CLAUSE>";
+  } else if (family === "WARNING") {
+    pattern = "WARNING <CLAUSE>";
+  } else if (family === "QUESTION") {
+    pattern = `${genericStructuralPattern(words).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim()} ?`;
+  } else if (family === "COMMAND") {
+    pattern = `<COMMAND> ${genericStructuralPattern(words.slice(1))}`.trim();
+  } else if (family === "CONFESSION") {
+    pattern = `<PRON> ${genericStructuralPattern(words.slice(1)).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim()}`.trim();
+  } else if (family === "IDENTITY") {
+    pattern = genericStructuralPattern(words).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim();
+  } else {
+    pattern = genericStructuralPattern(words);
+  }
+
+  return {
+    family,
+    pattern: `${family}:${pattern}`,
+    opening,
+  };
+}
+
+export function applyStructuralDiversityRanking<
+  T extends { slogan: string; score: number; finalScore?: number },
+>(candidates: T[]): Array<T & StructuralDiversityMetrics> {
+  const remaining = candidates
+    .map((candidate, index) => ({
+      candidate,
+      fingerprint: buildStructuralFingerprint(candidate.slogan),
+      index,
+    }))
+    .sort((a, b) => b.candidate.score - a.candidate.score || a.index - b.index);
+  const selected: Array<T & StructuralDiversityMetrics> = [];
+  const patternCounts = new Map<string, number>();
+  const familyCounts = new Map<RhetoricalFamily, number>();
+  const openingCounts = new Map<string, number>();
+
+  while (remaining.length > 0) {
+    const evaluated = remaining.map((entry) => {
+      const patternCount = patternCounts.get(entry.fingerprint.pattern) || 0;
+      const familyCount = familyCounts.get(entry.fingerprint.family) || 0;
+      const openingCount = openingCounts.get(entry.fingerprint.opening) || 0;
+      const structuralPenalty = patternCount * 28;
+      const openingPenalty = openingCount * 16;
+      const familyPenalty = familyCount <= 1 ? familyCount * 4 : 8 + (familyCount - 1) * 10;
+      const penalty = structuralPenalty + openingPenalty + familyPenalty;
+
+      return {
+        ...entry,
+        adjustedScore: Math.max(0, Math.round(entry.candidate.score - penalty)),
+        penalty,
+      };
+    }).sort((a, b) =>
+      b.adjustedScore - a.adjustedScore ||
+      b.candidate.score - a.candidate.score ||
+      a.index - b.index
+    );
+
+    const winner = evaluated[0];
+    const remainingIndex = remaining.findIndex((entry) => entry.index === winner.index);
+    remaining.splice(remainingIndex, 1);
+    patternCounts.set(winner.fingerprint.pattern, (patternCounts.get(winner.fingerprint.pattern) || 0) + 1);
+    familyCounts.set(winner.fingerprint.family, (familyCounts.get(winner.fingerprint.family) || 0) + 1);
+    openingCounts.set(winner.fingerprint.opening, (openingCounts.get(winner.fingerprint.opening) || 0) + 1);
+    selected.push({
+      ...winner.candidate,
+      score: winner.adjustedScore,
+      finalScore: winner.adjustedScore,
+      structuralFingerprint: winner.fingerprint.pattern,
+      rhetoricalFamily: winner.fingerprint.family,
+      lexicalOpening: winner.fingerprint.opening,
+      structuralDiversityPenalty: winner.penalty,
+    });
+  }
+
+  return selected;
+}
+
 export function wearabilityScore(slogan: string): number {
   const trimmed = slogan.trim();
   const words = trimmed.split(/\s+/).filter(Boolean).length;
@@ -687,24 +932,22 @@ export function scoreDynamicSlogan(
   const ritual = ritualRecognitionScore(slogan, profile);
   const insider = insiderWordplayScore(slogan, profile);
   const authenticity = communityAuthenticityScore(slogan, profile);
-  const wearability = wearabilityScore(slogan);
   const specificity = dynamicSpecificityScore(slogan, profile);
-  const screenshot = screenshotProbabilityScore(slogan, profile);
   const moodPenalty = genericMoodPenalty(slogan, profile);
   const categoryPenalty = categoryDescriptionPenalty(slogan, profile);
   const explanationPenalty = explanatoryDescriptionPenalty(slogan, profile);
   const recognitionLatency = recognitionLatencyScore(slogan, profile);
+  const thumbnailReadability = thumbnailReadabilityScore(slogan);
 
   const rawScore = Math.max(0, Math.round(
-    contradiction * 0.24 +
-      insider * 0.22 +
-      ritual * 0.15 +
-      truth * 0.14 +
-      recognitionLatency * 0.10 +
-      authenticity * 0.10 +
-      specificity * 0.06 +
-      screenshot * 0.04 +
-      wearability * 0.02 -
+    truth * 0.16 +
+      authenticity * 0.13 +
+      recognitionLatency * 0.16 +
+      thumbnailReadability * 0.14 +
+      specificity * 0.07 +
+      contradiction * 0.15 +
+      insider * 0.12 +
+      ritual * 0.07 -
       moodPenalty -
       categoryPenalty -
       explanationPenalty,
