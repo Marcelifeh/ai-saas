@@ -8,6 +8,7 @@ import {
   type DynamicNicheProfile,
   genericMoodPenalty,
   insiderWordplayScore,
+  normalizeDynamicNicheProfile,
   passesDimensionCoverage,
   recognitionLatencyScore,
   rejectsPatternLeakage,
@@ -120,6 +121,95 @@ const retroSportsFashionProfile: DynamicNicheProfile = {
   visualCulture: ["thrift tags", "distressed jersey texture", "vintage scoreboards"],
   purchaseMotives: ["recognition of sportswear hunting rituals"],
 };
+
+const earlyMorningGymProfile: DynamicNicheProfile = {
+  niche: "Gym Lights and Early Mornings",
+  dimensions: ["pre-work training"],
+  audience: "consistent pre-work gym-goers",
+  rituals: [],
+  microRituals: [],
+  contradictions: [],
+  frustrations: [],
+  statusSignals: [],
+  insiderLanguage: [],
+  embarrassingTruths: [],
+  obsessions: [],
+  visualCulture: [],
+  purchaseMotives: [],
+  latentLifestyleModel: {
+    identityDirection: "proud_participant",
+    observableScenes: [
+      {
+        who: "the first regular through the door",
+        where: "an almost-empty weight room",
+        doing: "setting up the first lift",
+        before: "the morning commute",
+        after: "watching daylight arrive on the drive to work",
+        recurringObjects: ["packed gym bag", "water bottle", "weight rack"],
+        environmentalConditions: ["dark car park", "quiet room", "cold morning"],
+        socialContext: ["only a few regulars are present"],
+        emotionalStates: ["disciplined solitude", "quiet pride"],
+      },
+    ],
+    privateRituals: ["packing the gym bag before bed"],
+    environments: ["dark streets before the commute"],
+    recurringObjects: ["alarm", "locker", "gym lights"],
+    socialInteractions: ["recognizing the same few early regulars without small talk"],
+    tensions: ["warm bed versus a commitment already made"],
+    identitySignals: ["arriving before the room fills up"],
+    repeatedDecisions: ["turning off the alarm without negotiating"],
+    tinyFrustrations: ["a cold steering wheel on the drive in"],
+    smallVictories: ["finishing the first lift before daylight"],
+    unspokenRules: ["keep the room quiet until everyone is awake"],
+    emotionalRewards: ["leaving with the hardest decision already won"],
+  },
+};
+
+const sparseMechanicalPencilProfile = normalizeDynamicNicheProfile(
+  "Collectors Who Restore Mechanical Pencil Clips",
+  undefined,
+  {
+    audience: "collectors who repair old mechanical pencils",
+    latentLifestyleModel: {
+      observableScenes: [
+        {
+          who: "a collector",
+          where: "a small repair mat",
+          doing: "carefully straightening a bent pocket clip",
+          recurringObjects: ["precision pliers", "repair mat"],
+        },
+      ],
+      privateRituals: ["testing the restored clip on a scrap of fabric"],
+    },
+  },
+);
+
+const plannedMorningWorkoutProfile = normalizeDynamicNicheProfile(
+  "People Who Plan Morning Workouts but Keep Snoozing",
+  undefined,
+  {
+    audience: "well-intentioned people whose morning workout plans often lose to the snooze button",
+    latentLifestyleModel: {
+      identityDirection: "self_deprecating_outsider",
+      observableScenes: [
+        {
+          who: "a would-be morning gym-goer",
+          where: "bedroom before dawn",
+          doing: "moving the alarm later instead of getting dressed",
+          before: "packing workout clothes the night before",
+          after: "promising to try again tomorrow",
+          recurringObjects: ["phone alarm", "unused gym bag"],
+          environmentalConditions: ["dark room", "warm bed"],
+          socialContext: [],
+          emotionalStates: ["optimism followed by amused resignation"],
+        },
+      ],
+      tensions: ["planned discipline versus immediate comfort"],
+      repeatedDecisions: ["choosing one more snooze"],
+      embarrassingTruths: ["the gym bag is better prepared than its owner"],
+    },
+  },
+);
 
 assert.equal(
   passesDimensionCoverage("Loose Hinge Under The Workbench Lamp", syntheticProfile),
@@ -241,6 +331,93 @@ assert.ok(
 assert.ok(
   scoreDynamicSlogan("Retro Fashion: A Timeless Game", retroSportsFashionProfile) < 85,
   "Expected broad tagline language to be capped below breakout-score range",
+);
+
+assert.equal(
+  passesDimensionCoverage("Packed Gym Bag, Dark Car Park", earlyMorningGymProfile),
+  true,
+  "Expected nested lifestyle scenes and objects to participate in existing coverage gates",
+);
+
+assert.ok(
+  ritualRecognitionScore("First Lift Before Daylight", earlyMorningGymProfile) >
+  ritualRecognitionScore("Tracking Fitness Stats", earlyMorningGymProfile),
+  "Expected an inferred recurring scene to outrank a generic adjacent fitness topic",
+);
+
+assert.ok(
+  truthResonanceScore("Cold Steering Wheel, Commitment Kept", earlyMorningGymProfile) >
+  truthResonanceScore("Fitness Apps And Meal Plans", earlyMorningGymProfile),
+  "Expected a latent frustration and repeated decision to beat topic substitution",
+);
+
+assert.ok(
+  scoreDynamicSlogan("First Lift Before Daylight", earlyMorningGymProfile) >
+  scoreDynamicSlogan("Tracking Fitness Stats", earlyMorningGymProfile),
+  "Expected the richer inferred lifestyle model to improve niche-specific ranking",
+);
+
+assert.equal(
+  sparseMechanicalPencilProfile.latentLifestyleModel?.observableScenes.length,
+  1,
+  "Expected a sparse niche to preserve its one grounded scene without manufacturing a quota",
+);
+assert.equal(
+  sparseMechanicalPencilProfile.latentLifestyleModel?.identityDirection,
+  undefined,
+  "Expected an ambiguous sparse profile not to default to proud participation",
+);
+assert.deepEqual(
+  {
+    dimensions: sparseMechanicalPencilProfile.dimensions,
+    rituals: sparseMechanicalPencilProfile.rituals,
+    contradictions: sparseMechanicalPencilProfile.contradictions,
+    frustrations: sparseMechanicalPencilProfile.frustrations,
+    statusSignals: sparseMechanicalPencilProfile.statusSignals,
+    insiderLanguage: sparseMechanicalPencilProfile.insiderLanguage,
+    visualCulture: sparseMechanicalPencilProfile.visualCulture,
+  },
+  {
+    dimensions: [],
+    rituals: [],
+    contradictions: [],
+    frustrations: [],
+    statusSignals: [],
+    insiderLanguage: [],
+    visualCulture: [],
+  },
+  "Expected unsupported sparse-profile fields to remain empty instead of receiving fabricated detail",
+);
+assert.equal(
+  passesDimensionCoverage("Bent Clip On The Repair Mat", sparseMechanicalPencilProfile),
+  true,
+  "Expected a single grounded sparse scene to remain useful to downstream relevance gates",
+);
+
+assert.equal(
+  earlyMorningGymProfile.latentLifestyleModel?.identityDirection,
+  "proud_participant",
+  "Expected consistent early-gym participation to preserve a proud identity direction",
+);
+assert.equal(
+  plannedMorningWorkoutProfile.latentLifestyleModel?.identityDirection,
+  "self_deprecating_outsider",
+  "Expected repeated snoozing to preserve a self-deprecating identity direction",
+);
+assert.notEqual(
+  earlyMorningGymProfile.latentLifestyleModel?.identityDirection,
+  plannedMorningWorkoutProfile.latentLifestyleModel?.identityDirection,
+  "Expected closely related morning-workout profiles to support opposite identity directions",
+);
+const sleepyBehaviorUnderProudNicheName = normalizeDynamicNicheProfile(
+  earlyMorningGymProfile.niche,
+  undefined,
+  plannedMorningWorkoutProfile,
+);
+assert.equal(
+  sleepyBehaviorUnderProudNicheName.latentLifestyleModel?.identityDirection,
+  "self_deprecating_outsider",
+  "Expected normalization to preserve behavioral inference rather than override it with a niche-name check",
 );
 
 const dramaComparison = buildStructuralFingerprint("Comic Book Brows: More Drama Than My Life");

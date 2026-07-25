@@ -1,3 +1,37 @@
+export type IdentityDirection =
+  | "proud_participant"
+  | "reluctant_participant"
+  | "aspiring_participant"
+  | "self_deprecating_outsider";
+
+export interface LifestyleScene {
+  who: string;
+  where: string;
+  doing: string;
+  before: string;
+  after: string;
+  recurringObjects: string[];
+  environmentalConditions: string[];
+  socialContext: string[];
+  emotionalStates: string[];
+}
+
+export interface LatentLifestyleModel {
+  identityDirection?: IdentityDirection;
+  observableScenes: LifestyleScene[];
+  privateRituals: string[];
+  environments: string[];
+  recurringObjects: string[];
+  socialInteractions: string[];
+  tensions: string[];
+  identitySignals: string[];
+  repeatedDecisions: string[];
+  tinyFrustrations: string[];
+  smallVictories: string[];
+  unspokenRules: string[];
+  emotionalRewards: string[];
+}
+
 export type DynamicNicheProfile = {
   niche: string;
   dimensions: string[];
@@ -12,6 +46,11 @@ export type DynamicNicheProfile = {
   obsessions: string[];
   visualCulture: string[];
   purchaseMotives: string[];
+  /**
+   * Optional so cached profiles and callers that still construct the legacy
+   * flat shape remain valid. Newly inferred profiles always populate it.
+   */
+  latentLifestyleModel?: LatentLifestyleModel;
 };
 
 export type RhetoricalFamily =
@@ -79,6 +118,95 @@ function safeStringArray(value: unknown, limit = 12): string[] {
     .slice(0, limit);
 }
 
+function safeIdentityDirection(value: unknown): IdentityDirection | undefined {
+  if (
+    value === "proud_participant" ||
+    value === "reluctant_participant" ||
+    value === "aspiring_participant" ||
+    value === "self_deprecating_outsider"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function safeLifestyleScene(value: unknown): LifestyleScene | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const scene = value as Record<string, unknown>;
+  const normalized = {
+    who: safeString(scene.who),
+    where: safeString(scene.where),
+    doing: safeString(scene.doing),
+    before: safeString(scene.before),
+    after: safeString(scene.after),
+    recurringObjects: safeStringArray(scene.recurringObjects, 8),
+    environmentalConditions: safeStringArray(scene.environmentalConditions, 8),
+    socialContext: safeStringArray(scene.socialContext, 8),
+    emotionalStates: safeStringArray(scene.emotionalStates, 8),
+  };
+
+  return Object.values(normalized).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry))
+    ? normalized
+    : null;
+}
+
+function safeLifestyleScenes(value: unknown, limit = 8): LifestyleScene[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(safeLifestyleScene)
+    .filter((scene): scene is LifestyleScene => scene !== null)
+    .slice(0, limit);
+}
+
+function safeLatentLifestyleModel(value: unknown): LatentLifestyleModel {
+  const model = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+  return {
+    identityDirection: safeIdentityDirection(model.identityDirection),
+    observableScenes: safeLifestyleScenes(model.observableScenes),
+    privateRituals: safeStringArray(model.privateRituals),
+    environments: safeStringArray(model.environments),
+    recurringObjects: safeStringArray(model.recurringObjects),
+    socialInteractions: safeStringArray(model.socialInteractions),
+    tensions: safeStringArray(model.tensions),
+    identitySignals: safeStringArray(model.identitySignals),
+    repeatedDecisions: safeStringArray(model.repeatedDecisions),
+    tinyFrustrations: safeStringArray(model.tinyFrustrations),
+    smallVictories: safeStringArray(model.smallVictories),
+    unspokenRules: safeStringArray(model.unspokenRules),
+    emotionalRewards: safeStringArray(model.emotionalRewards),
+  };
+}
+
+export function normalizeDynamicNicheProfile(
+  niche: string,
+  audience: string | undefined,
+  value: unknown,
+): DynamicNicheProfile {
+  const json = value && typeof value === "object" && !Array.isArray(value)
+    ? value as DynamicProfileJson
+    : {};
+
+  return {
+    niche,
+    dimensions: safeStringArray(json.dimensions),
+    audience: safeString(json.audience) || audience?.trim() || niche,
+    rituals: safeStringArray(json.rituals),
+    microRituals: safeStringArray(json.microRituals),
+    contradictions: safeStringArray(json.contradictions),
+    frustrations: safeStringArray(json.frustrations),
+    statusSignals: safeStringArray(json.statusSignals),
+    insiderLanguage: safeStringArray(json.insiderLanguage),
+    embarrassingTruths: safeStringArray(json.embarrassingTruths),
+    obsessions: safeStringArray(json.obsessions),
+    visualCulture: safeStringArray(json.visualCulture),
+    purchaseMotives: safeStringArray(json.purchaseMotives),
+    latentLifestyleModel: safeLatentLifestyleModel(json.latentLifestyleModel),
+  };
+}
+
 async function callAIJson<T extends Record<string, unknown>>(prompt: string): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
   const response = await chatCompletionSafe({
@@ -121,6 +249,33 @@ Return ONLY valid JSON:
 {
   "dimensions": [],
   "audience": "",
+  "latentLifestyleModel": {
+    "identityDirection": "proud_participant",
+    "observableScenes": [
+      {
+        "who": "",
+        "where": "",
+        "doing": "",
+        "before": "",
+        "after": "",
+        "recurringObjects": [],
+        "environmentalConditions": [],
+        "socialContext": [],
+        "emotionalStates": []
+      }
+    ],
+    "privateRituals": [],
+    "environments": [],
+    "recurringObjects": [],
+    "socialInteractions": [],
+    "tensions": [],
+    "identitySignals": [],
+    "repeatedDecisions": [],
+    "tinyFrustrations": [],
+    "smallVictories": [],
+    "unspokenRules": [],
+    "emotionalRewards": []
+  },
   "rituals": [],
   "microRituals": [],
   "contradictions": [],
@@ -135,19 +290,30 @@ Return ONLY valid JSON:
 
 Rules:
 - Do not create slogans.
+- Build the latentLifestyleModel first. Use the legacy arrays to summarize and corroborate that model, not as a substitute for it.
+- Infer a lifestyle, not a bag of related topics or keywords.
+- Calibrate detail to evidence. Never invent rituals, objects, jargon, social behavior, or scenes merely to fill a field or meet a count target. For a sparse or unusual niche, return fewer high-confidence items and leave unsupported arrays empty.
+- Discover what repeatedly happens that outsiders rarely notice: private rituals, small interruptions, recurring choices, handled objects, social exchanges, tiny frustrations, and quiet victories.
+- For a behaviorally rich niche, return at least 5 observableScenes. For a sparse niche, return only the scenes supported by the niche and audience. Each scene must describe one coherent recurring moment, including who is present, where it happens, what is being done, what tends to happen before and after, and the relevant objects, conditions, social context, and emotions.
+- Scenes must be causally coherent. Do not combine details merely because they all relate to the broad category.
+- Infer environments and recurringObjects from the observableScenes. Prefer places and objects the audience actually encounters over decorative symbols associated with the topic.
+- tensions must express lived conflicts between compatible forces, choices, roles, or rewards. They are behavioral source material, not prewritten jokes.
+- repeatedDecisions must capture choices the audience makes again and again. smallVictories must capture what they quietly take pride in. unspokenRules must capture insider expectations that members follow without explaining.
+- identitySignals must show how someone proves belonging through behavior, taste, timing, knowledge, preparation, or choices.
+- Classify identityDirection from the audience's relationship to the behavior, not from a hardcoded niche-name lookup. When the evidence supports a direction, return exactly one of: proud_participant, reluctant_participant, aspiring_participant, or self_deprecating_outsider. If the relationship is genuinely ambiguous, omit identityDirection rather than defaulting to proud participation.
+- Keep identity direction consistent across the model. A proud-participant niche should not be defined by repeatedly failing or avoiding the core behavior; an aspiring or reluctant niche may support that contradiction.
 - Extract concrete behaviors, rituals, contradictions, pain points, status signals, insider language, embarrassing truths, obsessions, and visual culture.
 - Do not use generic marketing words.
 - Do not force keywords.
 - Preserve every meaningful dimension in compound niches.
-- Treat the niche and audience together. A phrase such as "sarcastic fans of true-crime short-form video apps" has at least three interacting dimensions: content interest, humor style, and media-consumption behavior.
+- Treat the niche and audience together. Separate content interest, humor style, media behavior, role, and setting when they are distinct axes.
 - Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
-- Return at least 6 rituals and make most of them observable, repeated actions with a context, trigger, or consequence (for example, an intended five-minute scroll becoming a late night).
-- Return at least 8 microRituals. These must be small "that's me" moments, not category summaries: reading comments before watching, guessing the ending halfway through, sending bizarre cases to friends, falling asleep with a podcast, rewinding because comments distracted them, staying up because autoplay started another clip.
+- For behaviorally rich niches, return at least 6 rituals and 8 microRituals. Sparse niches may return fewer. Most rituals must be observable, repeated actions with a context, trigger, or consequence; microRituals must be small "that's me" moments, not category summaries.
 - Prefer consumption behavior and community rituals over pretending the wearer performs the profession or activity shown in the content.
 - Humor about sensitive subject matter must target the viewer's habits, algorithms, commentary, or absurd decisions—not victims or harm.
-- Return at least 6 visualCulture items. Make them concrete objects, interfaces, textures, tools, settings, or recurring visual details inferred from the rituals.
+- For visually rich niches, return at least 6 visualCulture items; sparse niches may return fewer. Make them concrete objects, interfaces, textures, tools, settings, or recurring visual details inferred from the rituals.
 - Avoid mood-only abstractions like relaxing, comfort, aesthetic, vibes, self-care, or community unless tied to a specific action or object.
-- Do not return broad interests or aesthetics by themselves. "indie games", "retro games", "comfort", "cozy lighting", and "cute setup" are too shallow unless attached to a repeated behavior.
+- Do not return broad interests or aesthetics by themselves. Attach every detail to a repeated behavior or scene.
 - Every ritual, contradiction, frustration, status signal, embarrassing truth, and obsession should name an action, choice, object, mechanic, chore, collection, avoidance, or recurring decision.
 - Prefer oddly specific subculture behavior over category labels.
 - For rituals, ask: what do they repeatedly do that outsiders would not immediately understand?
@@ -162,22 +328,7 @@ Rules:
 `;
 
   const json = await callAIJson<DynamicProfileJson>(prompt);
-
-  return {
-    niche,
-    dimensions: safeStringArray(json.dimensions),
-    audience: safeString(json.audience) || niche,
-    rituals: safeStringArray(json.rituals),
-    microRituals: safeStringArray(json.microRituals),
-    contradictions: safeStringArray(json.contradictions),
-    frustrations: safeStringArray(json.frustrations),
-    statusSignals: safeStringArray(json.statusSignals),
-    insiderLanguage: safeStringArray(json.insiderLanguage),
-    embarrassingTruths: safeStringArray(json.embarrassingTruths),
-    obsessions: safeStringArray(json.obsessions),
-    visualCulture: safeStringArray(json.visualCulture),
-    purchaseMotives: safeStringArray(json.purchaseMotives),
-  };
+  return normalizeDynamicNicheProfile(niche, audience, json);
 }
 
 export async function generateSlogansFromDynamicProfile(
@@ -192,6 +343,9 @@ ${profile.niche}
 
 AUDIENCE:
 ${profile.audience}
+
+LATENT LIFESTYLE MODEL:
+${JSON.stringify(profile.latentLifestyleModel || safeLatentLifestyleModel(undefined), null, 2)}
 
 DIMENSIONS:
 ${profile.dimensions.join(", ")}
@@ -235,10 +389,16 @@ Rules:
 - Do NOT write generic identity labels.
 - Do NOT write category descriptions or product taglines such as "[interest], [mood]" or "[category] meets [comfort]".
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
-- Each slogan must come from a ritual, contradiction, frustration, status signal, embarrassing truth, obsession, or insider behavior in the profile.
+- Treat the latent lifestyle model as the primary creative source. Use the legacy fields as supporting evidence.
+- Each slogan must reveal one or more inferred scenes, private rituals, tensions, identity signals, repeated decisions, tiny frustrations, small victories, unspoken rules, or emotional rewards.
+- Let the observable behavior determine the rhetoric. Invent the wording and sentence structure for this niche; do not translate evidence into a recurring frame.
+- Prefer an observable moment over a description of the audience.
+- Compress compatible details from the same scene when it improves recognition. Do not splice unrelated objects or actions together for superficial specificity.
+- Preserve identityDirection. Celebrate core follow-through for proud participants; use failed intentions or avoidance as defining behavior only when the profile supports a reluctant, aspiring, or self-deprecating identity. If identityDirection is absent, do not invent a strong success-or-failure stance.
+- Draw across different scenes and behavioral sources so the batch explores the lifestyle rather than repeating one discovery.
+- Do not copy source phrases mechanically. Synthesize their lived truth into short, natural language.
 - Express a behavior and its recognizable truth or consequence; do not merely pair the topic with an opinion.
-- Expose the behavior instead of explaining the personality. "Dinner Can Wait, The Comments Can't" is stronger than "Obsessed With True Crime And Snacks".
-- Prefer micro-rituals that reveal a tiny recognizable moment: comments before the clip, autoplay after midnight, rewinding because the comments distracted them, sending a bizarre case to a friend, explaining an obscure case at dinner, falling asleep with a podcast.
+- Prefer micro-rituals that reveal a tiny recognizable moment over broad statements of interest or personality.
 - Do not imply the wearer performs a profession when the profile says they consume, watch, read, listen, scroll, or discuss it.
 - For sensitive topics, joke about audience behavior, platform culture, implausible decisions, or bad excuses—not victims, suspects, gore, harm, or violence.
 - Avoid fandom nicknames, show-specific catchphrases, branded community labels, or slogans that require a specific podcast/show/creator fandom to understand.
@@ -299,9 +459,44 @@ export function rejectsPatternLeakage(slogan: string): boolean {
   return bannedPatternLeakage.some((rx) => rx.test(slogan));
 }
 
+function lifestyleSceneSignals(scene: LifestyleScene): string[] {
+  return [
+    scene.who,
+    scene.where,
+    scene.doing,
+    scene.before,
+    scene.after,
+    ...scene.recurringObjects,
+    ...scene.environmentalConditions,
+    ...scene.socialContext,
+    ...scene.emotionalStates,
+  ].filter(Boolean);
+}
+
+function latentLifestyleSignals(profile: DynamicNicheProfile): string[] {
+  const model = profile.latentLifestyleModel;
+  if (!model) return [];
+
+  return [
+    ...model.observableScenes.flatMap(lifestyleSceneSignals),
+    ...model.privateRituals,
+    ...model.environments,
+    ...model.recurringObjects,
+    ...model.socialInteractions,
+    ...model.tensions,
+    ...model.identitySignals,
+    ...model.repeatedDecisions,
+    ...model.tinyFrustrations,
+    ...model.smallVictories,
+    ...model.unspokenRules,
+    ...model.emotionalRewards,
+  ].filter(Boolean);
+}
+
 function profileSignals(profile: DynamicNicheProfile): string[] {
   return [
     ...profile.dimensions,
+    ...latentLifestyleSignals(profile),
     ...profile.rituals,
     ...(profile.microRituals || []),
     ...profile.contradictions,
@@ -406,7 +601,18 @@ export function dynamicSpecificityScore(slogan: string, profile: DynamicNichePro
 }
 
 export function truthResonanceScore(slogan: string, profile: DynamicNicheProfile): number {
+  const lifestyle = profile.latentLifestyleModel;
   const truthSignals = [
+    ...(lifestyle?.observableScenes.flatMap(lifestyleSceneSignals) || []),
+    ...(lifestyle?.privateRituals || []),
+    ...(lifestyle?.socialInteractions || []),
+    ...(lifestyle?.tensions || []),
+    ...(lifestyle?.identitySignals || []),
+    ...(lifestyle?.repeatedDecisions || []),
+    ...(lifestyle?.tinyFrustrations || []),
+    ...(lifestyle?.smallVictories || []),
+    ...(lifestyle?.unspokenRules || []),
+    ...(lifestyle?.emotionalRewards || []),
     ...profile.rituals,
     ...(profile.microRituals || []),
     ...profile.contradictions,
@@ -423,6 +629,7 @@ export function truthResonanceScore(slogan: string, profile: DynamicNicheProfile
 export function behavioralContradictionScore(slogan: string, profile: DynamicNicheProfile): number {
   const text = slogan.toLowerCase();
   const contradictionHits = signalWordHitCount(slogan, [
+    ...(profile.latentLifestyleModel?.tensions || []),
     ...profile.contradictions,
     ...profile.embarrassingTruths,
   ]);
@@ -433,6 +640,11 @@ export function behavioralContradictionScore(slogan: string, profile: DynamicNic
 
 export function ritualRecognitionScore(slogan: string, profile: DynamicNicheProfile): number {
   const ritualHits = signalWordHitCount(slogan, [
+    ...(profile.latentLifestyleModel?.observableScenes.flatMap(lifestyleSceneSignals) || []),
+    ...(profile.latentLifestyleModel?.privateRituals || []),
+    ...(profile.latentLifestyleModel?.repeatedDecisions || []),
+    ...(profile.latentLifestyleModel?.smallVictories || []),
+    ...(profile.latentLifestyleModel?.unspokenRules || []),
     ...profile.rituals,
     ...(profile.microRituals || []),
     ...profile.obsessions,
@@ -444,6 +656,9 @@ export function ritualRecognitionScore(slogan: string, profile: DynamicNicheProf
 
 export function communityAuthenticityScore(slogan: string, profile: DynamicNicheProfile): number {
   const hits = signalWordHitCount(slogan, [
+    ...(profile.latentLifestyleModel?.identitySignals || []),
+    ...(profile.latentLifestyleModel?.socialInteractions || []),
+    ...(profile.latentLifestyleModel?.unspokenRules || []),
     ...profile.insiderLanguage,
     ...profile.statusSignals,
     ...profile.embarrassingTruths,
@@ -454,6 +669,8 @@ export function communityAuthenticityScore(slogan: string, profile: DynamicNiche
 export function insiderWordplayScore(slogan: string, profile: DynamicNicheProfile): number {
   const text = slogan.toLowerCase();
   const insiderHits = shortSignalHitCount(slogan, [
+    ...(profile.latentLifestyleModel?.identitySignals || []),
+    ...(profile.latentLifestyleModel?.unspokenRules || []),
     ...profile.insiderLanguage,
     ...profile.statusSignals,
     ...profile.obsessions,
@@ -673,6 +890,12 @@ export function screenshotProbabilityScore(slogan: string, profile: DynamicNiche
 export function recognitionLatencyScore(slogan: string, profile: DynamicNicheProfile): number {
   const text = slogan.toLowerCase();
   const microHits = distinctiveSignalHitCount(slogan, [
+    ...(profile.latentLifestyleModel?.observableScenes.flatMap(lifestyleSceneSignals) || []),
+    ...(profile.latentLifestyleModel?.privateRituals || []),
+    ...(profile.latentLifestyleModel?.repeatedDecisions || []),
+    ...(profile.latentLifestyleModel?.tinyFrustrations || []),
+    ...(profile.latentLifestyleModel?.smallVictories || []),
+    ...(profile.latentLifestyleModel?.unspokenRules || []),
     ...(profile.microRituals || []),
     ...profile.rituals,
     ...profile.embarrassingTruths,
