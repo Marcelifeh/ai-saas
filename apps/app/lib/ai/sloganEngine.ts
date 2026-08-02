@@ -117,6 +117,7 @@ import {
   insiderWordplayScore,
   passesDimensionCoverage,
   recognitionLatencyScore,
+  recognitionProbabilityScore,
   rejectsPatternLeakage,
   ritualRecognitionScore,
   semanticCompressionScore,
@@ -159,6 +160,7 @@ export interface RankedSlogan {
   emotion: number;
   emotionScore: number;
   recognitionScore?: number;
+  recognitionProbability?: number;
   punch: number;
   punchScore: number;
   visualFit: number;
@@ -3197,6 +3199,7 @@ function rankDynamicProfileSlogans(
       const truthScore = dynamicTruthResonanceScore(slogan, profile);
       const authenticityScore = dynamicCommunityAuthenticityScore(slogan, profile);
       const recognitionScore = recognitionLatencyScore(slogan, profile);
+      const recognitionProbability = recognitionProbabilityScore(slogan, profile);
       const semanticCompression = semanticCompressionScore(slogan, profile);
       const explanatoryPenalty = explanatoryLanguagePenalty(slogan);
       const contradictionScore = behavioralContradictionScore(slogan, profile);
@@ -3205,6 +3208,7 @@ function rankDynamicProfileSlogans(
         truthScore * rankingWeights.truth +
           authenticityScore * rankingWeights.authenticity +
           recognitionScore * rankingWeights.recognition +
+          recognitionProbability * rankingWeights.recognitionProbability +
           semanticCompression * rankingWeights.semanticCompression +
           brevity.score * rankingWeights.brevity +
           visualWidthScore * rankingWeights.visualWidth +
@@ -3231,6 +3235,7 @@ function rankDynamicProfileSlogans(
           "Generated from dynamic niche profile",
           "Passed pattern leakage gate",
           "Passed compressed behavioral evidence gate",
+          `Estimated self-recognition: ${recognitionProbability}`,
           `Ranked for ${layoutMode} layout`,
         ],
         salesSignals,
@@ -3244,6 +3249,7 @@ function rankDynamicProfileSlogans(
         emotion: truthScore,
         emotionScore: truthScore,
         recognitionScore,
+        recognitionProbability,
         punch: screenshotScore,
         punchScore: screenshotScore,
         visualFit: specificityScore,
@@ -3402,7 +3408,7 @@ export async function generateHighPotentialSlogans(
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
   const layoutKey = input.layoutMode ?? "standard";
-  const cacheKey = `slogans:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
+  const cacheKey = `slogans:behavior-v2:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
 
   // Try in-memory/Redis cache (async read for cold-starts)
   try {
@@ -3509,7 +3515,10 @@ function buildPromptDescription(style?: string, niche?: string): string {
 function profileVisualCueText(profile?: DynamicNicheProfile): string {
   const visualCulture = profile?.visualCulture || [];
   const rituals = profile?.rituals || [];
-  const source = visualCulture.length >= 4 ? visualCulture : [...visualCulture, ...rituals];
+  const comfortObjects = profile?.latentLifestyleModel?.comfortObjects || [];
+  const source = visualCulture.length >= 4
+    ? visualCulture
+    : [...visualCulture, ...comfortObjects, ...rituals];
   const cues = dedupeStrings(source)
     .map((cue) => cue.replace(/\s+/g, " ").replace(/[.;\s]+$/g, "").trim())
     .filter(Boolean)

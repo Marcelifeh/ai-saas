@@ -20,6 +20,14 @@ export interface LatentLifestyleModel {
   identityDirection?: IdentityDirection;
   observableScenes: LifestyleScene[];
   privateRituals: string[];
+  /** Repeated ways members engage with the core activity or interest. */
+  participationHabits?: string[];
+  /** Calendar-, season-, event-, or time-triggered changes in behavior. */
+  seasonalBehaviors?: string[];
+  /** Objects actively used for comfort during the behavior, not decorative topic symbols. */
+  comfortObjects?: string[];
+  /** Repeated acquiring, curating, organizing, preserving, or upgrading behavior. */
+  collectionHabits?: string[];
   environments: string[];
   recurringObjects: string[];
   socialInteractions: string[];
@@ -92,6 +100,7 @@ export interface DynamicRankingWeights {
   truth: number;
   authenticity: number;
   recognition: number;
+  recognitionProbability: number;
   semanticCompression: number;
   brevity: number;
   visualWidth: number;
@@ -212,6 +221,10 @@ function safeLatentLifestyleModel(value: unknown): LatentLifestyleModel {
     identityDirection: safeIdentityDirection(model.identityDirection),
     observableScenes: safeLifestyleScenes(model.observableScenes),
     privateRituals: safeStringArray(model.privateRituals),
+    participationHabits: safeStringArray(model.participationHabits),
+    seasonalBehaviors: safeStringArray(model.seasonalBehaviors),
+    comfortObjects: safeStringArray(model.comfortObjects),
+    collectionHabits: safeStringArray(model.collectionHabits),
     environments: safeStringArray(model.environments),
     recurringObjects: safeStringArray(model.recurringObjects),
     socialInteractions: safeStringArray(model.socialInteractions),
@@ -310,6 +323,10 @@ Return ONLY valid JSON:
       }
     ],
     "privateRituals": [],
+    "participationHabits": [],
+    "seasonalBehaviors": [],
+    "comfortObjects": [],
+    "collectionHabits": [],
     "environments": [],
     "recurringObjects": [],
     "socialInteractions": [],
@@ -339,6 +356,13 @@ Rules:
 - Infer a lifestyle, not a bag of related topics or keywords.
 - Calibrate detail to evidence. Never invent rituals, objects, jargon, social behavior, or scenes merely to fill a field or meet a count target. For a sparse or unusual niche, return fewer high-confidence items and leave unsupported arrays empty.
 - Discover what repeatedly happens that outsiders rarely notice: private rituals, small interruptions, recurring choices, handled objects, social exchanges, tiny frustrations, and quiet victories.
+- participationHabits must capture repeated ways members consume, practice, maintain, prepare for, or return to the core activity. This is the niche-agnostic equivalent of fields such as reading habits, training habits, viewing habits, care habits, or collecting routines; name the actual behavior rather than the category.
+- seasonalBehaviors must capture behavior that changes with a supported season, holiday, event cycle, weather pattern, or time of day. Leave it empty when the niche has no credible temporal trigger. Do not return seasonal imagery by itself.
+- comfortObjects must contain objects members actively handle or arrange while doing the behavior. Connect each object to its use in a scene; exclude decorative symbols and generic aesthetic props.
+- collectionHabits must capture repeated acquiring, curating, organizing, preserving, displaying, upgrading, or scarcity-driven behavior. Leave it empty when collecting is not supported by the niche.
+- These behavioral facets are evidence, not mandatory quotas. Never invent entries merely to populate the arrays.
+- Prefer facet entries that a meaningful share of the narrow audience would recognize from their own life. Reserve unusual but low-frequency details for observableScenes instead of presenting them as common habits.
+- Judge behavioral evidence by likely self-recognition, not by how clever its thematic association sounds.
 - For a behaviorally rich niche, return at least 5 observableScenes. For a sparse niche, return only the scenes supported by the niche and audience. Each scene must describe one coherent recurring moment, including who is present, where it happens, what is being done, what tends to happen before and after, and the relevant objects, conditions, social context, and emotions.
 - Scenes must be causally coherent. Do not combine details merely because they all relate to the broad category.
 - Infer environments and recurringObjects from the observableScenes. Prefer places and objects the audience actually encounters over decorative symbols associated with the topic.
@@ -436,6 +460,8 @@ Rules:
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
 - Treat the latent lifestyle model as the primary creative source. Use the legacy fields as supporting evidence.
 - Each slogan must reveal one or more inferred scenes, private rituals, tensions, identity signals, repeated decisions, tiny frustrations, small victories, unspoken rules, or emotional rewards.
+- Prefer participation habits, seasonal behaviors, comfort-object use, and collection habits when they reveal a widely shared "that's me" moment. An object alone is not behavioral evidence; preserve what the audience repeatedly does with it.
+- Favor evidence likely to be recognized by a meaningful share of the specific audience over obscure cleverness or topic-word combinations.
 - Let the observable behavior determine the rhetoric. Invent the wording and sentence structure for this niche; do not translate evidence into a recurring frame.
 - Prefer an observable moment over a description of the audience.
 - Compress compatible details from the same scene when it improves recognition. Do not splice unrelated objects or actions together for superficial specificity.
@@ -475,6 +501,9 @@ export function deriveSloganLengthBudget(
   const lifestyle = profile.latentLifestyleModel;
   const evidenceCount =
     (profile.microRituals?.length ?? 0) +
+    (lifestyle?.participationHabits?.length ?? 0) +
+    (lifestyle?.seasonalBehaviors?.length ?? 0) +
+    (lifestyle?.collectionHabits?.length ?? 0) +
     (lifestyle?.tensions.length ?? 0) +
     (profile.insiderLanguage?.length ?? 0) +
     (lifestyle?.unspokenRules.length ?? 0);
@@ -503,9 +532,10 @@ export function deriveDynamicRankingWeights(
 ): DynamicRankingWeights {
   if (layout === "compact") {
     return {
-      truth: 0.20,
-      authenticity: 0.15,
-      recognition: 0.15,
+      truth: 0.15,
+      authenticity: 0.10,
+      recognition: 0.10,
+      recognitionProbability: 0.15,
       semanticCompression: 0.15,
       brevity: 0.20,
       visualWidth: 0.15,
@@ -514,20 +544,22 @@ export function deriveDynamicRankingWeights(
   }
   if (layout === "statement") {
     return {
-      truth: 0.30,
-      authenticity: 0.15,
-      recognition: 0.13,
-      semanticCompression: 0.12,
-      brevity: 0.08,
-      visualWidth: 0.05,
-      contradiction: 0.17,
+      truth: 0.25,
+      authenticity: 0.12,
+      recognition: 0.10,
+      recognitionProbability: 0.15,
+      semanticCompression: 0.10,
+      brevity: 0.06,
+      visualWidth: 0.04,
+      contradiction: 0.18,
     };
   }
   return {
-    truth: 0.25,
-    authenticity: 0.20,
-    recognition: 0.20,
-    semanticCompression: 0.20,
+    truth: 0.20,
+    authenticity: 0.15,
+    recognition: 0.15,
+    recognitionProbability: 0.20,
+    semanticCompression: 0.15,
     brevity: 0.15,
     visualWidth: 0,
     contradiction: 0,
@@ -662,6 +694,10 @@ function latentLifestyleSignals(profile: DynamicNicheProfile): string[] {
   return [
     ...model.observableScenes.flatMap(lifestyleSceneSignals),
     ...model.privateRituals,
+    ...(model.participationHabits ?? []),
+    ...(model.seasonalBehaviors ?? []),
+    ...(model.comfortObjects ?? []),
+    ...(model.collectionHabits ?? []),
     ...model.environments,
     ...model.recurringObjects,
     ...model.socialInteractions,
@@ -787,6 +823,10 @@ export function truthResonanceScore(slogan: string, profile: DynamicNicheProfile
   const truthSignals = [
     ...(lifestyle?.observableScenes.flatMap(lifestyleSceneSignals) || []),
     ...(lifestyle?.privateRituals || []),
+    ...(lifestyle?.participationHabits || []),
+    ...(lifestyle?.seasonalBehaviors || []),
+    ...(lifestyle?.comfortObjects || []),
+    ...(lifestyle?.collectionHabits || []),
     ...(lifestyle?.socialInteractions || []),
     ...(lifestyle?.tensions || []),
     ...(lifestyle?.identitySignals || []),
@@ -824,6 +864,9 @@ export function ritualRecognitionScore(slogan: string, profile: DynamicNicheProf
   const ritualHits = signalWordHitCount(slogan, [
     ...(profile.latentLifestyleModel?.observableScenes.flatMap(lifestyleSceneSignals) || []),
     ...(profile.latentLifestyleModel?.privateRituals || []),
+    ...(profile.latentLifestyleModel?.participationHabits || []),
+    ...(profile.latentLifestyleModel?.seasonalBehaviors || []),
+    ...(profile.latentLifestyleModel?.collectionHabits || []),
     ...(profile.latentLifestyleModel?.repeatedDecisions || []),
     ...(profile.latentLifestyleModel?.smallVictories || []),
     ...(profile.latentLifestyleModel?.unspokenRules || []),
@@ -1067,6 +1110,10 @@ export function semanticCompressionScore(
     ...(profile.microRituals ?? []),
     ...(profile.rituals ?? []),
     ...(lifestyle?.privateRituals ?? []),
+    ...(lifestyle?.participationHabits ?? []),
+    ...(lifestyle?.seasonalBehaviors ?? []),
+    ...(lifestyle?.comfortObjects ?? []),
+    ...(lifestyle?.collectionHabits ?? []),
     ...(lifestyle?.recurringObjects ?? []),
     ...(lifestyle?.environments ?? []),
     ...(lifestyle?.repeatedDecisions ?? []),
@@ -1110,6 +1157,9 @@ function behavioralActionStems(profile: DynamicNicheProfile): string[] {
     ...profile.obsessions,
     ...(lifestyle?.observableScenes.flatMap((scene) => [scene.doing, scene.before, scene.after]) ?? []),
     ...(lifestyle?.privateRituals ?? []),
+    ...(lifestyle?.participationHabits ?? []),
+    ...(lifestyle?.seasonalBehaviors ?? []),
+    ...(lifestyle?.collectionHabits ?? []),
     ...(lifestyle?.repeatedDecisions ?? []),
     ...(lifestyle?.smallVictories ?? []),
     ...(lifestyle?.unspokenRules ?? []),
@@ -1239,6 +1289,9 @@ export function recognitionLatencyScore(slogan: string, profile: DynamicNichePro
   const microHits = distinctiveSignalHitCount(slogan, [
     ...(profile.latentLifestyleModel?.observableScenes.flatMap(lifestyleSceneSignals) || []),
     ...(profile.latentLifestyleModel?.privateRituals || []),
+    ...(profile.latentLifestyleModel?.participationHabits || []),
+    ...(profile.latentLifestyleModel?.seasonalBehaviors || []),
+    ...(profile.latentLifestyleModel?.collectionHabits || []),
     ...(profile.latentLifestyleModel?.repeatedDecisions || []),
     ...(profile.latentLifestyleModel?.tinyFrustrations || []),
     ...(profile.latentLifestyleModel?.smallVictories || []),
@@ -1264,6 +1317,58 @@ export function recognitionLatencyScore(slogan: string, profile: DynamicNichePro
       concise -
       explanationPenalty,
   ));
+}
+
+export function recognitionProbabilityScore(
+  slogan: string,
+  profile: DynamicNicheProfile,
+): number {
+  const lifestyle = profile.latentLifestyleModel;
+  const sharedBehaviorGroups = [
+    lifestyle?.participationHabits ?? [],
+    lifestyle?.seasonalBehaviors ?? [],
+    lifestyle?.collectionHabits ?? [],
+    lifestyle?.privateRituals ?? [],
+    lifestyle?.repeatedDecisions ?? [],
+    lifestyle?.tinyFrustrations ?? [],
+    lifestyle?.unspokenRules ?? [],
+    profile.microRituals ?? [],
+    profile.rituals,
+  ].filter((group) => group.length > 0);
+  const sharedSignals = sharedBehaviorGroups.flat();
+  const distinctiveHits = Math.min(
+    3,
+    distinctiveSignalHitCount(slogan, sharedSignals, profile),
+  );
+  const matchedGroups = Math.min(
+    4,
+    sharedBehaviorGroups.filter((group) => signalWordHitCount(slogan, group) > 0).length,
+  );
+  const objectHits = Math.min(2, signalWordHitCount(slogan, [
+    ...(lifestyle?.comfortObjects ?? []),
+    ...(lifestyle?.recurringObjects ?? []),
+  ]));
+  const actionStems = behavioralActionStems(profile);
+  const hasActionEvidence = containsProfileActionEvidence(slogan, actionStems);
+  const hasProfileCoverage = passesDimensionCoverage(slogan, profile);
+  const broadLabelPenalty = Math.min(24, broadCategoryLabelCount(slogan, profile) * 8);
+  const explanationPenalty = explanatoryLanguagePenalty(slogan);
+  const descriptionPenalty = categoryDescriptionPenalty(slogan, profile);
+
+  let score =
+    distinctiveHits * 18 +
+    matchedGroups * 10 +
+    objectHits * 8 +
+    (hasActionEvidence ? 15 : 0) +
+    (hasProfileCoverage ? 8 : 0) -
+    broadLabelPenalty -
+    explanationPenalty -
+    descriptionPenalty;
+
+  if (distinctiveHits === 0 && objectHits === 0) score = Math.min(score, 45);
+  if (!hasActionEvidence && objectHits === 0 && matchedGroups < 2) score = Math.min(score, 55);
+
+  return Math.max(0, Math.min(100, Math.round(score)));
 }
 
 const narrowCharacters = new Set(["i", "l", "I", "t", "f", "j", "r"]);
@@ -1555,16 +1660,18 @@ export function scoreDynamicSlogan(
   const categoryPenalty = categoryDescriptionPenalty(slogan, profile);
   const explanationPenalty = explanatoryDescriptionPenalty(slogan, profile);
   const recognitionLatency = recognitionLatencyScore(slogan, profile);
+  const recognitionProbability = recognitionProbabilityScore(slogan, profile);
   const thumbnailReadability = thumbnailReadabilityScore(slogan);
 
   const rawScore = Math.max(0, Math.round(
-    truth * 0.16 +
-      authenticity * 0.13 +
-      recognitionLatency * 0.16 +
-      thumbnailReadability * 0.14 +
-      specificity * 0.07 +
-      contradiction * 0.15 +
-      insider * 0.12 +
+    truth * 0.14 +
+      authenticity * 0.11 +
+      recognitionLatency * 0.10 +
+      recognitionProbability * 0.16 +
+      thumbnailReadability * 0.12 +
+      specificity * 0.06 +
+      contradiction * 0.14 +
+      insider * 0.10 +
       ritual * 0.07 -
       moodPenalty -
       categoryPenalty -

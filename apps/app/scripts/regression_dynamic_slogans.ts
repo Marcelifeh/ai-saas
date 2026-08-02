@@ -16,6 +16,7 @@ import {
   normalizeDynamicNicheProfile,
   passesDimensionCoverage,
   recognitionLatencyScore,
+  recognitionProbabilityScore,
   rejectsPatternLeakage,
   ritualRecognitionScore,
   scoreDynamicSlogan,
@@ -225,6 +226,22 @@ const gothicBookProfile: DynamicNicheProfile = {
   latentLifestyleModel: {
     observableScenes: [],
     privateRituals: ["reading by candlelight"],
+    participationHabits: [
+      "carries the current novel from room to room",
+      "reads one planned chapter until well past bedtime",
+      "highlights favorite passages for a later reread",
+    ],
+    seasonalBehaviors: [
+      "switches to gothic novels every October",
+      "re-reads a favorite gothic classic each fall",
+      "buys autumn candles specifically for evening reading",
+    ],
+    comfortObjects: ["reading tea", "soft reading blanket", "autumn candle", "bookmark"],
+    collectionHabits: [
+      "buys books faster than they get read",
+      "stacks unread books on purpose",
+      "collects beautiful editions of gothic classics",
+    ],
     environments: ["used bookshop", "candlelit reading chair"],
     recurringObjects: ["cider mug", "reading list", "rare edition"],
     socialInteractions: ["debating gothic tropes over cider"],
@@ -280,6 +297,13 @@ assert.equal(
 const compactWeights = deriveDynamicRankingWeights("compact");
 const standardWeights = deriveDynamicRankingWeights("standard");
 const statementWeights = deriveDynamicRankingWeights("statement");
+for (const [layout, weights] of Object.entries({ compactWeights, standardWeights, statementWeights })) {
+  const totalWeight = Object.values(weights).reduce((sum, weight) => sum + weight, 0);
+  assert.ok(
+    Math.abs(totalWeight - 1) < 0.0001,
+    `Expected ${layout} ranking weights to total 1, received ${totalWeight}`,
+  );
+}
 assert.ok(
   compactWeights.brevity + compactWeights.visualWidth >
     standardWeights.brevity + standardWeights.visualWidth,
@@ -433,6 +457,11 @@ for (const regressionCase of crossNicheLayoutCases) {
       semanticCompressionScore(regressionCase.generic, regressionCase.profile),
     `Expected compact behavioral evidence to beat a generic label for ${regressionCase.profile.niche}`,
   );
+  assert.ok(
+    recognitionProbabilityScore(regressionCase.behavioral, regressionCase.profile) >
+      recognitionProbabilityScore(regressionCase.generic, regressionCase.profile),
+    `Expected shared behavior to have higher self-recognition probability for ${regressionCase.profile.niche}`,
+  );
 
   for (const layoutMode of layoutModes) {
     const budget = deriveSloganLengthBudget(regressionCase.profile, layoutMode);
@@ -478,6 +507,34 @@ const sparseMechanicalPencilProfile = normalizeDynamicNicheProfile(
       privateRituals: ["testing the restored clip on a scrap of fabric"],
     },
   },
+);
+
+const normalizedBehavioralFacetProfile = normalizeDynamicNicheProfile(
+  "Seasonal Collectors",
+  undefined,
+  {
+    latentLifestyleModel: {
+      participationHabits: ["checks the display shelf before buying another piece"],
+      seasonalBehaviors: ["reorganizes the display at the start of winter"],
+      comfortObjects: ["inspection cloth"],
+      collectionHabits: ["tracks missing editions in a handwritten list"],
+    },
+  },
+);
+assert.deepEqual(
+  {
+    participationHabits: normalizedBehavioralFacetProfile.latentLifestyleModel?.participationHabits,
+    seasonalBehaviors: normalizedBehavioralFacetProfile.latentLifestyleModel?.seasonalBehaviors,
+    comfortObjects: normalizedBehavioralFacetProfile.latentLifestyleModel?.comfortObjects,
+    collectionHabits: normalizedBehavioralFacetProfile.latentLifestyleModel?.collectionHabits,
+  },
+  {
+    participationHabits: ["checks the display shelf before buying another piece"],
+    seasonalBehaviors: ["reorganizes the display at the start of winter"],
+    comfortObjects: ["inspection cloth"],
+    collectionHabits: ["tracks missing editions in a handwritten list"],
+  },
+  "Expected niche-agnostic behavioral facets to survive profile normalization",
 );
 
 const plannedMorningWorkoutProfile = normalizeDynamicNicheProfile(
