@@ -53,6 +53,51 @@ export type DynamicNicheProfile = {
   latentLifestyleModel?: LatentLifestyleModel;
 };
 
+export type SloganLayoutMode = "compact" | "standard" | "statement";
+
+export interface SloganLengthBudget {
+  idealWords: number;
+  maxWords: number;
+  idealCharacters: number;
+  maxCharacters: number;
+  targetReadTimeMs: number;
+}
+
+export interface AdaptiveBrevityEvaluation {
+  score: number;
+  passes: boolean;
+  wordCount: number;
+  characterCount: number;
+  visualWidth: number;
+}
+
+export interface CompressionMeaningRetention {
+  originalTruth: number;
+  compressedTruth: number;
+  originalSpecificity: number;
+  compressedSpecificity: number;
+  truthRetentionRatio: number;
+  specificityRetentionRatio: number;
+  evidenceOverlapRatio: number;
+  preservesActionEvidence: boolean;
+  preservesMeaning: boolean;
+}
+
+export interface DynamicCompressionAttempt extends CompressionMeaningRetention {
+  original: string;
+  compressed: string;
+}
+
+export interface DynamicRankingWeights {
+  truth: number;
+  authenticity: number;
+  recognition: number;
+  semanticCompression: number;
+  brevity: number;
+  visualWidth: number;
+  contradiction: number;
+}
+
 export type RhetoricalFamily =
   | "COMMAND"
   | "COMPARISON"
@@ -410,7 +455,9 @@ Rules:
 - Vary rhetorical structure across the batch. Mix observations, confessions, commands, questions, priorities, contrasts, and identity lines when the profile supports them.
 - Do not repeat the same grammatical frame with different nouns. In particular, generate no more than two comparisons, confessions, identity statements, commands, or questions.
 - Vary sentence openings. Do not begin multiple slogans with the same word.
-- Keep slogans short, wearable, and human.
+- Preserve the strongest complete behavioral concept in this stage; a downstream adaptive pass handles length and visual fit.
+- Do not optimize against a fixed word or character count here.
+- Keep slogans wearable and human.
 - Prefer lived truth over cleverness.
 - Return ONLY JSON:
 { "slogans": [] }
@@ -418,6 +465,141 @@ Rules:
 
   const json = await callAIJson<{ slogans?: unknown }>(prompt);
   return safeStringArray(json.slogans, count);
+}
+
+export function deriveSloganLengthBudget(
+  profile: DynamicNicheProfile,
+  layout: SloganLayoutMode = "standard",
+): SloganLengthBudget {
+  const dimensionCount = Math.max(profile.dimensions?.length ?? 1, 1);
+  const lifestyle = profile.latentLifestyleModel;
+  const evidenceCount =
+    (profile.microRituals?.length ?? 0) +
+    (lifestyle?.tensions.length ?? 0) +
+    (profile.insiderLanguage?.length ?? 0) +
+    (lifestyle?.unspokenRules.length ?? 0);
+
+  const complexityAdjustment = Math.min(dimensionCount - 1, 2);
+  const evidenceAdjustment = evidenceCount >= 12 ? -1 : 0;
+
+  const base =
+    layout === "compact"
+      ? { idealWords: 3, maxWords: 5, idealCharacters: 24, maxCharacters: 34 }
+      : layout === "statement"
+        ? { idealWords: 6, maxWords: 8, idealCharacters: 38, maxCharacters: 52 }
+        : { idealWords: 4, maxWords: 6, idealCharacters: 30, maxCharacters: 42 };
+
+  return {
+    idealWords: Math.max(2, base.idealWords + complexityAdjustment + evidenceAdjustment),
+    maxWords: Math.min(8, base.maxWords + complexityAdjustment),
+    idealCharacters: base.idealCharacters + complexityAdjustment * 4,
+    maxCharacters: base.maxCharacters + complexityAdjustment * 4,
+    targetReadTimeMs: layout === "compact" ? 900 : 1300,
+  };
+}
+
+export function deriveDynamicRankingWeights(
+  layout: SloganLayoutMode = "standard",
+): DynamicRankingWeights {
+  if (layout === "compact") {
+    return {
+      truth: 0.20,
+      authenticity: 0.15,
+      recognition: 0.15,
+      semanticCompression: 0.15,
+      brevity: 0.20,
+      visualWidth: 0.15,
+      contradiction: 0,
+    };
+  }
+  if (layout === "statement") {
+    return {
+      truth: 0.30,
+      authenticity: 0.15,
+      recognition: 0.13,
+      semanticCompression: 0.12,
+      brevity: 0.08,
+      visualWidth: 0.05,
+      contradiction: 0.17,
+    };
+  }
+  return {
+    truth: 0.25,
+    authenticity: 0.20,
+    recognition: 0.20,
+    semanticCompression: 0.20,
+    brevity: 0.15,
+    visualWidth: 0,
+    contradiction: 0,
+  };
+}
+
+export async function compressDynamicSlogansWithDiagnostics(
+  profile: DynamicNicheProfile,
+  slogans: string[],
+  budget: SloganLengthBudget,
+): Promise<DynamicCompressionAttempt[]> {
+  if (slogans.length === 0) return [];
+
+  const prompt = `
+Compress the following t-shirt slogan candidates.
+
+NICHE:
+${profile.niche}
+
+AUDIENCE:
+${profile.audience}
+
+TARGET:
+- Ideal word count: ${budget.idealWords}
+- Absolute maximum words: ${budget.maxWords}
+- Ideal character count: ${budget.idealCharacters}
+- Absolute maximum characters: ${budget.maxCharacters}
+- Target reading time: ${budget.targetReadTimeMs} milliseconds
+
+RULES:
+- Preserve the specific behavior, contradiction, ritual, or insider truth.
+- Remove explanatory wording and sentence-like setup.
+- Remove grammatical filler such as "my favorite", "while", "the one filled with", and unnecessary setup.
+- Do not use reusable slogan templates.
+- Do not replace specific behaviors with broad niche labels.
+- Do not force rhyme, alliteration, or punctuation.
+- Each result must remain understandable without the niche title.
+- Return one compressed version per input, in the same order.
+- Do not copy or imitate a fixed rewrite; synthesize from each input's behavioral evidence.
+- Return JSON only.
+
+INPUT:
+${JSON.stringify(slogans)}
+
+OUTPUT:
+{
+  "slogans": []
+}
+`;
+
+  const response = await callAIJson<{ slogans?: unknown }>(prompt);
+  const compressedValues = Array.isArray(response.slogans) ? response.slogans : [];
+
+  return slogans.map((original, index) => {
+    const compressed = safeString(compressedValues[index]);
+    return {
+      original,
+      compressed,
+      ...evaluateCompressionMeaningRetention(original, compressed, profile),
+    };
+  });
+}
+
+export async function compressDynamicSlogans(
+  profile: DynamicNicheProfile,
+  slogans: string[],
+  budget: SloganLengthBudget,
+): Promise<string[]> {
+  const attempts = await compressDynamicSlogansWithDiagnostics(profile, slogans, budget);
+  return attempts
+    .filter((attempt) => attempt.preservesMeaning)
+    .map((attempt) => attempt.compressed);
 }
 
 const bannedPatternLeakage = [
@@ -845,6 +1027,171 @@ function explanatoryDescriptionPenalty(slogan: string, profile: DynamicNicheProf
   return Math.min(35, penalty);
 }
 
+export function explanatoryLanguagePenalty(slogan: string): number {
+  const lower = slogan.toLowerCase().trim();
+  const words = lower.split(/\s+/).filter(Boolean);
+  let penalty = 0;
+
+  const clauseMarkers = [
+    "while",
+    "because",
+    "whenever",
+    "filled with",
+    "the one",
+    "as i",
+  ];
+  const descriptiveOpenings = [
+    /^creating\b/,
+    /^reading by\b/,
+    /^finding\b/,
+    /^sipping\b/,
+    /^my favorite\b/,
+  ];
+
+  penalty += clauseMarkers.filter((marker) => lower.includes(marker)).length * 8;
+  penalty += descriptiveOpenings.filter((pattern) => pattern.test(lower)).length * 8;
+  if (words.length >= 8) penalty += 12;
+  if ((lower.match(/,/g) ?? []).length >= 2) penalty += 8;
+
+  return Math.min(penalty, 40);
+}
+
+export function semanticCompressionScore(
+  slogan: string,
+  profile: DynamicNicheProfile,
+): number {
+  const lifestyle = profile.latentLifestyleModel;
+  const genericTerms = nicheStopWords(profile);
+  const evidenceTerms = [...new Set([
+    ...(profile.insiderLanguage ?? []),
+    ...(profile.microRituals ?? []),
+    ...(profile.rituals ?? []),
+    ...(lifestyle?.privateRituals ?? []),
+    ...(lifestyle?.recurringObjects ?? []),
+    ...(lifestyle?.environments ?? []),
+    ...(lifestyle?.repeatedDecisions ?? []),
+    ...(lifestyle?.smallVictories ?? []),
+    ...(lifestyle?.observableScenes.flatMap((scene) => [
+      scene.doing,
+      scene.before,
+      scene.after,
+      ...scene.recurringObjects,
+      ...scene.environmentalConditions,
+    ]) ?? []),
+  ]
+    .flatMap((value) => value.toLowerCase().split(/\W+/))
+    .filter((word) => word.length >= 4 && !genericTerms.has(word)))];
+
+  const sloganTerms = new Set(
+    slogan.toLowerCase().split(/\W+/).filter(Boolean),
+  );
+  const matchedEvidence = evidenceTerms.filter((term) => sloganTerms.has(term)).length;
+  const wordCount = Math.max(sloganTerms.size, 1);
+
+  return Math.min(100, Math.round((matchedEvidence / wordCount) * 180));
+}
+
+function normalizedActionStem(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .replace(/ies$/, "y")
+    .replace(/ing$/, "")
+    .replace(/ed$/, "")
+    .replace(/es$/, "")
+    .replace(/s$/, "");
+}
+
+function behavioralActionStems(profile: DynamicNicheProfile): string[] {
+  const lifestyle = profile.latentLifestyleModel;
+  const behavioralPhrases = [
+    ...profile.rituals,
+    ...(profile.microRituals ?? []),
+    ...profile.obsessions,
+    ...(lifestyle?.observableScenes.flatMap((scene) => [scene.doing, scene.before, scene.after]) ?? []),
+    ...(lifestyle?.privateRituals ?? []),
+    ...(lifestyle?.repeatedDecisions ?? []),
+    ...(lifestyle?.smallVictories ?? []),
+    ...(lifestyle?.unspokenRules ?? []),
+  ].filter(Boolean);
+  const stems = new Set<string>();
+
+  for (const phrase of behavioralPhrases) {
+    const words = phrase.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const leadingStem = normalizedActionStem(words[0] ?? "");
+    if (leadingStem.length >= 4) stems.add(leadingStem);
+    for (const word of words) {
+      if (!/(?:ing|ed)$/.test(word)) continue;
+      const stem = normalizedActionStem(word);
+      if (stem.length >= 4) stems.add(stem);
+    }
+  }
+
+  return [...stems];
+}
+
+function containsProfileActionEvidence(text: string, actionStems: string[]): boolean {
+  const candidateStems = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map(normalizedActionStem)
+    .filter((stem) => stem.length >= 4);
+
+  return candidateStems.some((candidate) => actionStems.some((evidence) => (
+    candidate.startsWith(evidence) || evidence.startsWith(candidate)
+  )));
+}
+
+function retentionRatio(compressed: number, original: number): number {
+  if (original <= 0) return 1;
+  return Math.round((compressed / original) * 100) / 100;
+}
+
+export function evaluateCompressionMeaningRetention(
+  original: string,
+  compressed: string,
+  profile: DynamicNicheProfile,
+  minimumRetention = 0.7,
+): CompressionMeaningRetention {
+  const originalTruth = truthResonanceScore(original, profile);
+  const compressedTruth = truthResonanceScore(compressed, profile);
+  const originalSpecificity = dynamicSpecificityScore(original, profile);
+  const compressedSpecificity = dynamicSpecificityScore(compressed, profile);
+  const truthRetentionRatio = retentionRatio(compressedTruth, originalTruth);
+  const specificityRetentionRatio = retentionRatio(compressedSpecificity, originalSpecificity);
+  const originalEvidenceSignals = profileSignals(profile).filter((signal) => (
+    signalWordHitCount(original, [signal]) > 0
+  ));
+  const retainedEvidenceSignals = originalEvidenceSignals.filter((signal) => (
+    signalWordHitCount(compressed, [signal]) > 0
+  ));
+  const evidenceOverlapRatio = originalEvidenceSignals.length === 0
+    ? 1
+    : Math.round((retainedEvidenceSignals.length / originalEvidenceSignals.length) * 100) / 100;
+  const actionStems = behavioralActionStems(profile);
+  const originalHasActionEvidence = containsProfileActionEvidence(original, actionStems);
+  const preservesActionEvidence = !originalHasActionEvidence ||
+    containsProfileActionEvidence(compressed, actionStems);
+  const preservesMeaning = Boolean(compressed.trim()) &&
+    truthRetentionRatio >= minimumRetention &&
+    specificityRetentionRatio >= minimumRetention &&
+    evidenceOverlapRatio >= minimumRetention &&
+    preservesActionEvidence;
+
+  return {
+    originalTruth,
+    compressedTruth,
+    originalSpecificity,
+    compressedSpecificity,
+    truthRetentionRatio,
+    specificityRetentionRatio,
+    evidenceOverlapRatio,
+    preservesActionEvidence,
+    preservesMeaning,
+  };
+}
+
 export function genericMoodPenalty(slogan: string, profile: DynamicNicheProfile): number {
   const text = slogan.toLowerCase();
   const moodHits = genericMoodWords.filter((word) => text.includes(word)).length;
@@ -919,16 +1266,64 @@ export function recognitionLatencyScore(slogan: string, profile: DynamicNichePro
   ));
 }
 
-const narrowCharacters = new Set("fijlrtI1'.,:;!| ");
-const wideCharacters = new Set("mwMW@%&QO");
+const narrowCharacters = new Set(["i", "l", "I", "t", "f", "j", "r"]);
+const wideCharacters = new Set(["m", "w", "M", "W", "O", "Q"]);
 
 export function estimateVisualWidth(slogan: string): number {
   return Math.round([...slogan.trim()].reduce((width, character) => {
-    if (narrowCharacters.has(character)) return width + (character === " " ? 0.5 : 0.55);
+    if (character === " ") return width + 0.45;
+    if (narrowCharacters.has(character)) return width + 0.55;
     if (wideCharacters.has(character)) return width + 1.35;
-    if (/[A-Z0-9]/.test(character)) return width + 1.05;
-    return width + 0.9;
+    return width + 1;
   }, 0) * 10) / 10;
+}
+
+export function evaluateAdaptiveBrevity(
+  slogan: string,
+  budget: SloganLengthBudget,
+): AdaptiveBrevityEvaluation {
+  const cleaned = slogan.trim();
+  const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
+  const characterCount = cleaned.length;
+  const visualWidth = estimateVisualWidth(cleaned);
+  let score = 100;
+
+  if (wordCount > budget.idealWords) {
+    score -= (wordCount - budget.idealWords) * 10;
+  }
+  if (characterCount > budget.idealCharacters) {
+    score -= Math.ceil((characterCount - budget.idealCharacters) / 4) * 5;
+  }
+  if (visualWidth > budget.maxCharacters) {
+    score -= 15;
+  }
+
+  const passes =
+    wordCount <= budget.maxWords &&
+    characterCount <= budget.maxCharacters &&
+    visualWidth <= budget.maxCharacters &&
+    score >= 55;
+
+  return {
+    score: Math.max(0, score),
+    passes,
+    wordCount,
+    characterCount,
+    visualWidth,
+  };
+}
+
+export function adaptiveVisualWidthScore(
+  brevity: AdaptiveBrevityEvaluation,
+  budget: SloganLengthBudget,
+): number {
+  if (brevity.visualWidth <= budget.idealCharacters) return 100;
+  const availableOverflow = Math.max(
+    budget.maxCharacters - budget.idealCharacters,
+    1,
+  );
+  const overflow = brevity.visualWidth - budget.idealCharacters;
+  return Math.max(0, Math.round(100 - (overflow / availableOverflow) * 100));
 }
 
 export function thumbnailReadabilityScore(slogan: string): number {

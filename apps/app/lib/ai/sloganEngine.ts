@@ -100,24 +100,35 @@ import {
 } from "./behavioralSloganEngine";
 import { getBehavioralProfile, type BehavioralArchetype, type BehavioralProfile } from "./behavioralLexicon";
 import {
+  adaptiveVisualWidthScore,
   applyStructuralDiversityRanking,
   buildDynamicNicheProfile,
   behavioralContradictionScore,
   categoryDescriptionPenalty,
+  compressDynamicSlogansWithDiagnostics,
   communityAuthenticityScore as dynamicCommunityAuthenticityScore,
+  deriveDynamicRankingWeights,
+  deriveSloganLengthBudget,
   dynamicSpecificityScore,
+  evaluateAdaptiveBrevity,
+  explanatoryLanguagePenalty,
   genericMoodPenalty,
   generateSlogansFromDynamicProfile,
   insiderWordplayScore,
   passesDimensionCoverage,
+  recognitionLatencyScore,
   rejectsPatternLeakage,
   ritualRecognitionScore,
-  scoreDynamicSlogan,
+  semanticCompressionScore,
   screenshotProbabilityScore,
   thumbnailReadabilityScore,
   truthResonanceScore as dynamicTruthResonanceScore,
+  type AdaptiveBrevityEvaluation,
+  type DynamicCompressionAttempt,
   type DynamicNicheProfile,
   type RhetoricalFamily,
+  type SloganLayoutMode,
+  type SloganLengthBudget,
   wearabilityScore as dynamicWearabilityScore,
 } from "./dynamicNicheProfile";
 
@@ -190,6 +201,13 @@ export interface RankedSlogan {
   lexicalOpening?: string;
   thumbnailReadabilityScore?: number;
   structuralDiversityPenalty?: number;
+  brevity?: AdaptiveBrevityEvaluation;
+  semanticCompression?: number;
+  explanatoryPenalty?: number;
+  lengthBudget?: SloganLengthBudget;
+  visualWidthScore?: number;
+  layoutMode?: SloganLayoutMode;
+  compressionDiagnostics?: DynamicCompressionAttempt;
 }
 
 export interface SloganCollections {
@@ -221,6 +239,7 @@ export interface SloganEngineInput {
   execMode?: ExecMode;
   context?: string;
   cacheTtlSec?: number;
+  layoutMode?: SloganLayoutMode;
 }
 
 type PatternFamily = "ATTITUDE" | "HUMOR" | "IDENTITY" | "CONTRAST" | "STATEMENT" | "MINIMAL_LABEL" | "IDENTITY_SIGNAL" | "RELATABLE_LOOP" | "SOCIAL_SIGNAL" | "LEGACY";
@@ -3156,19 +3175,42 @@ function rankDynamicProfileSlogans(
   input: SloganEngineInput,
   profile: DynamicNicheProfile,
   base: Pick<SloganEngineResult, "persona" | "personaKey" | "mode">,
+  compressionAttempts: DynamicCompressionAttempt[] = [],
 ): RankedSlogan[] {
   const salesSignals = normalizeSalesSignals(input.salesSignals);
+  const layoutMode = input.layoutMode ?? "standard";
+  const lengthBudget = deriveSloganLengthBudget(profile, layoutMode);
+  const rankingWeights = deriveDynamicRankingWeights(layoutMode);
+  const compressionDiagnostics = new Map(
+    compressionAttempts.map((attempt) => [
+      cleanSlogan(attempt.compressed).toLowerCase(),
+      attempt,
+    ]),
+  );
 
   const individuallyRanked = dedupeStrings(slogans)
     .map(cleanSlogan)
     .filter(Boolean)
     .filter((slogan) => !rejectsPatternLeakage(slogan))
-    .filter((slogan) => passesDimensionCoverage(slogan, profile))
     .map((slogan) => {
-      const finalScore = clamp(scoreDynamicSlogan(slogan, profile), 0, 100);
+      const brevity = evaluateAdaptiveBrevity(slogan, lengthBudget);
       const truthScore = dynamicTruthResonanceScore(slogan, profile);
       const authenticityScore = dynamicCommunityAuthenticityScore(slogan, profile);
+      const recognitionScore = recognitionLatencyScore(slogan, profile);
+      const semanticCompression = semanticCompressionScore(slogan, profile);
+      const explanatoryPenalty = explanatoryLanguagePenalty(slogan);
       const contradictionScore = behavioralContradictionScore(slogan, profile);
+      const visualWidthScore = adaptiveVisualWidthScore(brevity, lengthBudget);
+      const finalScore = clamp(Math.round(
+        truthScore * rankingWeights.truth +
+          authenticityScore * rankingWeights.authenticity +
+          recognitionScore * rankingWeights.recognition +
+          semanticCompression * rankingWeights.semanticCompression +
+          brevity.score * rankingWeights.brevity +
+          visualWidthScore * rankingWeights.visualWidth +
+          contradictionScore * rankingWeights.contradiction -
+          explanatoryPenalty,
+      ), 0, 100);
       const insiderScore = insiderWordplayScore(slogan, profile);
       const ritualScore = ritualRecognitionScore(slogan, profile);
       const specificityScore = dynamicSpecificityScore(slogan, profile);
@@ -3188,7 +3230,8 @@ function rankDynamicProfileSlogans(
         reasons: [
           "Generated from dynamic niche profile",
           "Passed pattern leakage gate",
-          "Passed dimension coverage gate",
+          "Passed compressed behavioral evidence gate",
+          `Ranked for ${layoutMode} layout`,
         ],
         salesSignals,
         bucket: chooseBucket(finalScore, screenshotScore),
@@ -3200,7 +3243,7 @@ function rankDynamicProfileSlogans(
         identityScore: 0,
         emotion: truthScore,
         emotionScore: truthScore,
-        recognitionScore: specificityScore,
+        recognitionScore,
         punch: screenshotScore,
         punchScore: screenshotScore,
         visualFit: specificityScore,
@@ -3225,7 +3268,14 @@ function rankDynamicProfileSlogans(
         contradictionStrength: contradictionScore,
         ritualCompression: ritualScore,
         insiderSpecificity: insiderScore,
-        brevityScore: wearability,
+        brevityScore: brevity.score,
+        brevity,
+        semanticCompression,
+        explanatoryPenalty,
+        lengthBudget,
+        visualWidthScore,
+        layoutMode,
+        compressionDiagnostics: compressionDiagnostics.get(slogan.toLowerCase()),
         thumbnailReadabilityScore: thumbnailReadability,
         screenshotScore,
         nicheAlignmentScore: specificityScore,
@@ -3236,6 +3286,8 @@ function rankDynamicProfileSlogans(
         corporateTonePenalty: 0,
       };
     })
+    .filter((item) => item.brevity.passes)
+    .filter((item) => passesDimensionCoverage(item.slogan, profile) || item.semanticCompression >= 25)
     .sort((a, b) => b.score - a.score);
 
   return applyStructuralDiversityRanking(individuallyRanked).map((entry) => ({
@@ -3256,8 +3308,34 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
 
   try {
     const dynamicProfile = await buildDynamicNicheProfile(input.niche, input.audience);
-    const dynamicSlogans = await generateSlogansFromDynamicProfile(dynamicProfile, 20);
-    const dynamicRanked = rankDynamicProfileSlogans(dynamicSlogans, input, dynamicProfile, base);
+    const generated = await generateSlogansFromDynamicProfile(dynamicProfile, 20);
+    const lengthBudget = deriveSloganLengthBudget(dynamicProfile, input.layoutMode ?? "standard");
+    const compressionAttempts = await compressDynamicSlogansWithDiagnostics(
+      dynamicProfile,
+      generated,
+      lengthBudget,
+    );
+    const compressed = compressionAttempts
+      .filter((attempt) => attempt.preservesMeaning)
+      .map((attempt) => attempt.compressed);
+    const needsCompression = generated.filter((slogan, index) => (
+      !evaluateAdaptiveBrevity(slogan, lengthBudget).passes ||
+      !compressionAttempts[index]?.preservesMeaning
+    ));
+    const retryAttempts = needsCompression.length > 0
+      ? await compressDynamicSlogansWithDiagnostics(dynamicProfile, needsCompression, lengthBudget)
+      : [];
+    const retryCompressed = retryAttempts
+      .filter((attempt) => attempt.preservesMeaning)
+      .map((attempt) => attempt.compressed);
+    const compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
+    const dynamicRanked = rankDynamicProfileSlogans(
+      compressionCandidates,
+      input,
+      dynamicProfile,
+      base,
+      [...compressionAttempts, ...retryAttempts],
+    );
     if (dynamicRanked.length > 0) {
       const sortedDynamic = dedupeRanked(dynamicRanked);
       const collections = buildCollections(sortedDynamic);
@@ -3323,7 +3401,8 @@ export async function generateHighPotentialSlogans(
   const execMode = resolveExecMode(input.context, input.execMode);
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
-  const cacheKey = `slogans:${nicheKey}:${audienceKey}:${execMode}`;
+  const layoutKey = input.layoutMode ?? "standard";
+  const cacheKey = `slogans:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
 
   // Try in-memory/Redis cache (async read for cold-starts)
   try {

@@ -5,7 +5,12 @@ import {
   buildStructuralFingerprint,
   categoryDescriptionPenalty,
   classifyRhetoricalFamily,
+  deriveDynamicRankingWeights,
+  deriveSloganLengthBudget,
   type DynamicNicheProfile,
+  evaluateAdaptiveBrevity,
+  evaluateCompressionMeaningRetention,
+  explanatoryLanguagePenalty,
   genericMoodPenalty,
   insiderWordplayScore,
   normalizeDynamicNicheProfile,
@@ -14,6 +19,7 @@ import {
   rejectsPatternLeakage,
   ritualRecognitionScore,
   scoreDynamicSlogan,
+  semanticCompressionScore,
   thumbnailReadabilityScore,
   truthResonanceScore,
 } from "../lib/ai/dynamicNicheProfile";
@@ -122,6 +128,36 @@ const retroSportsFashionProfile: DynamicNicheProfile = {
   purchaseMotives: ["recognition of sportswear hunting rituals"],
 };
 
+const whimsicalExoticPetsProfile: DynamicNicheProfile = {
+  niche: "Whimsical Families with Exotic Pets",
+  dimensions: ["family routines", "exotic pet care", "whimsical humor"],
+  audience: "families whose unusual pets reshape everyday household routines",
+  rituals: ["counting feeder crickets before breakfast", "searching the room after a gecko escape"],
+  microRituals: ["checking the terrarium latch twice", "moving tea-party props away from the gecko"],
+  contradictions: ["tiny pet creates a whole-house search party"],
+  frustrations: ["one missing cricket becomes everyone's problem"],
+  statusSignals: ["spots an open terrarium latch across the room"],
+  insiderLanguage: ["feeder crickets", "terrarium latch", "heat lamp"],
+  embarrassingTruths: ["the gecko has interrupted family dinner again"],
+  obsessions: ["recounting crickets after every enclosure cleanup"],
+  visualCulture: ["terrarium latch", "cricket container", "tiny tea-party props"],
+  purchaseMotives: ["recognition of unusual household pet routines"],
+  latentLifestyleModel: {
+    observableScenes: [],
+    privateRituals: ["checking the heat lamp before bed"],
+    environments: ["family room beside the terrarium"],
+    recurringObjects: ["terrarium latch", "cricket container", "heat lamp"],
+    socialInteractions: ["recruiting the family for another gecko search"],
+    tensions: ["careful enclosure routine versus an opportunistic escape"],
+    identitySignals: ["notices a shifted latch immediately"],
+    repeatedDecisions: ["counts the feeder crickets one more time"],
+    tinyFrustrations: ["a cricket loose behind the furniture"],
+    smallVictories: ["finds the gecko before it reaches the hallway"],
+    unspokenRules: ["close the latch before answering anyone"],
+    emotionalRewards: ["the whole family laughs once the pet is safely back"],
+  },
+};
+
 const earlyMorningGymProfile: DynamicNicheProfile = {
   niche: "Gym Lights and Early Mornings",
   dimensions: ["pre-work training"],
@@ -164,6 +200,266 @@ const earlyMorningGymProfile: DynamicNicheProfile = {
     emotionalRewards: ["leaving with the hardest decision already won"],
   },
 };
+
+const gothicBookProfile: DynamicNicheProfile = {
+  niche: "Gothic Book Lovers During Autumn",
+  dimensions: ["gothic fiction", "autumn reading", "book collecting"],
+  audience: "gothic book readers with autumn reading rituals",
+  rituals: ["building a seasonal gothic reading list", "reading gothic fiction by candlelight"],
+  microRituals: [
+    "adding another gothic title to the autumn reading list",
+    "lighting a candle before opening the book",
+    "checking used shelves for rare gothic editions",
+    "bringing cider to a gothic trope debate",
+    "checking the spine before checking the price",
+    "reordering the reading list when the weather turns",
+  ],
+  contradictions: ["collects more autumn reading than one season can hold"],
+  frustrations: ["finding a rare edition with a damaged spine"],
+  statusSignals: ["recognizes obscure gothic editions"],
+  insiderLanguage: ["gothic tropes", "rare edition", "reading list", "candlelight"],
+  embarrassingTruths: ["the autumn reading list grows faster than it gets read"],
+  obsessions: ["hunting used shelves for rare gothic books"],
+  visualCulture: ["candlelit pages", "weathered book spines", "mug of cider"],
+  purchaseMotives: ["recognition of private autumn reading rituals"],
+  latentLifestyleModel: {
+    observableScenes: [],
+    privateRituals: ["reading by candlelight"],
+    environments: ["used bookshop", "candlelit reading chair"],
+    recurringObjects: ["cider mug", "reading list", "rare edition"],
+    socialInteractions: ["debating gothic tropes over cider"],
+    tensions: ["finite autumn nights versus an expanding reading list"],
+    identitySignals: ["spots rare gothic editions on used shelves"],
+    repeatedDecisions: ["adds one more gothic title to the seasonal list"],
+    tinyFrustrations: ["a damaged spine on a rare find"],
+    smallVictories: ["finds an uncommon edition in the used stacks"],
+    unspokenRules: ["candlelight starts the autumn reading session"],
+    emotionalRewards: ["settling into a gothic story on a cold evening"],
+  },
+};
+
+const gothicStandardBudget = deriveSloganLengthBudget(gothicBookProfile, "standard");
+const gothicCompactBudget = deriveSloganLengthBudget(gothicBookProfile, "compact");
+const gothicStatementBudget = deriveSloganLengthBudget(gothicBookProfile, "statement");
+assert.deepEqual(
+  gothicStandardBudget,
+  {
+    idealWords: 5,
+    maxWords: 8,
+    idealCharacters: 38,
+    maxCharacters: 50,
+    targetReadTimeMs: 1300,
+  },
+  "Expected evidence density to tighten the ideal while preserving room for a complex crossover niche",
+);
+assert.ok(
+  gothicCompactBudget.maxWords < gothicStandardBudget.maxWords &&
+    gothicCompactBudget.maxCharacters < gothicStandardBudget.maxCharacters,
+  "Expected compact layouts to receive a tighter adaptive budget",
+);
+assert.ok(
+  gothicCompactBudget.idealWords < gothicStandardBudget.idealWords &&
+    gothicStandardBudget.idealWords < gothicStatementBudget.idealWords,
+  "Expected each layout mode to have a distinct ideal length",
+);
+const wideCompactCandidate = evaluateAdaptiveBrevity(
+  "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+  gothicCompactBudget,
+);
+assert.ok(
+  wideCompactCandidate.characterCount <= gothicCompactBudget.maxCharacters &&
+    wideCompactCandidate.visualWidth > gothicCompactBudget.maxCharacters,
+  "Expected the visual-width fixture to fit by characters but overflow typographically",
+);
+assert.equal(
+  wideCompactCandidate.passes,
+  false,
+  "Expected visual-width overflow to fail even when raw character count fits",
+);
+
+const compactWeights = deriveDynamicRankingWeights("compact");
+const standardWeights = deriveDynamicRankingWeights("standard");
+const statementWeights = deriveDynamicRankingWeights("statement");
+assert.ok(
+  compactWeights.brevity + compactWeights.visualWidth >
+    standardWeights.brevity + standardWeights.visualWidth,
+  "Expected compact ranking to emphasize brevity and visual width",
+);
+assert.ok(
+  statementWeights.truth + statementWeights.contradiction >
+    compactWeights.truth + compactWeights.contradiction,
+  "Expected statement ranking to emphasize truth and narrative tension",
+);
+
+const compressedGothicCandidates = [
+  "Spooky Reading Lists",
+  "Candlelight Reading",
+  "Autumn Gothic Fiction",
+  "Rare Book Hunting",
+  "Cider Trope Debates",
+];
+const gothicBrevityResults = compressedGothicCandidates.map((slogan) => ({
+  slogan,
+  brevity: evaluateAdaptiveBrevity(slogan, gothicStandardBudget),
+}));
+for (const item of gothicBrevityResults) {
+  assert.equal(item.brevity.passes, true, `Expected compressed slogan to pass: ${item.slogan}`);
+  assert.ok(
+    item.brevity.wordCount <= gothicStandardBudget.maxWords,
+    `Overlong slogan survived: ${item.slogan}`,
+  );
+  assert.ok(
+    item.brevity.characterCount <= gothicStandardBudget.maxCharacters,
+    `Visual-length overflow survived: ${item.slogan}`,
+  );
+}
+const averageGothicWords = gothicBrevityResults.reduce(
+  (sum, item) => sum + item.brevity.wordCount,
+  0,
+) / Math.max(gothicBrevityResults.length, 1);
+assert.ok(averageGothicWords <= 5.5, `Average slogan length regressed: ${averageGothicWords}`);
+
+assert.equal(
+  evaluateAdaptiveBrevity(
+    "Finding Rare Gothic Books Is My Kind Of Autumn Treasure Hunt",
+    gothicStandardBudget,
+  ).passes,
+  false,
+  "Expected an explanatory mini-sentence to fail the adaptive hard gate",
+);
+assert.ok(
+  explanatoryLanguagePenalty("Sipping Cider While Debating Gothic Tropes") >
+    explanatoryLanguagePenalty("Cider Trope Debates"),
+  "Expected sentence-like cadence to receive an explanatory-language penalty",
+);
+assert.ok(
+  semanticCompressionScore("Candlelight Reading", gothicBookProfile) >
+    semanticCompressionScore("Autumn Stories", gothicBookProfile),
+  "Expected a compact insider ritual to beat a broad seasonal description",
+);
+
+const genericCompression = evaluateCompressionMeaningRetention(
+  "Finding Rare Books Before Anyone Else",
+  "Rare Book Lover",
+  gothicBookProfile,
+);
+const behavioralCompression = evaluateCompressionMeaningRetention(
+  "Finding Rare Books Before Anyone Else",
+  "Rare Book Hunting",
+  gothicBookProfile,
+);
+assert.equal(
+  genericCompression.preservesMeaning,
+  false,
+  "Expected compression to reject a generic identity label that drops the original action",
+);
+assert.equal(
+  genericCompression.preservesActionEvidence,
+  false,
+  "Expected the meaning diagnostic to identify lost behavioral evidence",
+);
+assert.equal(
+  behavioralCompression.preservesMeaning,
+  true,
+  "Expected compression to accept a shorter expression that retains behavioral evidence",
+);
+
+const crossNicheLayoutCases = [
+  {
+    profile: gothicBookProfile,
+    behavioral: "Candlelight Reading",
+    generic: "Gothic Book Lover",
+    candidates: [
+      ...compressedGothicCandidates,
+      "Candlelight Reading Before The Cold Autumn Rain",
+      "Candlelight Reading Outlasts The Cold Autumn Rain Again",
+    ],
+  },
+  {
+    profile: earlyMorningGymProfile,
+    behavioral: "First Lift Before Daylight",
+    generic: "Morning Gym Person",
+    candidates: [
+      "First Lift Before Daylight",
+      "Cold Steering Wheel Commitment Kept",
+      "Cold Steering Wheel Before First Lift",
+      "Packed Gym Bag Before The Dark Morning Commute",
+    ],
+  },
+  {
+    profile: trueCrimeShortFormProfile,
+    behavioral: "Comments Before The Clip",
+    generic: "True Crime Fan",
+    candidates: [
+      "Comments Before The Clip",
+      "Autoplay Past Midnight",
+      "Comments Get Read Before The Actual Case Clip",
+      "Comments Before Another Midnight Autoplay Case Starts Again",
+    ],
+  },
+  {
+    profile: whimsicalExoticPetsProfile,
+    behavioral: "Crickets Before Gecko Escape",
+    generic: "Whimsical Pet Family",
+    candidates: [
+      "Crickets Before Gecko Escape",
+      "Terrarium Latch Checked Twice",
+      "Crickets Counted Before The Gecko Escapes Again",
+      "Tiny Gecko Tea Parties Require Emergency Cricket Groceries",
+    ],
+  },
+  {
+    profile: retroSportsFashionProfile,
+    behavioral: "Thrift Tags Before Scores",
+    generic: "Retro Sports Fan",
+    candidates: [
+      "Thrift Tags Before Scores",
+      "Faded Jersey Hunt",
+      "Thrift Tags Checked Before The Halftime Score",
+      "Faded Jerseys Found Before Another Halftime Resale Search",
+    ],
+  },
+];
+const layoutModes = ["compact", "standard", "statement"] as const;
+const layoutWordCounts: Record<(typeof layoutModes)[number], number[]> = {
+  compact: [],
+  standard: [],
+  statement: [],
+};
+
+for (const regressionCase of crossNicheLayoutCases) {
+  assert.ok(
+    semanticCompressionScore(regressionCase.behavioral, regressionCase.profile) >
+      semanticCompressionScore(regressionCase.generic, regressionCase.profile),
+    `Expected compact behavioral evidence to beat a generic label for ${regressionCase.profile.niche}`,
+  );
+
+  for (const layoutMode of layoutModes) {
+    const budget = deriveSloganLengthBudget(regressionCase.profile, layoutMode);
+    const survivors = regressionCase.candidates
+      .map((slogan) => evaluateAdaptiveBrevity(slogan, budget))
+      .filter((brevity) => brevity.passes);
+    assert.ok(survivors.length > 0, `Expected ${layoutMode} survivors for ${regressionCase.profile.niche}`);
+    for (const survivor of survivors) {
+      assert.ok(
+        survivor.visualWidth <= budget.maxCharacters,
+        `Visual-width overflow survived in ${layoutMode}: ${regressionCase.profile.niche}`,
+      );
+      layoutWordCounts[layoutMode].push(survivor.wordCount);
+    }
+  }
+}
+
+const averageLayoutWords = Object.fromEntries(layoutModes.map((layoutMode) => [
+  layoutMode,
+  layoutWordCounts[layoutMode].reduce((sum, count) => sum + count, 0) /
+    Math.max(layoutWordCounts[layoutMode].length, 1),
+])) as Record<(typeof layoutModes)[number], number>;
+assert.ok(
+  averageLayoutWords.compact < averageLayoutWords.standard &&
+    averageLayoutWords.standard < averageLayoutWords.statement,
+  `Expected average word count to rise by layout: ${JSON.stringify(averageLayoutWords)}`,
+);
 
 const sparseMechanicalPencilProfile = normalizeDynamicNicheProfile(
   "Collectors Who Restore Mechanical Pencil Clips",
