@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { withWorkspaceAuth } from "@/lib/api/routeWrappers";
 import { getAIUsageSummaryForUser, getUserPlanAndLimits } from "@/lib/services/usageService";
+import { getVisualMetricLearningSignals } from "@/lib/services/salesFeedbackService";
+import { buildVisualLearningInsights } from "@/lib/services/visualLearningInsights";
 
 export const GET = withWorkspaceAuth(async ({ session }) => {
     try {
@@ -9,9 +11,10 @@ export const GET = withWorkspaceAuth(async ({ session }) => {
             return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
         }
 
-        const [usage, planInfo] = await Promise.all([
+        const [usage, planInfo, visualSignals] = await Promise.all([
             getAIUsageSummaryForUser(userId),
             getUserPlanAndLimits(userId),
+            getVisualMetricLearningSignals({ userId }),
         ]);
 
         const remaining = Math.max(
@@ -43,6 +46,8 @@ export const GET = withWorkspaceAuth(async ({ session }) => {
                 icon: "🛠️",
             });
         }
+
+        insights.push(...buildVisualLearningInsights(visualSignals));
 
         return NextResponse.json({ success: true, insights });
     } catch (err: unknown) {

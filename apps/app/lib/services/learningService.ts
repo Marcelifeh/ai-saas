@@ -37,7 +37,15 @@ export function saveQueue(q: any[]) {
   fs.writeFileSync(QUEUE_FILE, JSON.stringify(q, null, 2), 'utf8');
 }
 
-export function enqueueLaunch(item: { niche: string; slogan: string; listing: any; adHooks?: string[] }) {
+export function enqueueLaunch(item: {
+  niche: string;
+  slogan: string;
+  listing: any;
+  adHooks?: string[];
+  visualBatchMetrics?: unknown;
+  visualStrategyMetrics?: unknown;
+  visualReleaseGate?: unknown;
+}) {
   const q = loadQueue();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const entry = {
@@ -46,6 +54,9 @@ export function enqueueLaunch(item: { niche: string; slogan: string; listing: an
     slogan: item.slogan,
     listing: item.listing,
     adHooks: item.adHooks || [],
+    visualBatchMetrics: item.visualBatchMetrics,
+    visualStrategyMetrics: item.visualStrategyMetrics,
+    visualReleaseGate: item.visualReleaseGate,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };

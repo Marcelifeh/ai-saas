@@ -18,8 +18,30 @@ type RankedSlogan = {
     punch?: number;
     visualFit?: number;
     marketSignalScore?: number;
+    authenticityScore?: number;
+    truthScore?: number;
+    ritualCompression?: number;
+    contradictionStrength?: number;
+    insiderSpecificity?: number;
+    nicheAlignmentScore?: number;
     pattern?: string;
     reasons?: string[];
+};
+
+type VisualStrategy = {
+    slogan: string;
+    visualImpact: number;
+    qualityGatePassed: boolean;
+    concept: { coreMessage: string };
+    composition: { primaryFocus: "typography" | "illustration" | "hybrid" };
+    complexity: { supportingDetailLevel: "minimal" | "controlled" | "moderate" };
+    fingerprint: { metaphorType: string };
+    quality: {
+        thumbnailLegibility: number;
+        sloganReinforcement: number;
+        visualOriginality: number;
+        printability: number;
+    };
 };
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -43,6 +65,19 @@ function badgeClass(color: string) {
     return "bg-amber-500/15 text-amber-300 border border-amber-500/25";
 }
 
+function isBehavioralWinner(entry: RankedSlogan) {
+    const alignment = entry.nicheAlignmentScore ?? 0;
+    if (alignment < 70) return false;
+    const behavioralSignal = Math.max(
+        entry.authenticityScore ?? 0,
+        entry.truthScore ?? 0,
+        entry.ritualCompression ?? 0,
+        entry.contradictionStrength ?? 0,
+        entry.insiderSpecificity ?? 0,
+    );
+    return behavioralSignal >= 55;
+}
+
 function ScoreBar({ value }: { value: number }) {
     const pct = Math.min(100, Math.max(0, value));
     const color = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-yellow-400" : "bg-red-500";
@@ -56,7 +91,7 @@ function ScoreBar({ value }: { value: number }) {
     );
 }
 
-function SloganCard({ entry, imagePrompt }: { entry: RankedSlogan; imagePrompt?: string }) {
+function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSlogan; imagePrompt?: string; visualStrategy?: VisualStrategy }) {
     const [copied, setCopied] = useState(false);
     const [promptCopied, setPromptCopied] = useState(false);
     const [promptOpen, setPromptOpen] = useState(false);
@@ -147,17 +182,34 @@ function SloganCard({ entry, imagePrompt }: { entry: RankedSlogan; imagePrompt?:
             {/* Image prompt */}
             {imagePrompt && (
                 <div className="border-t border-gray-800/60 pt-2">
+                    {visualStrategy && (
+                        <div className="mb-2 grid grid-cols-3 gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-[10px]">
+                            <div><span className="text-gray-500 uppercase tracking-wider">Concept</span><div className="text-indigo-200 font-bold line-clamp-2">{visualStrategy.fingerprint.metaphorType || visualStrategy.concept.coreMessage}</div></div>
+                            <div><span className="text-gray-500 uppercase tracking-wider">Focus</span><div className="text-white font-black uppercase">{visualStrategy.composition.primaryFocus}</div></div>
+                            <div><span className="text-gray-500 uppercase tracking-wider">Impact</span><div className="text-emerald-300 font-black">{visualStrategy.visualImpact}</div></div>
+                        </div>
+                    )}
                     <button
                         type="button"
                         onClick={() => setPromptOpen((p) => !p)}
                         className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 hover:text-gray-200 transition-colors w-full"
                     >
                         {promptOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                        {promptOpen ? "Hide" : "Show"} Image Prompt
+                        {promptOpen ? "Hide" : "Show"} Design Strategy
                     </button>
                     {promptOpen && (
-                        <div className="mt-2 bg-gray-950 border border-gray-800 rounded-xl p-3 text-[11px] text-gray-300 leading-relaxed font-mono whitespace-pre-wrap relative">
-                            {imagePrompt}
+                        <div className="mt-2 bg-gray-950 border border-gray-800 rounded-xl p-3 text-[11px] text-gray-300 leading-relaxed relative">
+                            {visualStrategy && (
+                                <div className="mb-3 grid grid-cols-2 gap-2 border-b border-gray-800 pb-3 font-sans text-[10px] uppercase tracking-wider text-gray-500">
+                                    <div>Thumbnail <span className="text-white font-black">{visualStrategy.quality.thumbnailLegibility}</span></div>
+                                    <div>Reinforcement <span className="text-white font-black">{visualStrategy.quality.sloganReinforcement}</span></div>
+                                    <div>Originality <span className="text-white font-black">{visualStrategy.quality.visualOriginality}</span></div>
+                                    <div>Printability <span className="text-white font-black">{visualStrategy.quality.printability}</span></div>
+                                    <div>Complexity <span className="text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</span></div>
+                                    <div>Quality Gate <span className={visualStrategy.qualityGatePassed ? "text-emerald-300 font-black" : "text-amber-300 font-black"}>{visualStrategy.qualityGatePassed ? "Passed" : "Review"}</span></div>
+                                </div>
+                            )}
+                            <div className="font-mono whitespace-pre-wrap">{imagePrompt}</div>
                             <button
                                 type="button"
                                 onClick={copyPrompt}
@@ -189,12 +241,14 @@ export default function DesignStudioPage() {
             const raw = typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
             if (!raw) return;
             const saved = JSON.parse(raw);
-            if (saved.niche) setNiche(saved.niche);
-            if (saved.audience) setAudience(saved.audience);
-            if (saved.style) setStyle(saved.style);
-            if (saved.platform) setPlatform(saved.platform);
-            if (saved.result) setResult(saved.result);
-        } catch (_) { /* ignore corrupt data */ }
+            queueMicrotask(() => {
+                if (saved.niche) setNiche(saved.niche);
+                if (saved.audience) setAudience(saved.audience);
+                if (saved.style) setStyle(saved.style);
+                if (saved.platform) setPlatform(saved.platform);
+                if (saved.result) setResult(saved.result);
+            });
+        } catch { /* ignore corrupt data */ }
     }, []);
 
     // Persist state whenever it changes
@@ -203,7 +257,7 @@ export default function DesignStudioPage() {
             if (typeof window !== "undefined") {
                 window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ niche, audience, style, platform, result }));
             }
-        } catch (_) { /* ignore storage errors */ }
+        } catch { /* ignore storage errors */ }
     }, [niche, audience, style, platform, result]);
 
     const allSlogans = useMemo<RankedSlogan[]>(() => {
@@ -213,47 +267,47 @@ export default function DesignStudioPage() {
             ...(result.sloganCollections?.boldPicks ?? []),
             ...(result.sloganCollections?.experimental ?? []),
         ].filter((s: any) => s?.slogan) as RankedSlogan[];
+        const collectionWinners = fromCollections.filter(isBehavioralWinner);
+        if (collectionWinners.length > 0) return collectionWinners;
         if (fromCollections.length > 0) return fromCollections;
-        return Array.isArray(result.sloganInsights)
+        const insightWinners = Array.isArray(result.sloganInsights)
             ? (result.sloganInsights as RankedSlogan[]).filter((s) => s?.slogan)
+            : [];
+        const validatedInsights = insightWinners.filter(isBehavioralWinner);
+        if (validatedInsights.length > 0) return validatedInsights;
+        if (insightWinners.length > 0) return insightWinners;
+        return Array.isArray(result.shirtSlogans)
+            ? (result.shirtSlogans as string[])
+                .filter((slogan) => typeof slogan === "string" && slogan.trim().length > 0)
+                .map((slogan) => ({ slogan, score: 50, bucket: "experimental" as const }))
             : [];
     }, [result]);
 
-    // Extract niche-specific descriptions from server-generated prompts (style-neutral)
-    const serverDescMap = useMemo<Record<string, string>>(() => {
-        const map: Record<string, string> = {};
-        if (!result || !Array.isArray(result.shirtSlogans) || !Array.isArray(result.imagePrompts)) return map;
-        (result.shirtSlogans as string[]).forEach((s: string, i: number) => {
-            const raw: unknown = result.imagePrompts[i];
-            if (!s || typeof raw !== "string") return;
-            // Extract the description after the em-dash on the Style line
-            const match = raw.match(/Style:\s*[^\u2014\n]+\u2014\s*(.+?)(?:\.?\s*(?:\n|$))/i)
-                ?? raw.match(/Style:\s*[^\-\n]+-\s*(.+?)(?:\.?\s*(?:\n|$))/i);
-            if (match?.[1]?.trim()) map[s] = match[1].trim();
-        });
+    const visualStrategyMap = useMemo<Record<string, VisualStrategy>>(() => {
+        const map: Record<string, VisualStrategy> = {};
+        if (!Array.isArray(result?.visualStrategies)) return map;
+        for (const strategy of result.visualStrategies as VisualStrategy[]) {
+            if (strategy?.slogan) map[strategy.slogan] = strategy;
+        }
         return map;
     }, [result]);
 
-    // Reactive: covers ALL slogans, rebuilds whenever style changes
+    // Style is a rendering-only transformation; it never rebuilds the concept.
     const imagePromptMap = useMemo<Record<string, string>>(() => {
         const map: Record<string, string> = {};
-        const nicheLabel = niche.trim() || "this niche";
+        if (!result || !Array.isArray(result.shirtSlogans) || !Array.isArray(result.imagePrompts)) return map;
+        (result.shirtSlogans as string[]).forEach((slogan, index) => {
+            const raw = result.imagePrompts[index];
+            if (!slogan || typeof raw !== "string") return;
+            map[slogan] = /ART DIRECTION:\s*\n[^\n]*/i.test(raw)
+                ? raw.replace(/ART DIRECTION:\s*\n[^\n]*/i, `ART DIRECTION:\n${style}`)
+                : raw;
+        });
         for (const entry of allSlogans) {
-            const desc =
-                serverDescMap[entry.slogan] ??
-                `A bold commercial t-shirt composition with niche-specific supporting graphics and a clear typographic focal point for ${nicheLabel}`;
-            map[entry.slogan] = [
-                "Create an original POD t-shirt design.",
-                `Text: "${entry.slogan}"`,
-                `Style: ${style} \u2014 ${desc.replace(/\.?$/, ".")}`,
-                "No brands, logos, or trademarks.",
-                "Transparent background.",
-                "Commercial friendly.",
-                "300 DPI.",
-            ].join("\n");
+            if (!map[entry.slogan]) map[entry.slogan] = "No dynamic design strategy was generated for this slogan.";
         }
         return map;
-    }, [allSlogans, style, niche, serverDescMap]);
+    }, [allSlogans, style, result]);
 
     const handleGenerate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -422,6 +476,7 @@ export default function DesignStudioPage() {
                                         key={i}
                                         entry={entry}
                                         imagePrompt={imagePromptMap[entry.slogan]}
+                                        visualStrategy={visualStrategyMap[entry.slogan]}
                                     />
                                 ))}
                             </div>

@@ -9,7 +9,10 @@
     "start": "next start",
     "lint": "eslint",
     "engine": "tsx scripts/run_engine.ts",
-    "benchmark:dynamic": "tsx scripts/benchmark_dynamic_behavior.ts"
+    "benchmark:dynamic": "tsx scripts/benchmark_dynamic_behavior.ts",
+    "benchmark:design": "tsx scripts/benchmark_dynamic_design.ts",
+    "benchmark:design:live": "tsx scripts/benchmark_dynamic_design.ts --live",
+    "verify:visual-learning": "tsx scripts/verify_visual_learning_persistence.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

@@ -1,6 +1,7 @@
 // Use the package-local generated client so Windows builds do not rewrite
 // the shared root node_modules Prisma engine during app prebuild.
 import { PrismaClient } from "../../../../packages/db/generated/client";
+export type { Prisma } from "../../../../packages/db/generated/client";
 
 const prismaClientSingleton = () => new PrismaClient();
 

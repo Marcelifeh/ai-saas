@@ -76,6 +76,9 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             favorites,
             revenue,
             observedAt,
+            visualBatchMetrics: raw.visualBatchMetrics,
+            visualStrategyMetrics: raw.visualStrategyMetrics,
+            visualReleaseGate: raw.visualReleaseGate,
         }),
     ]);
 

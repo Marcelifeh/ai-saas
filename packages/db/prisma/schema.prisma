@@ -44,19 +44,19 @@ model VerificationToken {
 }
 
 model User {
-  id            String            @id @default(cuid())
-  name          String?
-  email         String?           @unique
-  emailVerified DateTime?
-  image         String?
-  password      String?
-  role          String            @default("user")
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  accounts      Account[]
-  sessions      Session[]
-  subscriptions Subscription[]
-  workspaces    WorkspaceMember[]
+  id                   String                 @id @default(cuid())
+  name                 String?
+  email                String?                @unique
+  emailVerified        DateTime?
+  image                String?
+  password             String?
+  role                 String                 @default("user")
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  accounts             Account[]
+  sessions             Session[]
+  subscriptions        Subscription[]
+  workspaces           WorkspaceMember[]
   merchOutcomeFeedback MerchOutcomeFeedback[]
 }
 
@@ -124,59 +124,62 @@ model AutopilotJob {
 }
 
 model SignalSnapshot {
-  id         String   @id @default(cuid())
-  source     String
+  id          String   @id @default(cuid())
+  source      String
   snapshotKey String
-  data       Json
-  fetchedAt  DateTime
-  expiresAt  DateTime
-  confidence Float
-  status     String   @default("live")
-  transport  String   @default("live")
-  details    String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  data        Json
+  fetchedAt   DateTime
+  expiresAt   DateTime
+  confidence  Float
+  status      String   @default("live")
+  transport   String   @default("live")
+  details     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([source, snapshotKey])
   @@index([source, expiresAt])
 }
 
 model SignalSourceHealth {
-  id            String   @id @default(cuid())
-  source        String   @unique
-  status        String   @default("healthy")
-  failureCount  Int      @default(0)
+  id            String    @id @default(cuid())
+  source        String    @unique
+  status        String    @default("healthy")
+  failureCount  Int       @default(0)
   lastSuccess   DateTime?
   lastFailure   DateTime?
   cooldownUntil DateTime?
   lastError     String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model MerchOutcomeFeedback {
-  id           String   @id @default(cuid())
-  userId       String
-  niche        String
-  nicheKey     String
-  platform     String
-  slogan       String
-  sloganKey    String
-  pattern      String?
-  tags         String[] @default([])
-  audience     String?
-  style        String?
-  productTitle String?
-  impressions  Int      @default(0)
-  clicks       Int      @default(0)
-  orders       Int      @default(0)
-  favorites    Int      @default(0)
-  revenue      Float    @default(0)
-  refunds      Int      @default(0)
-  observedAt   DateTime @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                    String   @id @default(cuid())
+  userId                String
+  niche                 String
+  nicheKey              String
+  platform              String
+  slogan                String
+  sloganKey             String
+  pattern               String?
+  tags                  String[] @default([])
+  audience              String?
+  style                 String?
+  productTitle          String?
+  visualBatchMetrics    Json?
+  visualStrategyMetrics Json?
+  visualReleaseGate     Json?
+  impressions           Int      @default(0)
+  clicks                Int      @default(0)
+  orders                Int      @default(0)
+  favorites             Int      @default(0)
+  revenue               Float    @default(0)
+  refunds               Int      @default(0)
+  observedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, observedAt])
   @@index([userId, platform, sloganKey, observedAt])
@@ -230,34 +233,40 @@ model MarketSignal {
 }
 
 model ListingQueue {
-  id           String   @id @default(cuid())
-  niche        String
-  slogan       String
-  title        String
-  bullets      String[] @default([])
-  tags         String[] @default([])
-  mockupPrompt String
-  adHooks      String[] @default([])
+  id                    String   @id @default(cuid())
+  niche                 String
+  slogan                String
+  title                 String
+  bullets               String[] @default([])
+  tags                  String[] @default([])
+  mockupPrompt          String
+  adHooks               String[] @default([])
+  visualBatchMetrics    Json?
+  visualStrategyMetrics Json?
+  visualReleaseGate     Json?
 
-  status       String   @default("PENDING")
-  platform     String   @default("etsy")
-  priorityScore Float?  
+  status        String @default("PENDING")
+  platform      String @default("etsy")
+  priorityScore Float?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ListingPerformance {
-  id          String   @id @default(cuid())
-  listingId   String
-  impressions Int      @default(0)
-  clicks      Int      @default(0)
-  ctr         Float    @default(0)
-  conversions Int      @default(0)
-  revenue     Float    @default(0)
-  observedAt  DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  listingId             String
+  impressions           Int      @default(0)
+  clicks                Int      @default(0)
+  ctr                   Float    @default(0)
+  conversions           Int      @default(0)
+  revenue               Float    @default(0)
+  visualBatchMetrics    Json?
+  visualStrategyMetrics Json?
+  visualReleaseGate     Json?
+  observedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@index([listingId, observedAt])
 }

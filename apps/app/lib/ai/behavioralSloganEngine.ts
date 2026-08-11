@@ -1,5 +1,6 @@
 import { BehavioralArchetype, BehavioralProfile, describeBehavioralProfile, getBehavioralArchetypes, getBehavioralProfile } from "./behavioralLexicon";
 import { assignArchetypeToSlogan, getBehaviorFragmentPool, getCommunityCompressionTokens, getCommunityKnowledge, scoreCulturalCompression } from "./communityKnowledgeEngine";
+import { logError } from "../utils/logger";
 
 export const TEMPLATE_DEATH_FILTERS: RegExp[] = [
   /just one more/i,
@@ -61,6 +62,27 @@ function tokenize(value: string): string[] {
 function lastMeaningfulWord(value: string): string {
   const tokens = tokenize(value);
   return tokens[tokens.length - 1] || value.toLowerCase();
+}
+
+function structureFingerprint(slogan: string): string {
+  return slogan
+    .toLowerCase()
+    .replace(/[a-z]+/g, "X")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function dedupeByFingerprint(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of values) {
+    const fp = structureFingerprint(v);
+    if (!seen.has(fp)) {
+      seen.add(fp);
+      out.push(v);
+    }
+  }
+  return out;
 }
 
 function phraseFromRitual(ritual: string): string {
@@ -595,11 +617,38 @@ Return JSON: { "slogans": ["...", "..."] }`,
       ],
     });
 
-    const content = response.data?.choices?.[0]?.message?.content;
-    if (!content) return fallback.slice(0, count);
-    const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed.slogans)) return fallback.slice(0, count);
-    return rejectTemplateStructures(parsed.slogans.map(String))
+    const content = response.data?.choices?.[0]?.message?.content || "";
+    if (!content) {
+      try { logError?.("BehavioralAISlogans: empty LLM response", { niche }); } catch {}
+      return fallback.slice(0, count);
+    }
+
+    let parsedSlogans: string[] = [];
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed.slogans)) parsedSlogans = parsed.slogans.map(String);
+    } catch (err: unknown) {
+      // Naive line-based fallback when model returns non-JSON or extra wrapper text
+      parsedSlogans = (content || "")
+        .split(/\n+/)
+        .map((l) => l.replace(/^[-*\d.\s"']+/, "").trim())
+        .filter(Boolean)
+        .slice(0, count);
+      const message = err instanceof Error ? err.message : String(err);
+      try { logError?.("BehavioralAISlogans: JSON parse failed — using naive fallback", { niche, sample: parsedSlogans.slice(0, 6), error: message }); } catch {}
+    }
+
+    if (!parsedSlogans || parsedSlogans.length === 0) {
+      try { logError?.("BehavioralAISlogans: no slogans parsed — returning deterministic fallback", { niche, sample: content.slice(0, 1000) }); } catch {}
+      return fallback.slice(0, count);
+    }
+
+    // Deduplicate structurally (avoid repeating the same template family)
+    const unique = dedupeByFingerprint(parsedSlogans)
+      .map((s) => trimPunctuation(String(s)))
+      .filter(Boolean);
+
+    return rejectTemplateStructures(unique)
       .filter((slogan) => passesChestPrintFilter(slogan))
       .slice(0, count);
   } catch {

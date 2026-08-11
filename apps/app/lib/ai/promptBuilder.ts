@@ -37,11 +37,15 @@ Suitable for paid traffic ad creative thumbnails`
 };
 
 export function buildImagePrompt(): string {
-    return `Create an original POD t-shirt design.
+    return `Create an original commercial POD t-shirt graphic.
 
-Text: "[SLOGAN]"
+EXACT TEXT:
+"[SLOGAN]"
+
+Interpret the exact slogan through one concrete behavior, contradiction, ritual, status signal, or punchline before choosing any objects or composition.
+Make the graphic/text interaction reinforce that specific meaning.
 No brands, logos, or trademarks.
 Transparent background.
-Commercial friendly.
-300 DPI.`;
+Commercial-friendly original artwork.
+Deliver the highest-resolution print-ready composition supported by the image pipeline.`;
 }

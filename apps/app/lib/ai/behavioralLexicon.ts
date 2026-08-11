@@ -213,6 +213,93 @@ function deriveProfileHeuristically(niche: string, audience?: string): Partial<B
       emotionalTriggers: ["discipline", "self-respect", "competitive focus"],
     };
   }
+  if (/\b(exotic pet|exotic pets|parrot|bird|birds|reptile|reptiles|lizard|lizards|snake|snakes|gecko|geckos|iguana|terrarium|aviary)\b/.test(lower)) {
+    return {
+      rituals: [
+        "cleaning cages before coffee",
+        "planning life around feeding time",
+        "talking to birds like roommates",
+        "checking heat lamps and terrariums",
+        "rearranging the house around animals",
+      ],
+      frustrations: [
+        "expensive exotic vet bills",
+        "birds screaming before sunrise",
+        "people asking if the reptile is dangerous",
+        "cage mess right after cleaning",
+        "vacations planned around pet care",
+      ],
+      slang: [
+        "feathered roommate",
+        "scale baby",
+        "terrarium life",
+        "bird room",
+        "cage cleaning",
+        "the parrot talks back",
+      ],
+      aspirations: [
+        "giving every animal the good room",
+        "building the weirdest loving household",
+        "being understood by the pets first",
+      ],
+      socialDynamics: [
+        "families that introduce the animals first",
+        "pet photos nobody asked for but everyone gets",
+        "the house rules being set by feathers and scales",
+      ],
+      emotionalTriggers: ["loving chaos", "protective weirdness", "animal-first family priorities"],
+    };
+  }
+  if (/crochet|crocheter|crocheters|yarn|knit/.test(lower)) {
+    return {
+      rituals: ["counting stitches twice", "untangling yarn again", "starting one more row", "carrying yarn everywhere"],
+      frustrations: ["losing count mid-row", "yarn knots at midnight", "people calling crochet knitting"],
+      slang: ["one more row", "yarn stash", "hook size", "frogging it"],
+      aspirations: ["finishing the project before starting another", "turning yarn into proof of patience"],
+      socialDynamics: ["showing progress photos nobody asked for", "the yarn stash needing its own room"],
+      emotionalTriggers: ["patient obsession", "craft pride", "cozy chaos"],
+    };
+  }
+  if (/nurse|nurses|nursing|scrubs|rn\b/.test(lower)) {
+    return {
+      rituals: ["charting after everyone leaves", "checking vitals before coffee", "living out of scrub pockets", "washing hands one more time"],
+      frustrations: ["short staffing", "alarm fatigue", "families asking for updates during rounds", "coffee going cold again"],
+      slang: ["scrub pocket", "night shift", "charting", "code brown"],
+      aspirations: ["getting everyone through the shift", "staying calm when the floor is not"],
+      socialDynamics: ["shift change truth sessions", "dark humor at the nurses station"],
+      emotionalTriggers: ["controlled chaos", "care under pressure", "earned exhaustion"],
+    };
+  }
+  if (/golf|golfer|golfers|putt|putting|fairway|tee/.test(lower)) {
+    return {
+      rituals: ["blaming the wind", "checking tee time like weather", "replaying one bad putt", "buying balls like hope"],
+      frustrations: ["three-putting again", "slicing into the trees", "cart path only days", "almost pars"],
+      slang: ["three putt", "mulligan", "fairway finder", "tee time"],
+      aspirations: ["finding the swing for one whole round", "earning the clubhouse story"],
+      socialDynamics: ["trash talk on the back nine", "scorecard negotiations"],
+      emotionalTriggers: ["hopeful frustration", "competitive calm", "weekend obsession"],
+    };
+  }
+  if (/teacher|teachers|teaching|classroom|school/.test(lower)) {
+    return {
+      rituals: ["grading after bedtime", "labeling everything twice", "repeating directions again", "living by the bell schedule"],
+      frustrations: ["dry markers", "indoor recess", "missing glue sticks", "emails after contract hours"],
+      slang: ["teacher tired", "bell schedule", "hall pass", "lesson plans"],
+      aspirations: ["getting through May with grace", "turning chaos into learning"],
+      socialDynamics: ["teacher lounge therapy", "classroom chaos coordination"],
+      emotionalTriggers: ["patient authority", "controlled chaos", "earned summer"],
+    };
+  }
+  if (/adhd|coder|coders|coding|developer|developers|programmer|programmers/.test(lower)) {
+    return {
+      rituals: ["debugging one more thing", "opening ten tabs for one bug", "forgetting why the terminal is open", "hyperfixating past midnight"],
+      frustrations: ["syntax errors before coffee", "context switching", "meetings breaking focus", "unfinished side projects"],
+      slang: ["debug mode", "hyperfocus", "rubber ducking", "ship it"],
+      aspirations: ["turning chaos into working code", "finishing the side project this time"],
+      socialDynamics: ["commit messages as emotional records", "explaining the bug to a rubber duck"],
+      emotionalTriggers: ["hyperfocus", "productive chaos", "focus guilt"],
+    };
+  }
   if (/book|reading|reader|library|bookworm/.test(lower)) {
     return {
       rituals: ["reading one more chapter", "annotating favorite lines", "judging covers in public"],

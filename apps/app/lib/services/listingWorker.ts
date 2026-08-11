@@ -1,13 +1,25 @@
 import { prisma } from "../db/prisma";
 
-export async function runListingWorker() {
+export type ListingWorkerOptions = {
+  listingId?: string;
+  take?: number;
+};
+
+export async function runListingWorker(options: ListingWorkerOptions = {}) {
   if (!prisma || !prisma.listingQueue) {
     console.warn('[listingWorker] prisma listingQueue not available');
     return { processed: 0 };
   }
 
   // Fetch highest-priority pending jobs
-  const jobs = await prisma.listingQueue.findMany({ where: { status: 'PENDING' }, orderBy: { priorityScore: 'desc' }, take: 5 });
+  const jobs = await prisma.listingQueue.findMany({
+    where: {
+      status: 'PENDING',
+      id: options.listingId,
+    },
+    orderBy: { priorityScore: 'desc' },
+    take: Math.max(1, Math.min(25, options.take ?? 5)),
+  });
   let processed = 0;
 
   for (const job of jobs) {
@@ -26,7 +38,18 @@ export async function runListingWorker() {
       // Create an initial performance record (best-effort)
       try {
         if (prisma.listingPerformance) {
-          await prisma.listingPerformance.create({ data: { listingId: job.id, impressions: 0, clicks: 0, conversions: 0, revenue: 0 } });
+          await prisma.listingPerformance.create({
+            data: {
+              listingId: job.id,
+              impressions: 0,
+              clicks: 0,
+              conversions: 0,
+              revenue: 0,
+              visualBatchMetrics: job.visualBatchMetrics ?? undefined,
+              visualStrategyMetrics: job.visualStrategyMetrics ?? undefined,
+              visualReleaseGate: job.visualReleaseGate ?? undefined,
+            },
+          });
         }
       } catch (e) {
         console.warn('[listingWorker] could not create initial performance record', e && (e as any).message);

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import {
+  applySelfRevelationScoreCap,
   applyStructuralDiversityRanking,
   behavioralContradictionScore,
   buildStructuralFingerprint,
   categoryDescriptionPenalty,
   classifyRhetoricalFamily,
+  dedupeCanonicalSlogans,
   deriveDynamicRankingWeights,
   deriveSloganLengthBudget,
   type DynamicNicheProfile,
@@ -231,6 +233,12 @@ const gothicBookProfile: DynamicNicheProfile = {
       "reads one planned chapter until well past bedtime",
       "highlights favorite passages for a later reread",
     ],
+    involuntaryBehaviors: [
+      "opens one chapter and notices it is two in the morning",
+      "lights another candle because the chapter is not finished",
+      "lets the reading tea go cold again",
+      "moves a new book out of sight before discussing the budget",
+    ],
     seasonalBehaviors: [
       "switches to gothic novels every October",
       "re-reads a favorite gothic classic each fall",
@@ -304,6 +312,36 @@ for (const [layout, weights] of Object.entries({ compactWeights, standardWeights
     `Expected ${layout} ranking weights to total 1, received ${totalWeight}`,
   );
 }
+const borderlineAtmosphericAssessment = {
+  slogan: "A concise atmospheric line",
+  classification: "description" as const,
+  confidence: 79,
+  score: 21,
+  reason: "Atmospheric but plausibly personal",
+};
+assert.equal(
+  applySelfRevelationScoreCap(91, borderlineAtmosphericAssessment),
+  91,
+  "Expected a sub-threshold descriptive judgment not to become the only authority",
+);
+assert.equal(
+  applySelfRevelationScoreCap(91, {
+    ...borderlineAtmosphericAssessment,
+    confidence: 80,
+  }),
+  68,
+  "Expected only high-confidence descriptive copy to receive the winner cap",
+);
+assert.equal(
+  applySelfRevelationScoreCap(91, {
+    ...borderlineAtmosphericAssessment,
+    classification: "self_revelation",
+    confidence: 99,
+    score: 99,
+  }),
+  91,
+  "Expected self-revelatory candidates to remain uncapped",
+);
 assert.ok(
   compactWeights.brevity + compactWeights.visualWidth >
     standardWeights.brevity + standardWeights.visualWidth,
@@ -386,6 +424,21 @@ assert.equal(
   behavioralCompression.preservesMeaning,
   true,
   "Expected compression to accept a shorter expression that retains behavioral evidence",
+);
+const involuntaryRecognition = recognitionProbabilityScore("Tea Went Cold Again", gothicBookProfile);
+const atmosphericRecognition = recognitionProbabilityScore("Warm Gothic Reflections", gothicBookProfile);
+assert.ok(
+  involuntaryRecognition > atmosphericRecognition,
+  `Expected an involuntary consequence to outrank atmospheric description: ${involuntaryRecognition} <= ${atmosphericRecognition}`,
+);
+assert.deepEqual(
+  dedupeCanonicalSlogans([
+    '"Tea Went Cold Again"',
+    "tea went cold again.",
+    "Tea—Went Cold Again",
+  ]),
+  ['"Tea Went Cold Again"'],
+  "Expected cosmetic quote, case, dash, and punctuation variants to deduplicate",
 );
 
 const crossNicheLayoutCases = [
@@ -515,6 +568,7 @@ const normalizedBehavioralFacetProfile = normalizeDynamicNicheProfile(
   {
     latentLifestyleModel: {
       participationHabits: ["checks the display shelf before buying another piece"],
+      involuntaryBehaviors: ["checks the shelf gap again while walking past"],
       seasonalBehaviors: ["reorganizes the display at the start of winter"],
       comfortObjects: ["inspection cloth"],
       collectionHabits: ["tracks missing editions in a handwritten list"],
@@ -524,12 +578,14 @@ const normalizedBehavioralFacetProfile = normalizeDynamicNicheProfile(
 assert.deepEqual(
   {
     participationHabits: normalizedBehavioralFacetProfile.latentLifestyleModel?.participationHabits,
+    involuntaryBehaviors: normalizedBehavioralFacetProfile.latentLifestyleModel?.involuntaryBehaviors,
     seasonalBehaviors: normalizedBehavioralFacetProfile.latentLifestyleModel?.seasonalBehaviors,
     comfortObjects: normalizedBehavioralFacetProfile.latentLifestyleModel?.comfortObjects,
     collectionHabits: normalizedBehavioralFacetProfile.latentLifestyleModel?.collectionHabits,
   },
   {
     participationHabits: ["checks the display shelf before buying another piece"],
+    involuntaryBehaviors: ["checks the shelf gap again while walking past"],
     seasonalBehaviors: ["reorganizes the display at the start of winter"],
     comfortObjects: ["inspection cloth"],
     collectionHabits: ["tracks missing editions in a handwritten list"],

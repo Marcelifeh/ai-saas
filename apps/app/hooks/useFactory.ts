@@ -55,6 +55,9 @@ type SalesFeedbackInput = {
     revenue?: number;
     refunds?: number;
     observedAt?: string;
+    visualBatchMetrics?: Record<string, unknown>;
+    visualStrategyMetrics?: Record<string, unknown>;
+    visualReleaseGate?: Record<string, unknown>;
 };
 
 export function useFactory() {

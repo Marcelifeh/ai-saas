@@ -72,6 +72,27 @@ type SloganCollections = {
     experimental?: RankedSlogan[];
 };
 
+type VisualStrategy = {
+    slogan: string;
+    visualImpact: number;
+    qualityGatePassed: boolean;
+    diversityPenalty: number;
+    concept: { coreMessage: string };
+    composition: { primaryFocus: "typography" | "illustration" | "hybrid" };
+    complexity: { supportingDetailLevel: "minimal" | "controlled" | "moderate" };
+    fingerprint: { metaphorType: string };
+    quality: {
+        thumbnailLegibility: number;
+        focalClarity: number;
+        silhouetteStrength: number;
+        textGraphicIntegration: number;
+        contrast: number;
+        printability: number;
+        visualOriginality: number;
+        sloganReinforcement: number;
+    };
+};
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 function SingleStrategyContent() {
@@ -101,6 +122,7 @@ function SingleStrategyContent() {
     const sloganCollections = (result?.sloganCollections || {}) as SloganCollections;
     const rankedSlogans = (result?.sloganInsights || []) as RankedSlogan[];
     const designSlogans = result?.shirtSlogans || [];
+    const visualStrategies = (result?.visualStrategies || []) as VisualStrategy[];
 
     const describeBand = (value: number | null) => {
         if (value == null || Number.isNaN(value)) return "Medium";
@@ -298,12 +320,24 @@ function SingleStrategyContent() {
     const handleSubmitFeedback = async () => {
         if (!feedbackModal || !result) return;
         setFeedbackSubmitting(true);
+        const selectedVisualStrategy = visualStrategies.find((strategy) => strategy.slogan === feedbackModal.slogan);
         await recordSalesFeedback({
             niche: result.niche || prompt,
             slogan: feedbackModal.slogan,
             impressions: feedbackInputs.impressions ? parseInt(feedbackInputs.impressions, 10) : undefined,
             clicks: feedbackInputs.clicks ? parseInt(feedbackInputs.clicks, 10) : undefined,
             orders: feedbackInputs.orders ? parseInt(feedbackInputs.orders, 10) : undefined,
+            visualBatchMetrics: result.visualBatchMetrics,
+            visualStrategyMetrics: selectedVisualStrategy ? {
+                visualImpact: selectedVisualStrategy.visualImpact,
+                qualityGatePassed: selectedVisualStrategy.qualityGatePassed,
+                diversityPenalty: selectedVisualStrategy.diversityPenalty,
+                quality: selectedVisualStrategy.quality,
+                complexity: selectedVisualStrategy.complexity,
+                fingerprint: selectedVisualStrategy.fingerprint,
+                primaryFocus: selectedVisualStrategy.composition.primaryFocus,
+            } : undefined,
+            visualReleaseGate: result.visualReleaseGate,
         });
         setFeedbackSubmitting(false);
         setFeedbackModal(null);
@@ -387,6 +421,11 @@ function SingleStrategyContent() {
     const injectStyle = (text: string, designStyle: string): string => {
         if (!text || !designStyle) return text;
 
+        // Dynamic prompts keep the concept fixed and expose one rendering-only seam.
+        if (/ART DIRECTION:\s*\n[^\n]*/i.test(text)) {
+            return text.replace(/ART DIRECTION:\s*\n[^\n]*/i, `ART DIRECTION:\n${designStyle}`);
+        }
+
         // If placeholder token exists, replace it
         if (text.includes("[STYLE]")) {
             return text.replace(/\[STYLE\]/g, designStyle);
@@ -409,11 +448,11 @@ function SingleStrategyContent() {
     };
 
     const enhancePromptWithStandards = (text: string): string => {
-        const suffix = "Transparent background. Commercial friendly. 300 DPI.";
+        const suffix = "Transparent background. Commercial-friendly original artwork. Deliver the highest-resolution print-ready composition supported by the image pipeline.";
         if (!text) return suffix;
 
         // Avoid duplicating if already present
-        if (text.includes("Transparent background") || text.includes("300 DPI")) {
+        if (text.includes("BACKGROUND:") || text.includes("Transparent background")) {
             return text;
         }
 
@@ -940,10 +979,23 @@ function SingleStrategyContent() {
                                         <h3 className="text-lg font-bold text-white">AI Design Studio</h3>
                                         <p className="text-xs text-gray-500 mt-1">Refine and copy ready-to-use image prompts.</p>
                                     </div>
-                                    <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-indigo-300">
-                                        {platform === "amazon" ? "Amazon Merch" : platform.toUpperCase()}
-                                    </span>
+                                    <div className="flex items-center gap-2">
+                                        {result.visualReleaseGate && (
+                                            <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${result.visualReleaseGate.passed ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-amber-500/40 bg-amber-500/10 text-amber-300"}`}>
+                                                Visual release: {result.visualReleaseGate.passed ? "pass" : "review"}
+                                            </span>
+                                        )}
+                                        <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-indigo-300">
+                                            {platform === "amazon" ? "Amazon Merch" : platform.toUpperCase()}
+                                        </span>
+                                    </div>
                                 </div>
+
+                                {Array.isArray(result.visualReleaseGate?.warnings) && result.visualReleaseGate.warnings.length > 0 && (
+                                    <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+                                        Soft release warning after {result.visualReleaseGate.repairAttempts}/{result.visualReleaseGate.maxRepairAttempts} repair attempts: {result.visualReleaseGate.warnings.map((warning: any) => `${warning.metric} ${warning.actual} (${warning.expectation === "maximum" ? "max" : "min"} ${warning.threshold})`).join(" · ")}
+                                    </div>
+                                )}
 
                                 <div className="flex flex-wrap gap-2 mb-4">
                                     {PRESET_STYLES.map((styleName) => (
@@ -973,6 +1025,7 @@ function SingleStrategyContent() {
                                         const isCollapsed = collapsedPrompts[slogan] ?? true;
                                         const wordCount = finalPromptText.trim() ? finalPromptText.trim().split(/\s+/).length : 0;
                                         const sloganMeta = rankedSlogans.find((entry) => entry.slogan === slogan);
+                                        const visualStrategy = visualStrategies.find((entry) => entry.slogan === slogan);
 
                                         return (
                                             <div
@@ -1000,13 +1053,18 @@ function SingleStrategyContent() {
                                                             ></path>
                                                         </svg>
                                                         <span className="bg-indigo-600/30 text-indigo-300 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-600/30">
-                                                            Image Prompt {i + 1}
+                                                            Design Concept {i + 1}
                                                         </span>
                                                         <span className="text-gray-500 text-[10px] font-bold uppercase tracking-widest truncate max-w-[140px] sm:max-w-[220px] italic">
                                                             &quot;{slogan}&quot;
                                                         </span>
                                                     </div>
                                                     <div className="flex items-center gap-2">
+                                                        {visualStrategy && (
+                                                            <span className="hidden sm:inline text-[9px] font-black text-indigo-300 uppercase tracking-widest">
+                                                                {visualStrategy.composition.primaryFocus} · impact {visualStrategy.visualImpact}
+                                                            </span>
+                                                        )}
                                                         {sloganMeta && (
                                                             <span className="text-[9px] font-black text-emerald-300 uppercase tracking-widest">
                                                                 score {sloganMeta.score}
@@ -1034,14 +1092,35 @@ function SingleStrategyContent() {
                                                             className="text-[10px] font-black py-1.5 px-3 rounded-lg border flex items-center gap-1.5 transition-all uppercase tracking-wider bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
                                                         >
                                                             <BarChart2 className="w-3 h-3" />
-                                                            Stats
+                                                            Sales Data
                                                         </button>
                                                     </div>
                                                 </div>
 
                                                 {!isCollapsed && (
-                                                    <div className="px-4 sm:px-6 py-4 text-sm text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
-                                                        {finalPromptText}
+                                                    <div className="px-4 sm:px-6 py-4">
+                                                        {visualStrategy && (
+                                                            <div className="mb-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+                                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] uppercase tracking-widest">
+                                                                    <div><span className="text-gray-500">Concept</span><div className="mt-0.5 text-indigo-200 font-bold normal-case tracking-normal">{visualStrategy.fingerprint.metaphorType || visualStrategy.concept.coreMessage}</div></div>
+                                                                    <div><span className="text-gray-500">Focus</span><div className="mt-0.5 text-white font-black">{visualStrategy.composition.primaryFocus}</div></div>
+                                                                    <div><span className="text-gray-500">Complexity</span><div className="mt-0.5 text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</div></div>
+                                                                </div>
+                                                                <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
+                                                                    <div className="text-gray-500">Visual Impact <span className="text-white font-black">{visualStrategy.visualImpact}</span></div>
+                                                                    <div className="text-gray-500">Thumbnail <span className="text-white font-black">{visualStrategy.quality.thumbnailLegibility}</span></div>
+                                                                    <div className="text-gray-500">Reinforcement <span className="text-white font-black">{visualStrategy.quality.sloganReinforcement}</span></div>
+                                                                    <div className="text-gray-500">Originality <span className="text-white font-black">{visualStrategy.quality.visualOriginality}</span></div>
+                                                                    <div className="text-gray-500">Printability <span className="text-white font-black">{visualStrategy.quality.printability}</span></div>
+                                                                </div>
+                                                                <div className={`mt-2 text-[9px] font-black uppercase tracking-widest ${visualStrategy.qualityGatePassed ? "text-emerald-300" : "text-amber-300"}`}>
+                                                                    Quality gate: {visualStrategy.qualityGatePassed ? "passed" : "review recommended"}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="text-sm text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                                            {finalPromptText}
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>

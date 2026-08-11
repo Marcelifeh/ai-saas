@@ -1,5 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import type { Prisma } from "@/lib/db/prisma";
+import { logError } from "@/lib/utils/logger";
 
 const FEEDBACK_LOOKBACK_DAYS = 180;
 const EXACT_MATCH_WEIGHT = 0.58;
@@ -42,6 +44,9 @@ export type RecordMerchOutcomeFeedbackInput = {
     audience?: string;
     style?: string;
     productTitle?: string;
+    visualBatchMetrics?: unknown;
+    visualStrategyMetrics?: unknown;
+    visualReleaseGate?: unknown;
     impressions?: number;
     clicks?: number;
     orders?: number;
@@ -52,6 +57,17 @@ export type RecordMerchOutcomeFeedbackInput = {
 };
 
 type PersistedSignalMap = Record<string, SignalLike>;
+
+export interface VisualMetricLearningSignal {
+    metric: string;
+    observations: number;
+    impressions: number;
+    ctrCorrelation?: number;
+    favoriteRateCorrelation?: number;
+    conversionCorrelation?: number;
+    orderRateCorrelation?: number;
+    confidence: number;
+}
 
 function normalizeKey(value: string): string {
     return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -284,6 +300,123 @@ function isMissingFeedbackTableError(err: unknown): boolean {
     return typeof candidate.message === "string" ? candidate.message.includes("MerchOutcomeFeedback") : true;
 }
 
+function asJsonRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : {};
+}
+
+function jsonNumber(record: Record<string, unknown>, key: string): number | undefined {
+    const value = record[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function weightedCorrelation(points: Array<{ x: number; y: number; weight: number }>): number | undefined {
+    if (points.length < 3) return undefined;
+    const totalWeight = points.reduce((sum, point) => sum + point.weight, 0);
+    if (totalWeight <= 0) return undefined;
+    const meanX = points.reduce((sum, point) => sum + point.x * point.weight, 0) / totalWeight;
+    const meanY = points.reduce((sum, point) => sum + point.y * point.weight, 0) / totalWeight;
+    let covariance = 0;
+    let varianceX = 0;
+    let varianceY = 0;
+    for (const point of points) {
+        const dx = point.x - meanX;
+        const dy = point.y - meanY;
+        covariance += point.weight * dx * dy;
+        varianceX += point.weight * dx * dx;
+        varianceY += point.weight * dy * dy;
+    }
+    if (varianceX <= 0 || varianceY <= 0) return undefined;
+    return Math.round((covariance / Math.sqrt(varianceX * varianceY)) * 1000) / 1000;
+}
+
+function extractVisualMetricValues(batchValue: unknown, strategyValue: unknown): Record<string, number> {
+    const batch = asJsonRecord(batchValue);
+    const strategy = asJsonRecord(strategyValue);
+    const quality = asJsonRecord(strategy.quality);
+    const complexity = asJsonRecord(strategy.complexity);
+    const values: Record<string, number> = {};
+    const copy = (targetKey: string, record: Record<string, unknown>, sourceKey = targetKey) => {
+        const value = jsonNumber(record, sourceKey);
+        if (value !== undefined) values[targetKey] = value;
+    };
+
+    for (const metric of [
+        "primaryFocusDiversity",
+        "compositionFamilyDiversity",
+        "visualMetaphorDiversity",
+        "supportingObjectOverlap",
+        "typographyRoleDiversity",
+        "commercialQualityScore",
+        "qualityGatePassRate",
+    ]) copy(metric, batch);
+    for (const metric of [
+        "thumbnailLegibility",
+        "focalClarity",
+        "silhouetteStrength",
+        "textGraphicIntegration",
+        "contrast",
+        "printability",
+        "visualOriginality",
+        "sloganReinforcement",
+    ]) copy(metric, quality);
+    copy("visualImpact", strategy);
+    copy("diversityPenalty", strategy);
+    copy("textDominance", complexity);
+
+    return values;
+}
+
+function sanitizeJsonInput(value: unknown): Prisma.InputJsonValue | undefined {
+    if (value === undefined || value === null) return undefined;
+    try {
+        return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+    } catch {
+        return undefined;
+    }
+}
+
+function getErrorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (err && typeof err === "object" && "message" in err) {
+        const message = (err as { message?: unknown }).message;
+        if (typeof message === "string") return message;
+    }
+    return String(err);
+}
+
+function isFeedbackDatabaseUnavailableError(err: unknown): boolean {
+    if (!err || typeof err !== "object") return false;
+    const candidate = err as { code?: string; name?: string; message?: string };
+    const message = getErrorMessage(err).toLowerCase();
+
+    if (candidate.code === "P1001" || candidate.code === "P1002" || candidate.code === "P1017") return true;
+    if (candidate.name === "PrismaClientInitializationError" || candidate.name === "PrismaClientKnownRequestError") {
+        return (
+            message.includes("enotfound") ||
+            message.includes("tenant/user") ||
+            message.includes("error querying the database") ||
+            message.includes("can't reach database server") ||
+            message.includes("connection") ||
+            message.includes("timeout")
+        );
+    }
+
+    return (
+        message.includes("enotfound") ||
+        message.includes("tenant/user") ||
+        message.includes("fatal:") && message.includes("not found")
+    );
+}
+
+function logFeedbackDatabaseUnavailable(context: string, err: unknown): void {
+    const message = getErrorMessage(err)
+        .replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, "postgres://[redacted]@")
+        .replace(/postgres\.[a-z0-9_-]+/gi, "postgres.[redacted]");
+    logError(context, message);
+}
+
 /**
  * Fire-and-forget: updates SloganPattern.score for the observed pattern after
  * real sales data arrives. CTR / conversion vs. benchmarks adjusts the score
@@ -349,7 +482,7 @@ async function updatePatternScoreFromFeedback(
                 },
             });
         }
-    } catch (_) {
+    } catch {
         // Non-blocking — pattern scoring is best-effort
     }
 }
@@ -376,6 +509,9 @@ export async function recordMerchOutcomeFeedback(input: RecordMerchOutcomeFeedba
                 audience: input.audience?.trim() || null,
                 style: input.style?.trim() || null,
                 productTitle: input.productTitle?.trim() || null,
+                visualBatchMetrics: sanitizeJsonInput(input.visualBatchMetrics),
+                visualStrategyMetrics: sanitizeJsonInput(input.visualStrategyMetrics),
+                visualReleaseGate: sanitizeJsonInput(input.visualReleaseGate),
                 impressions: sanitizeCount(input.impressions),
                 clicks: sanitizeCount(input.clicks),
                 orders: sanitizeCount(input.orders),
@@ -401,6 +537,10 @@ export async function recordMerchOutcomeFeedback(input: RecordMerchOutcomeFeedba
     } catch (err: unknown) {
         if (isMissingFeedbackTableError(err)) {
             throw new Error("Sales feedback tables are not available yet. Apply the Prisma schema changes before recording outcomes.");
+        }
+        if (isFeedbackDatabaseUnavailableError(err)) {
+            logFeedbackDatabaseUnavailable("Sales feedback database unavailable while recording outcome", err);
+            throw new Error("Sales feedback database is temporarily unavailable. Please retry shortly.");
         }
         throw err;
     }
@@ -490,7 +630,7 @@ export async function getPersistedSalesSignalsForRankedSlogans(params: {
             if (target.tags.length > 0) {
                 for (const row of rows) {
                     if (row.nicheKey !== nicheKey) continue;
-                    if (!row.tags.some((tag: any) => target.tags.includes(tag))) continue;
+                    if (!row.tags.some((tag) => typeof tag === "string" && target.tags.includes(tag))) continue;
                     appendRow(tagBucket, row);
                 }
             }
@@ -514,7 +654,100 @@ export async function getPersistedSalesSignalsForRankedSlogans(params: {
         if (isMissingFeedbackTableError(err)) {
             return {};
         }
-        throw err;
+        logFeedbackDatabaseUnavailable("Sales feedback read skipped; using no learned signals", err);
+        return {};
+    }
+}
+
+export async function getVisualMetricLearningSignals(params: {
+    userId: string;
+    platform?: string;
+    niche?: string;
+    lookbackDays?: number;
+}): Promise<VisualMetricLearningSignal[]> {
+    const cutoff = new Date(Date.now() - Math.max(7, Math.min(365, params.lookbackDays ?? FEEDBACK_LOOKBACK_DAYS)) * 86_400_000);
+    try {
+        const rows = await prisma.merchOutcomeFeedback.findMany({
+            where: {
+                userId: params.userId,
+                platform: params.platform ? normalizePlatform(params.platform) : undefined,
+                nicheKey: params.niche ? normalizeKey(params.niche) : undefined,
+                observedAt: { gte: cutoff },
+            },
+            select: {
+                visualBatchMetrics: true,
+                visualStrategyMetrics: true,
+                impressions: true,
+                clicks: true,
+                orders: true,
+                favorites: true,
+            },
+            orderBy: { observedAt: "desc" },
+            take: 1000,
+        });
+
+        const pointsByMetric = new Map<string, Array<{
+            x: number;
+            weight: number;
+            impressions: number;
+            ctr?: number;
+            favoriteRate?: number;
+            conversion?: number;
+            orderRate?: number;
+        }>>();
+
+        for (const row of rows) {
+            const metrics = extractVisualMetricValues(row.visualBatchMetrics, row.visualStrategyMetrics);
+            if (Object.keys(metrics).length === 0) continue;
+            const evidence = Math.max(1, row.impressions + row.clicks * 4 + row.orders * 12 + row.favorites * 2);
+            const weight = Math.sqrt(evidence);
+            const outcomes = {
+                ctr: row.impressions > 0 ? row.clicks / row.impressions : undefined,
+                favoriteRate: row.impressions > 0 ? row.favorites / row.impressions : undefined,
+                conversion: row.clicks > 0 ? row.orders / row.clicks : undefined,
+                orderRate: row.impressions > 0 ? row.orders / row.impressions : undefined,
+            };
+            for (const [metric, x] of Object.entries(metrics)) {
+                const points = pointsByMetric.get(metric) ?? [];
+                points.push({ x, weight, impressions: row.impressions, ...outcomes });
+                pointsByMetric.set(metric, points);
+            }
+        }
+
+        const signals = [...pointsByMetric.entries()].map(([metric, points]) => {
+            const correlate = (outcome: "ctr" | "favoriteRate" | "conversion" | "orderRate") => weightedCorrelation(
+                points
+                    .filter((point): point is typeof point & Record<typeof outcome, number> => typeof point[outcome] === "number")
+                    .map((point) => ({ x: point.x, y: point[outcome], weight: point.weight })),
+            );
+            const impressions = points.reduce((sum, point) => sum + point.impressions, 0);
+            const confidence = Math.min(1, (points.length / 25) * Math.min(1, Math.log10(1 + impressions) / 4));
+            return {
+                metric,
+                observations: points.length,
+                impressions,
+                ctrCorrelation: correlate("ctr"),
+                favoriteRateCorrelation: correlate("favoriteRate"),
+                conversionCorrelation: correlate("conversion"),
+                orderRateCorrelation: correlate("orderRate"),
+                confidence: roundConfidence(confidence),
+            } satisfies VisualMetricLearningSignal;
+        });
+
+        return signals.sort((left, right) => {
+            const strongest = (signal: VisualMetricLearningSignal) => Math.max(
+                Math.abs(signal.ctrCorrelation ?? 0),
+                Math.abs(signal.favoriteRateCorrelation ?? 0),
+                Math.abs(signal.conversionCorrelation ?? 0),
+                Math.abs(signal.orderRateCorrelation ?? 0),
+            ) * signal.confidence;
+            return strongest(right) - strongest(left);
+        });
+    } catch (err: unknown) {
+        if (!isMissingFeedbackTableError(err)) {
+            logFeedbackDatabaseUnavailable("Visual metric learning read skipped", err);
+        }
+        return [];
     }
 }
 

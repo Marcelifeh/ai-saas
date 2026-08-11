@@ -101,13 +101,17 @@ import {
 import { getBehavioralProfile, type BehavioralArchetype, type BehavioralProfile } from "./behavioralLexicon";
 import {
   adaptiveVisualWidthScore,
+  applySelfRevelationScoreCap,
   applyStructuralDiversityRanking,
   buildDynamicNicheProfile,
   behavioralContradictionScore,
+  canonicalSloganKey,
   categoryDescriptionPenalty,
+  classifyDynamicSelfRevelation,
   compressDynamicSlogansWithDiagnostics,
   communityAuthenticityScore as dynamicCommunityAuthenticityScore,
   deriveDynamicRankingWeights,
+  dedupeCanonicalSlogans,
   deriveSloganLengthBudget,
   dynamicSpecificityScore,
   evaluateAdaptiveBrevity,
@@ -130,6 +134,7 @@ import {
   type RhetoricalFamily,
   type SloganLayoutMode,
   type SloganLengthBudget,
+  type SelfRevelationAssessment,
   wearabilityScore as dynamicWearabilityScore,
 } from "./dynamicNicheProfile";
 
@@ -210,6 +215,8 @@ export interface RankedSlogan {
   visualWidthScore?: number;
   layoutMode?: SloganLayoutMode;
   compressionDiagnostics?: DynamicCompressionAttempt;
+  selfRevelationScore?: number;
+  selfRevelationAssessment?: SelfRevelationAssessment;
 }
 
 export interface SloganCollections {
@@ -761,13 +768,7 @@ export function computeConversationalScore(s: string): number {
 }
 
 function dedupeStrings(arr: string[]): string[] {
-  const seen = new Set<string>();
-  return arr.filter((s) => {
-    const k = s.toLowerCase().trim();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  return dedupeCanonicalSlogans(arr);
 }
 
 function normalizeMode(mode?: unknown): SloganMode {
@@ -2753,7 +2754,8 @@ function diversifyRanked(ranked: RankedSlogan[], niche = ""): RankedSlogan[] {
 function dedupeRanked(ranked: RankedSlogan[]): RankedSlogan[] {
   const seen = new Set<string>();
   return ranked.filter((r) => {
-    const k = r.slogan.toLowerCase().trim();
+    const k = canonicalSloganKey(r.slogan);
+    if (!k) return false;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -3178,6 +3180,7 @@ function rankDynamicProfileSlogans(
   profile: DynamicNicheProfile,
   base: Pick<SloganEngineResult, "persona" | "personaKey" | "mode">,
   compressionAttempts: DynamicCompressionAttempt[] = [],
+  selfRevelationAssessments: SelfRevelationAssessment[] = [],
 ): RankedSlogan[] {
   const salesSignals = normalizeSalesSignals(input.salesSignals);
   const layoutMode = input.layoutMode ?? "standard";
@@ -3185,8 +3188,14 @@ function rankDynamicProfileSlogans(
   const rankingWeights = deriveDynamicRankingWeights(layoutMode);
   const compressionDiagnostics = new Map(
     compressionAttempts.map((attempt) => [
-      cleanSlogan(attempt.compressed).toLowerCase(),
+      canonicalSloganKey(cleanSlogan(attempt.compressed)),
       attempt,
+    ]),
+  );
+  const selfRevelationDiagnostics = new Map(
+    selfRevelationAssessments.map((assessment) => [
+      canonicalSloganKey(assessment.slogan),
+      assessment,
     ]),
   );
 
@@ -3204,17 +3213,31 @@ function rankDynamicProfileSlogans(
       const explanatoryPenalty = explanatoryLanguagePenalty(slogan);
       const contradictionScore = behavioralContradictionScore(slogan, profile);
       const visualWidthScore = adaptiveVisualWidthScore(brevity, lengthBudget);
-      const finalScore = clamp(Math.round(
+      const selfRevelationAssessment = selfRevelationDiagnostics.get(
+        canonicalSloganKey(slogan),
+      ) ?? {
+        slogan,
+        classification: "uncertain" as const,
+        confidence: 50,
+        score: 50,
+        reason: "Classifier unavailable",
+      };
+      const weightedScore = clamp(Math.round(
         truthScore * rankingWeights.truth +
           authenticityScore * rankingWeights.authenticity +
           recognitionScore * rankingWeights.recognition +
           recognitionProbability * rankingWeights.recognitionProbability +
+          selfRevelationAssessment.score * rankingWeights.selfRevelation +
           semanticCompression * rankingWeights.semanticCompression +
           brevity.score * rankingWeights.brevity +
           visualWidthScore * rankingWeights.visualWidth +
           contradictionScore * rankingWeights.contradiction -
           explanatoryPenalty,
       ), 0, 100);
+      const finalScore = applySelfRevelationScoreCap(
+        weightedScore,
+        selfRevelationAssessment,
+      );
       const insiderScore = insiderWordplayScore(slogan, profile);
       const ritualScore = ritualRecognitionScore(slogan, profile);
       const specificityScore = dynamicSpecificityScore(slogan, profile);
@@ -3236,6 +3259,7 @@ function rankDynamicProfileSlogans(
           "Passed pattern leakage gate",
           "Passed compressed behavioral evidence gate",
           `Estimated self-recognition: ${recognitionProbability}`,
+          `Self-revelation: ${selfRevelationAssessment.classification}`,
           `Ranked for ${layoutMode} layout`,
         ],
         salesSignals,
@@ -3281,7 +3305,9 @@ function rankDynamicProfileSlogans(
         lengthBudget,
         visualWidthScore,
         layoutMode,
-        compressionDiagnostics: compressionDiagnostics.get(slogan.toLowerCase()),
+        compressionDiagnostics: compressionDiagnostics.get(canonicalSloganKey(slogan)),
+        selfRevelationScore: selfRevelationAssessment.score,
+        selfRevelationAssessment,
         thumbnailReadabilityScore: thumbnailReadability,
         screenshotScore,
         nicheAlignmentScore: specificityScore,
@@ -3335,12 +3361,17 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       .filter((attempt) => attempt.preservesMeaning)
       .map((attempt) => attempt.compressed);
     const compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
+    const selfRevelationAssessments = await classifyDynamicSelfRevelation(
+      dynamicProfile,
+      compressionCandidates,
+    );
     const dynamicRanked = rankDynamicProfileSlogans(
       compressionCandidates,
       input,
       dynamicProfile,
       base,
       [...compressionAttempts, ...retryAttempts],
+      selfRevelationAssessments,
     );
     if (dynamicRanked.length > 0) {
       const sortedDynamic = dedupeRanked(dynamicRanked);
@@ -3408,7 +3439,7 @@ export async function generateHighPotentialSlogans(
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
   const layoutKey = input.layoutMode ?? "standard";
-  const cacheKey = `slogans:behavior-v2:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
+  const cacheKey = `slogans:behavior-v3:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
 
   // Try in-memory/Redis cache (async read for cold-starts)
   try {
@@ -3493,23 +3524,8 @@ function describeStyle(style?: string): string {
 }
 
 function buildPromptDescription(style?: string, niche?: string): string {
-  const styleValue = style?.trim() || "Bold Graphic";
   const nicheValue = niche?.trim() || "the niche";
-  const lowerStyle = styleValue.toLowerCase();
-
-  if (lowerStyle.includes("vintage distressed")) {
-    return `A distressed vintage typography concept with subtle retro texture and niche-specific supporting elements for ${nicheValue}.`;
-  }
-  if (lowerStyle.includes("hand-drawn")) {
-    return `A hand-drawn illustration layout with expressive linework and niche-specific icons built around the text for ${nicheValue}.`;
-  }
-  if (lowerStyle.includes("retro vintage")) {
-    return `A retro vintage composition with faded color blocking, nostalgic shapes, and niche-specific graphic accents for ${nicheValue}.`;
-  }
-  if (lowerStyle.includes("minimalist vector")) {
-    return `A minimalist vector layout with clean shapes, strong spacing, and a simple niche-specific icon system for ${nicheValue}.`;
-  }
-  return `A bold commercial t-shirt composition with niche-specific supporting graphics and a clear typographic focal point for ${nicheValue}.`;
+  return `Interpret the exact slogan through one concrete behavior, contradiction, ritual, status signal, or punchline from ${nicheValue}; choose the composition from that meaning rather than the rendering style.`;
 }
 
 function profileVisualCueText(profile?: DynamicNicheProfile): string {
@@ -3529,22 +3545,8 @@ function profileVisualCueText(profile?: DynamicNicheProfile): string {
 }
 
 function coupleVisualsToBehavior(description: string, slogan: string, niche?: string, profile?: DynamicNicheProfile): string {
-  const context = `${niche || ""} ${slogan}`.toLowerCase();
-  let cleaned = description.replace(/[.\s]+$/g, "");
-
-  // Short-form audiences recognize the interface and ritual, not obsolete media shorthand.
-  if (/short[- ]form|scroll|algorithm|screen time|clips?|comments?/.test(context)) {
-    cleaned = cleaned
-      .replace(/\b(?:film|movie) reels?\b/gi, "phone screen")
-      .replace(/\bclapperboards?\b/gi, "caption card");
-    cleaned += ". Prefer profile-derived interface or ritual cues over generic film/TV symbols";
-  }
-
-  if (/true crime|alibi|detective|evidence|interrogation|case\b/.test(context)) {
-    cleaned += ". Keep any investigative references non-graphic and viewer-centered; no blood, skulls, weapons, bodies, victim imagery, or active crime scene";
-  }
-
-  return `${cleaned}.${profileVisualCueText(profile)}. Supporting graphics must reinforce the concrete behavior or punchline in the text, not merely illustrate the broad topic`;
+  const cleaned = description.replace(/[.\s]+$/g, "");
+  return `${cleaned}.${profileVisualCueText(profile)}. Select the smallest useful evidence set. Supporting graphics must reinforce this exact slogan's concrete behavior or punchline, not merely illustrate ${niche || "the broad topic"}. The typography and graphic must interact rather than sit in a default template`;
 }
 
 function normalizePromptBody(body: string): string {
@@ -3613,7 +3615,7 @@ function buildStructuredImagePrompt(slogan: string, description: string, style?:
     "No brands, logos, or trademarks.",
     "Transparent background.",
     "Commercial friendly.",
-    "300 DPI.",
+    "Deliver the highest-resolution print-ready composition supported by the image pipeline.",
   ].join("\n");
 }
 

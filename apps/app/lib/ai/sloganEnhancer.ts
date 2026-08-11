@@ -10,6 +10,8 @@
  *  4. Final dedup + safety-ordered output
  */
 
+import { runSafetyEngine } from "./safetyEngine";
+
 // ─── Niche Category Registry ─────────────────────────────────────────────────
 
 const NICHE_CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -134,12 +136,9 @@ export function isSafeSlogan(slogan: string): boolean {
 
   // Run entity detector for known brands/celebrities/movies
   try {
-    // Import runSafetyEngine lazily to avoid circular imports at module load
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { runSafetyEngine } = require("./safetyEngine");
     const safety = runSafetyEngine(slogan || "");
     if (safety && (safety.flaggedEntities || []).length > 0) return false;
-  } catch (_err) {
+  } catch {
     // If safety engine not available, continue with existing checks
   }
 
@@ -223,7 +222,6 @@ function tidySlogan(s: string): string {
   // Normalize spacing and punctuation
   t = t.replace(/[.!,]+$/g, '').replace(/\s+/g, ' ').trim();
 
-  const lower = t.toLowerCase();
   // Remove terminal scaffold words that often leak from templates
   const suffixRemovals = ['identity', 'identity.', 'signal', 'clean', 'wearable', 'commercial', 'graphic'];
   const parts = t.split(/\s+/);
@@ -249,7 +247,7 @@ function tidySlogan(s: string): string {
  */
 export function makePunchier(slogan: string): string {
   // First apply conversational layer
-  let tightened = makeConversational(slogan);
+  const tightened = makeConversational(slogan);
 
   return tightened
     // "X and Y" → "X & Y" (keeps brevity)
@@ -321,7 +319,17 @@ export function filterAndEnhanceSlogans(
   const isDualNiche = categories.length >= 2;
 
   // Step 1: safety filter and wearability check
-  const safe = slogans.filter(isSafeSlogan).filter(isWearable);
+  // Also hard-reject common merch boilerplate and identity-label crutches
+  const safe = slogans
+    .filter(isSafeSlogan)
+    .filter(isWearable)
+    .filter((s) => {
+      const lower = (s || "").toLowerCase();
+      if (/eat\s+sleep\s+\w+\s+repeat/i.test(lower)) return false;
+      if (/powered by/i.test(lower)) return false;
+      if (/\b(warrior|hustler|addict|mvp|legend|squad|crew|tribe)\b/i.test(lower)) return false;
+      return true;
+    });
 
   // Step 2: enhance + deduplicate
   const seen = new Set<string>();

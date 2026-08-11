@@ -5,7 +5,15 @@ import { detectPlatform, PLATFORM_RULES } from "../ai/promptBuilder";
 import { globalCache } from "../utils/cache";
 import { chatCompletionSafe } from "../ai/aiGateway";
 import { TrendSignalSourceResult } from "../ai/trendEngine";
-import { runEliteSloganEngine, normalizeImagePrompts } from "../ai/sloganEngine";
+import { runEliteSloganEngine } from "../ai/sloganEngine";
+import {
+    analyzeDynamicDesignBatch,
+    evaluateVisualReleaseGate,
+    generateDynamicDesignBatch,
+    type DesignBatchDiversityMetrics,
+    type DynamicDesignStrategy,
+    type VisualReleaseGate,
+} from "../ai/dynamicDesignPrompt";
 import { getPersistedSalesSignalsForRankedSlogans, mergeSalesSignalsInputs } from "./salesFeedbackService";
 import { checkCompliance, filterSafeSlogans } from "./complianceEngine";
 import { prisma } from "../db/prisma";
@@ -23,6 +31,9 @@ export interface BulkDiscoveryResult {
 export interface SloganRegenerationResult {
     shirtSlogans: string[];
     imagePrompts: string[];
+    visualStrategies: DynamicDesignStrategy[];
+    visualBatchMetrics: DesignBatchDiversityMetrics;
+    visualReleaseGate: VisualReleaseGate;
     sloganInsights: any[];
     sloganCollections: any;
     sloganPersona: string;
@@ -51,34 +62,11 @@ function detectSloganMode(style?: string): "safe" | "viral" | "edgy" {
     return "safe";
 }
 
-function normalizeSloganLookupKey(value: string): string {
-    return value.toLowerCase().trim().replace(/\s+/g, " ");
-}
-
-function alignImagePromptsToSlogans(targetSlogans: string[], sourceSlogans: unknown, sourcePrompts: unknown): string[] {
-    const originalSlogans = Array.isArray(sourceSlogans)
-        ? sourceSlogans.map((value) => (typeof value === "string" ? value.trim() : ""))
-        : [];
-    const originalPrompts = Array.isArray(sourcePrompts)
-        ? sourcePrompts.map((value) => (typeof value === "string" ? value.trim() : ""))
-        : [];
-
-    const promptBySlogan = new Map<string, string>();
-    originalSlogans.forEach((slogan, index) => {
-        const prompt = originalPrompts[index];
-        if (!slogan || !prompt) return;
-        const key = normalizeSloganLookupKey(slogan);
-        if (!promptBySlogan.has(key)) {
-            promptBySlogan.set(key, prompt);
-        }
-    });
-
-    return targetSlogans.map((slogan, index) => {
-        const exact = promptBySlogan.get(normalizeSloganLookupKey(slogan));
-        if (exact) return exact;
-        const byIndex = originalPrompts[index];
-        return typeof byIndex === "string" ? byIndex : "";
-    });
+function mapDesignMarketplace(platform?: string): "amazon_merch" | "etsy" | "general" {
+    const detected = detectPlatform(platform);
+    if (detected === "amazon") return "amazon_merch";
+    if (detected === "etsy") return "etsy";
+    return "general";
 }
 
 async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string) {
@@ -107,19 +95,25 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         mode: sloganMode,
     });
 
-    const alignedImagePrompts = alignImagePromptsToSlogans(
-        sloganEngine.slogans,
-        parsed?.shirtSlogans,
-        parsed?.imagePrompts,
-    );
-
     // ── Compliance: filter slogans and attach report ──────────────────────
     const { safe: safeSlogans } = filterSafeSlogans(sloganEngine.slogans);
     const finalSlogans = safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans;
-    const alignedPromptsFiltered = alignImagePromptsToSlogans(
-        finalSlogans,
-        sloganEngine.slogans,
-        normalizeImagePrompts(sloganEngine.slogans, alignedImagePrompts, style, niche, sloganEngine.dynamicProfile),
+    const visualStrategies = sloganEngine.dynamicProfile
+        ? await generateDynamicDesignBatch({
+            niche,
+            slogans: finalSlogans,
+            profile: sloganEngine.dynamicProfile,
+            style: style?.trim() || "Bold Graphic",
+            garmentBackground: "either",
+            printBackground: "transparent",
+            marketplace: mapDesignMarketplace(platform),
+            userId,
+        })
+        : [];
+    const visualBatchMetrics = analyzeDynamicDesignBatch(visualStrategies);
+    const visualReleaseGate = evaluateVisualReleaseGate(
+        visualBatchMetrics,
+        Math.max(0, ...visualStrategies.map((strategy) => strategy.batchRepairAttempts ?? 0)),
     );
     const complianceReport = checkCompliance({
         niche,
@@ -130,7 +124,10 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
     return {
         ...parsed,
         shirtSlogans: finalSlogans,
-        imagePrompts: alignedPromptsFiltered,
+        imagePrompts: visualStrategies.map((strategy) => strategy.prompt),
+        visualStrategies,
+        visualBatchMetrics,
+        visualReleaseGate,
         sloganInsights: sloganEngine.ranked,
         sloganCollections: sloganEngine.collections,
         sloganPersona: sloganEngine.persona,
@@ -260,6 +257,9 @@ JSON SHAPE:
     return {
         shirtSlogans: merchPayload.shirtSlogans,
         imagePrompts: merchPayload.imagePrompts,
+        visualStrategies: merchPayload.visualStrategies,
+        visualBatchMetrics: merchPayload.visualBatchMetrics,
+        visualReleaseGate: merchPayload.visualReleaseGate,
         sloganInsights: merchPayload.sloganInsights,
         sloganCollections: merchPayload.sloganCollections,
         sloganPersona: merchPayload.sloganPersona,
@@ -315,19 +315,10 @@ Output ONLY valid JSON:
   "estimatedTrend": 0,
   "estimatedBuyerIntent": 0,
   "shirtSlogans": ["slogan 1","slogan 2","...","slogan 10"],
-  "imagePrompts": ["unique design prompt for slogan 1","...","unique design prompt for slogan 10"],
   "amazonListing": { "title": "", "brandName": "", "bulletPoint1": "", "bulletPoint2": "", "description": "", "keywords": [] }
 }
 
-IMAGE PROMPTS: Provide exactly 10 UNIQUE image prompts (one per slogan) formatted exactly as:
-Create an original POD t-shirt design.
-Text: "[The exact slogan]"
-Style: [STYLE] — [1-2 sentences of UNIQUE design description]
-No brands, logos, or trademarks.
-Transparent background.
-Commercial friendly.
-300 DPI.
-IMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line. Do NOT replace it.`
+Do not generate image prompts or visual concepts here. A separate visual-semantic engine will interpret the winning slogans after behavioral ranking.`
                 },
                 {
                     role: 'user',
@@ -617,7 +608,15 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                 // enqueue for launch pipeline
                 try {
                     const learning = require('./learningService');
-                    learning.enqueueLaunch({ niche: item.niche, slogan: conversion?.slogan || '', listing: item.autoListing, adHooks: item.adHooks });
+                    learning.enqueueLaunch({
+                        niche: item.niche,
+                        slogan: conversion?.slogan || '',
+                        listing: item.autoListing,
+                        adHooks: item.adHooks,
+                        visualBatchMetrics: item.visualBatchMetrics,
+                        visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
+                        visualReleaseGate: item.visualReleaseGate,
+                    });
                 } catch (e) {
                     // ignore queue failures
                 }
@@ -633,6 +632,9 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                                 tags: Array.isArray(item.autoListing?.tags) ? item.autoListing.tags : [],
                                 mockupPrompt: item.autoListing?.mockupPrompt || item.autoListing?.description || '',
                                 adHooks: Array.isArray(item.adHooks) ? item.adHooks : [],
+                                visualBatchMetrics: item.visualBatchMetrics,
+                                visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
+                                visualReleaseGate: item.visualReleaseGate,
                                 status: 'PENDING',
                                 platform: 'etsy',
                             }
@@ -680,7 +682,7 @@ export async function generateChunk(niches: any[], isAutopilot: boolean = false,
                             role: 'system',
                             content: isAutopilot
                                 ? 'You create Amazon POD listings. Always output valid JSON exactly: { "slogan": "", "title": "", "bullet_point_1": "", "bullet_point_2": "", "description": "" }'
-                                : `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:\n{\n    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],\n    "imagePrompts": ["", "", "", "", "", "", "", "", "", ""],\n    "designDirections": ["", ""],\n    "amazonListing": { "title": "", "bulletPoint1": "", "bulletPoint2": "", "description": "", "keywords": ["", ""] }\n}\n\nSLOGAN RULES:\n- Use the formula IDENTITY + EMOTION + PUNCH.\n- Keep most slogans between 2 and 7 words.\n- Make them wearable, commercial, and emotionally sticky.\n- Include a mix of safe winners, bold lines, and experimental ideas.\n- Avoid generic motivational filler.\n\nIMAGE PROMPT RULES:\nProvide 10 UNIQUE image prompts (one per slogan). Use EXACTLY this format for EVERY prompt:\nCreate an original POD t-shirt design.\nText: "[The exact slogan]"\nStyle: [STYLE] — [1-2 sentences of UNIQUE, niche-specific design description for THIS slogan.]\nNo brands, logos, or trademarks.\nTransparent background.\nCommercial friendly.\n300 DPI.\nIMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line. Do NOT replace it.`
+                                : `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:\n{\n    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],\n    "designDirections": ["", ""],\n    "amazonListing": { "title": "", "bulletPoint1": "", "bulletPoint2": "", "description": "", "keywords": ["", ""] }\n}\n\nSLOGAN RULES:\n- Use behavioral recognition, emotion, and social signaling.\n- Keep most slogans between 2 and 7 words.\n- Make them wearable, commercial, and emotionally sticky.\n- Include a mix of safe winners, bold lines, and experimental ideas.\n- Avoid generic motivational filler.\n\nDo not generate image prompts or visual concepts. A separate visual-semantic engine runs after slogan ranking.`
                         },
                         {
                             role: 'user',
