@@ -5,7 +5,8 @@ import { useFactory } from "../../../hooks/useFactory";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
 import { Zap, Sparkles, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
 
-const STORAGE_KEY = "tf_slogan_intelligence_state_v1";
+const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+const STORAGE_KEY = `tf_slogan_intelligence_state_${VISUAL_ENGINE_VERSION}`;
 
 type RankedSlogan = {
     slogan: string;
@@ -242,6 +243,10 @@ export default function DesignStudioPage() {
             if (!raw) return;
             const saved = JSON.parse(raw);
             queueMicrotask(() => {
+                if (saved.result?.visualEngineVersion !== VISUAL_ENGINE_VERSION) {
+                    window.localStorage.removeItem(STORAGE_KEY);
+                    return;
+                }
                 if (saved.niche) setNiche(saved.niche);
                 if (saved.audience) setAudience(saved.audience);
                 if (saved.style) setStyle(saved.style);

@@ -7,9 +7,9 @@ import { chatCompletionSafe } from "../ai/aiGateway";
 import { TrendSignalSourceResult } from "../ai/trendEngine";
 import { runEliteSloganEngine } from "../ai/sloganEngine";
 import {
-    analyzeDynamicDesignBatch,
-    evaluateVisualReleaseGate,
+    evaluateVisualBatchRelease,
     generateDynamicDesignBatch,
+    VISUAL_ENGINE_VERSION,
     type DesignBatchDiversityMetrics,
     type DynamicDesignStrategy,
     type VisualReleaseGate,
@@ -32,8 +32,9 @@ export interface SloganRegenerationResult {
     shirtSlogans: string[];
     imagePrompts: string[];
     visualStrategies: DynamicDesignStrategy[];
-    visualBatchMetrics: DesignBatchDiversityMetrics;
+    visualBatchMetrics: DesignBatchDiversityMetrics | null;
     visualReleaseGate: VisualReleaseGate;
+    visualEngineVersion: string;
     sloganInsights: any[];
     sloganCollections: any;
     sloganPersona: string;
@@ -110,11 +111,7 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
             userId,
         })
         : [];
-    const visualBatchMetrics = analyzeDynamicDesignBatch(visualStrategies);
-    const visualReleaseGate = evaluateVisualReleaseGate(
-        visualBatchMetrics,
-        Math.max(0, ...visualStrategies.map((strategy) => strategy.batchRepairAttempts ?? 0)),
-    );
+    const visualBenchmark = evaluateVisualBatchRelease(visualStrategies);
     const complianceReport = checkCompliance({
         niche,
         shirtSlogans: finalSlogans,
@@ -126,8 +123,9 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         shirtSlogans: finalSlogans,
         imagePrompts: visualStrategies.map((strategy) => strategy.prompt),
         visualStrategies,
-        visualBatchMetrics,
-        visualReleaseGate,
+        visualBatchMetrics: visualBenchmark.metrics,
+        visualReleaseGate: visualBenchmark.releaseGate,
+        visualEngineVersion: VISUAL_ENGINE_VERSION,
         sloganInsights: sloganEngine.ranked,
         sloganCollections: sloganEngine.collections,
         sloganPersona: sloganEngine.persona,
@@ -260,6 +258,7 @@ JSON SHAPE:
         visualStrategies: merchPayload.visualStrategies,
         visualBatchMetrics: merchPayload.visualBatchMetrics,
         visualReleaseGate: merchPayload.visualReleaseGate,
+        visualEngineVersion: merchPayload.visualEngineVersion,
         sloganInsights: merchPayload.sloganInsights,
         sloganCollections: merchPayload.sloganCollections,
         sloganPersona: merchPayload.sloganPersona,
@@ -613,7 +612,7 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                         slogan: conversion?.slogan || '',
                         listing: item.autoListing,
                         adHooks: item.adHooks,
-                        visualBatchMetrics: item.visualBatchMetrics,
+                        visualBatchMetrics: item.visualBatchMetrics ?? undefined,
                         visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
                         visualReleaseGate: item.visualReleaseGate,
                     });
@@ -632,7 +631,7 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                                 tags: Array.isArray(item.autoListing?.tags) ? item.autoListing.tags : [],
                                 mockupPrompt: item.autoListing?.mockupPrompt || item.autoListing?.description || '',
                                 adHooks: Array.isArray(item.adHooks) ? item.adHooks : [],
-                                visualBatchMetrics: item.visualBatchMetrics,
+                                visualBatchMetrics: item.visualBatchMetrics ?? undefined,
                                 visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
                                 visualReleaseGate: item.visualReleaseGate,
                                 status: 'PENDING',

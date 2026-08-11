@@ -103,6 +103,7 @@ export interface DynamicStyleVariant {
 }
 
 export interface DesignBatchDiversityMetrics {
+  sampleSize: number;
   designCount: number;
   primaryFocusDiversity: number;
   compositionFamilyDiversity: number;
@@ -121,6 +122,10 @@ export interface DesignBatchDiversityMetrics {
   collapsedStrategyIndexes: number[];
 }
 
+export const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+export const MIN_VISUAL_BATCH_SIZE = 3;
+export const MAX_VISUAL_REPAIR_ATTEMPTS = 2;
+
 export const VISUAL_RELEASE_THRESHOLDS = {
   primaryFocusDiversity: 0.6,
   compositionFamilyDiversity: 0.75,
@@ -131,6 +136,7 @@ export const VISUAL_RELEASE_THRESHOLDS = {
 } as const;
 
 export type VisualReleaseMetric = keyof typeof VISUAL_RELEASE_THRESHOLDS;
+export type VisualReleaseStatus = "NOT_EVALUATED" | "INSUFFICIENT_SAMPLE" | "PASS" | "REVIEW";
 
 export interface VisualReleaseWarning {
   metric: VisualReleaseMetric;
@@ -140,12 +146,22 @@ export interface VisualReleaseWarning {
 }
 
 export interface VisualReleaseGate {
-  status: "pass" | "soft_warning";
+  status: VisualReleaseStatus;
+  evaluated: boolean;
   passed: boolean;
+  sampleSize: number;
   repairAttempts: number;
   maxRepairAttempts: number;
+  unresolvedMetrics: VisualReleaseMetric[];
   warnings: VisualReleaseWarning[];
   thresholds: typeof VISUAL_RELEASE_THRESHOLDS;
+  reason?: string;
+}
+
+export interface VisualBatchReleaseEvaluation {
+  validStrategies: DynamicDesignStrategy[];
+  metrics: DesignBatchDiversityMetrics | null;
+  releaseGate: VisualReleaseGate;
 }
 
 export interface DynamicDesignBatchInput {
@@ -492,9 +508,10 @@ function arrayOverlap(left: string[], right: string[]): number {
   return intersection / (a.size + b.size - intersection);
 }
 
-function averageMetric(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+function averageDefined(values: Array<number | null | undefined>): number | null {
+  const valid = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (valid.length === 0) return null;
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
 }
 
 function roundedRatio(value: number): number {
@@ -1124,28 +1141,50 @@ export function buildDynamicStyleVariants(
   }));
 }
 
-export function analyzeDynamicDesignBatch(strategies: DynamicDesignStrategy[]): DesignBatchDiversityMetrics {
+export function isValidVisualStrategy(strategy: unknown): strategy is DynamicDesignStrategy {
+  if (!strategy || typeof strategy !== "object") return false;
+  const candidate = strategy as Partial<DynamicDesignStrategy>;
+  const composition = candidate.composition;
+  const concept = candidate.concept;
+  const fingerprint = candidate.fingerprint;
+  const quality = candidate.quality;
+  const focusIsValid = composition?.primaryFocus === "typography" ||
+    composition?.primaryFocus === "illustration" ||
+    composition?.primaryFocus === "hybrid";
+  const qualityValues = quality ? [
+    quality.thumbnailLegibility,
+    quality.focalClarity,
+    quality.silhouetteStrength,
+    quality.textGraphicIntegration,
+    quality.contrast,
+    quality.printability,
+    quality.visualOriginality,
+    quality.sloganReinforcement,
+  ] : [];
+
+  return Boolean(
+    cleanString(candidate.slogan) &&
+    focusIsValid &&
+    cleanString(composition?.textTreatment) &&
+    cleanString(composition?.illustrationRelationship) &&
+    cleanString(composition?.silhouette) &&
+    cleanString(concept?.coreMessage) &&
+    Array.isArray(concept?.visualMetaphors) &&
+    cleanString(fingerprint?.primarySubject) &&
+    cleanString(fingerprint?.compositionType) &&
+    cleanString(fingerprint?.metaphorType) &&
+    cleanString(fingerprint?.typographyRole) &&
+    cleanString(fingerprint?.graphicRelationship) &&
+    qualityValues.length === 8 &&
+    qualityValues.every((value) => typeof value === "number" && Number.isFinite(value)) &&
+    typeof candidate.visualImpact === "number" && Number.isFinite(candidate.visualImpact),
+  );
+}
+
+export function analyzeDynamicDesignBatch(candidates: readonly unknown[]): DesignBatchDiversityMetrics | null {
+  const strategies = candidates.filter(isValidVisualStrategy);
   const count = strategies.length;
-  if (count === 0) {
-    return {
-      designCount: 0,
-      primaryFocusDiversity: 0,
-      compositionFamilyDiversity: 0,
-      visualMetaphorDiversity: 0,
-      supportingObjectOverlap: 0,
-      typographyRoleDiversity: 0,
-      fingerprintCollisionRate: 0,
-      maxFingerprintSimilarity: 0,
-      averageThumbnailLegibility: 0,
-      averagePrintability: 0,
-      averageSloganReinforcement: 0,
-      averageVisualOriginality: 0,
-      averageVisualImpact: 0,
-      commercialQualityScore: 0,
-      qualityGatePassRate: 0,
-      collapsedStrategyIndexes: [],
-    };
-  }
+  if (count < MIN_VISUAL_BATCH_SIZE) return null;
 
   const pairSimilarities: number[] = [];
   const objectOverlaps: number[] = [];
@@ -1159,49 +1198,71 @@ export function analyzeDynamicDesignBatch(strategies: DynamicDesignStrategy[]): 
     }
   }
 
-  const thumbnail = averageMetric(strategies.map((strategy) => strategy.quality.thumbnailLegibility));
-  const printability = averageMetric(strategies.map((strategy) => strategy.quality.printability));
-  const reinforcement = averageMetric(strategies.map((strategy) => strategy.quality.sloganReinforcement));
-  const originality = averageMetric(strategies.map((strategy) => strategy.quality.visualOriginality));
-  const focalClarity = averageMetric(strategies.map((strategy) => strategy.quality.focalClarity));
-  const integration = averageMetric(strategies.map((strategy) => strategy.quality.textGraphicIntegration));
+  const thumbnail = averageDefined(strategies.map((strategy) => strategy.quality.thumbnailLegibility));
+  const printability = averageDefined(strategies.map((strategy) => strategy.quality.printability));
+  const reinforcement = averageDefined(strategies.map((strategy) => strategy.quality.sloganReinforcement));
+  const originality = averageDefined(strategies.map((strategy) => strategy.quality.visualOriginality));
+  const focalClarity = averageDefined(strategies.map((strategy) => strategy.quality.focalClarity));
+  const integration = averageDefined(strategies.map((strategy) => strategy.quality.textGraphicIntegration));
+  if ([thumbnail, printability, reinforcement, originality, focalClarity, integration].some((value) => value === null)) {
+    return null;
+  }
   const pairCount = pairSimilarities.length;
   const collisions = pairSimilarities.filter((similarity) => similarity >= 0.65).length;
   const primaryFocusCount = new Set(strategies.map((strategy) => strategy.composition.primaryFocus)).size;
 
   return {
+    sampleSize: count,
     designCount: count,
     primaryFocusDiversity: roundedRatio(primaryFocusCount / Math.min(3, count)),
     compositionFamilyDiversity: roundedRatio(semanticClusterCount(strategies.map(compositionDescriptor)) / count),
     visualMetaphorDiversity: roundedRatio(semanticClusterCount(strategies.map((strategy) => strategy.fingerprint.metaphorType)) / count),
-    supportingObjectOverlap: roundedRatio(averageMetric(objectOverlaps)),
+    supportingObjectOverlap: roundedRatio(averageDefined(objectOverlaps) ?? 0),
     typographyRoleDiversity: roundedRatio(semanticClusterCount(strategies.map(typographyRoleDescriptor)) / count),
     fingerprintCollisionRate: roundedRatio(pairCount > 0 ? collisions / pairCount : 0),
     maxFingerprintSimilarity: roundedRatio(pairSimilarities.length > 0 ? Math.max(...pairSimilarities) : 0),
-    averageThumbnailLegibility: Math.round(thumbnail),
-    averagePrintability: Math.round(printability),
-    averageSloganReinforcement: Math.round(reinforcement),
-    averageVisualOriginality: Math.round(originality),
-    averageVisualImpact: Math.round(averageMetric(strategies.map((strategy) => strategy.visualImpact))),
+    averageThumbnailLegibility: Math.round(thumbnail!),
+    averagePrintability: Math.round(printability!),
+    averageSloganReinforcement: Math.round(reinforcement!),
+    averageVisualOriginality: Math.round(originality!),
+    averageVisualImpact: Math.round(averageDefined(strategies.map((strategy) => strategy.visualImpact))!),
     // Simplicity is not penalized. The three strongest commercial constraints
     // receive 75% of the score; novelty is deliberately capped at 5%.
     commercialQualityScore: Math.round(
-      thumbnail * 0.25 +
-      printability * 0.25 +
-      reinforcement * 0.25 +
-      focalClarity * 0.1 +
-      integration * 0.1 +
-      originality * 0.05,
+      thumbnail! * 0.25 +
+      printability! * 0.25 +
+      reinforcement! * 0.25 +
+      focalClarity! * 0.1 +
+      integration! * 0.1 +
+      originality! * 0.05,
     ),
     qualityGatePassRate: roundedRatio(strategies.filter((strategy) => strategy.qualityGatePassed).length / count),
     collapsedStrategyIndexes: findBatchCollapseRepairIndexes(strategies),
   };
 }
 
+export function createUnevaluatedVisualReleaseGate(sampleSize = 0): VisualReleaseGate {
+  const hasNoStrategies = sampleSize === 0;
+  return {
+    status: hasNoStrategies ? "NOT_EVALUATED" : "INSUFFICIENT_SAMPLE",
+    evaluated: false,
+    passed: false,
+    sampleSize,
+    repairAttempts: 0,
+    maxRepairAttempts: MAX_VISUAL_REPAIR_ATTEMPTS,
+    unresolvedMetrics: [],
+    warnings: [],
+    thresholds: VISUAL_RELEASE_THRESHOLDS,
+    reason: hasNoStrategies
+      ? "Visual strategies have not been generated yet."
+      : `At least ${MIN_VISUAL_BATCH_SIZE} valid visual strategies are required for batch-diversity analysis.`,
+  };
+}
+
 export function evaluateVisualReleaseGate(
   metrics: DesignBatchDiversityMetrics,
   repairAttempts = 0,
-  maxRepairAttempts = 2,
+  maxRepairAttempts = MAX_VISUAL_REPAIR_ATTEMPTS,
 ): VisualReleaseGate {
   const warnings: VisualReleaseWarning[] = [];
   const addMinimumWarning = (metric: Exclude<VisualReleaseMetric, "supportingObjectOverlap">) => {
@@ -1225,12 +1286,47 @@ export function evaluateVisualReleaseGate(
   }
 
   return {
-    status: warnings.length === 0 ? "pass" : "soft_warning",
+    status: warnings.length === 0 ? "PASS" : "REVIEW",
+    evaluated: true,
     passed: warnings.length === 0,
+    sampleSize: metrics.sampleSize,
     repairAttempts: Math.max(0, Math.min(maxRepairAttempts, Math.round(repairAttempts))),
     maxRepairAttempts,
+    unresolvedMetrics: warnings.map((warning) => warning.metric),
     warnings,
     thresholds: VISUAL_RELEASE_THRESHOLDS,
+    reason: warnings.length === 0
+      ? "Visual batch passed the commercial quality and diversity release thresholds."
+      : "Some concepts remain below the visual release thresholds.",
+  };
+}
+
+export function evaluateVisualBatchRelease(candidates: readonly unknown[]): VisualBatchReleaseEvaluation {
+  const validStrategies = candidates.filter(isValidVisualStrategy);
+  if (validStrategies.length < MIN_VISUAL_BATCH_SIZE) {
+    return {
+      validStrategies,
+      metrics: null,
+      releaseGate: createUnevaluatedVisualReleaseGate(validStrategies.length),
+    };
+  }
+
+  const metrics = analyzeDynamicDesignBatch(validStrategies);
+  if (!metrics) {
+    return {
+      validStrategies,
+      metrics: null,
+      releaseGate: createUnevaluatedVisualReleaseGate(validStrategies.length),
+    };
+  }
+
+  return {
+    validStrategies,
+    metrics,
+    releaseGate: evaluateVisualReleaseGate(
+      metrics,
+      Math.max(0, ...validStrategies.map((strategy) => strategy.batchRepairAttempts ?? 0)),
+    ),
   };
 }
 
@@ -1250,7 +1346,7 @@ export async function generateDynamicDesignBatch(input: DynamicDesignBatchInput)
   let evaluated = await evaluateAndReviseStrategies(normalizedInput, unscored);
   const repairedIndexes = new Set<number>();
   let batchRepairAttempts = 0;
-  for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+  for (let repairAttempt = 0; repairAttempt < MAX_VISUAL_REPAIR_ATTEMPTS; repairAttempt += 1) {
     const collapsed = findBatchCollapseRepairIndexes(evaluated);
     if (collapsed.length === 0) break;
     batchRepairAttempts += 1;

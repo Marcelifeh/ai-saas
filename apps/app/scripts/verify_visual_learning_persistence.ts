@@ -37,6 +37,8 @@ function normalizeKey(value: string): string {
 function strategyMetrics(level: number, marker: string) {
   return {
     marker,
+    sampleSize: 6,
+    designCount: 6,
     visualImpact: level,
     qualityGatePassed: level >= 70,
     diversityPenalty: 0,
@@ -99,11 +101,15 @@ async function main(): Promise<void> {
   const expectedStrategy = strategyMetrics(60, marker);
   const expectedGate = {
     marker,
-    status: "pass",
+    status: "PASS",
+    evaluated: true,
     passed: true,
+    sampleSize: 6,
     repairAttempts: 1,
     maxRepairAttempts: 2,
+    unresolvedMetrics: [],
     warnings: [],
+    reason: "Visual batch passed the commercial quality and diversity release thresholds.",
   };
   let userId: string | undefined;
   let listingId: string | undefined;

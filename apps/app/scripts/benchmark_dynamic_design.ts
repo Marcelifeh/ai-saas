@@ -9,6 +9,7 @@ import type {
   VisualFingerprint,
 } from "../lib/ai/dynamicDesignPrompt";
 import type { DynamicNicheProfile } from "../lib/ai/dynamicNicheProfile";
+import { getVisualReleasePresentation } from "../lib/utils/visualReleasePresentation";
 
 function loadLocalEnvironment(): void {
   const candidates = [
@@ -192,6 +193,7 @@ async function runDeterministicBenchmark(): Promise<void> {
   const {
     analyzeDynamicDesignBatch,
     buildDynamicStyleVariants,
+    evaluateVisualBatchRelease,
     evaluateVisualReleaseGate,
   } = await import("../lib/ai/dynamicDesignPrompt");
   const strategies = [0, 1, 2, 3].map(makeSyntheticStrategy);
@@ -215,6 +217,7 @@ async function runDeterministicBenchmark(): Promise<void> {
   }
 
   const metrics = analyzeDynamicDesignBatch(strategies);
+  assert.ok(metrics, "A valid four-strategy batch must produce metrics");
   assert.equal(evaluateVisualReleaseGate(metrics).passed, true);
   assert.equal(metrics.primaryFocusDiversity, 1);
   assert.equal(metrics.compositionFamilyDiversity, 1);
@@ -230,7 +233,8 @@ async function runDeterministicBenchmark(): Promise<void> {
     commercialQualityScore: 69,
   }, 2);
   assert.equal(failedGate.passed, false);
-  assert.equal(failedGate.status, "soft_warning");
+  assert.equal(failedGate.status, "REVIEW");
+  assert.equal(failedGate.evaluated, true);
   assert.equal(failedGate.repairAttempts, 2);
   assert.deepEqual(
     failedGate.warnings.map((warning) => warning.metric).sort(),
@@ -238,12 +242,50 @@ async function runDeterministicBenchmark(): Promise<void> {
     "The release gate must expose each unresolved soft-threshold failure after two repairs",
   );
 
+  const emptyRelease = evaluateVisualBatchRelease([]);
+  assert.equal(emptyRelease.metrics, null);
+  assert.equal(emptyRelease.releaseGate.status, "NOT_EVALUATED");
+  assert.equal(emptyRelease.releaseGate.evaluated, false);
+  assert.deepEqual(emptyRelease.releaseGate.unresolvedMetrics, []);
+  const unevaluatedUi = getVisualReleasePresentation({ status: "REVIEW", evaluated: false });
+  assert.equal(unevaluatedUi.label, "pending");
+  assert.equal(unevaluatedUi.showReviewWarning, false, "REVIEW must never render for an unevaluated gate");
+
+  for (const sampleSize of [1, 2]) {
+    const undersizedRelease = evaluateVisualBatchRelease(strategies.slice(0, sampleSize));
+    assert.equal(undersizedRelease.metrics, null);
+    assert.equal(undersizedRelease.releaseGate.status, "INSUFFICIENT_SAMPLE");
+    assert.equal(undersizedRelease.releaseGate.sampleSize, sampleSize);
+  }
+
+  const incompleteStrategies = strategies.slice(0, 3).map((strategy) => ({
+    ...strategy,
+    quality: { ...strategy.quality, thumbnailLegibility: undefined },
+  }));
+  const incompleteRelease = evaluateVisualBatchRelease(incompleteStrategies);
+  assert.equal(incompleteRelease.metrics, null, "Absent quality scores must not be averaged as zero");
+  assert.notEqual(incompleteRelease.releaseGate.status, "REVIEW");
+
+  const collapsingBatch = strategies.slice(0, 3).map((strategy, index) => ({
+    ...strategy,
+    batchRepairAttempts: 2,
+    fingerprint: { ...strategies[0].fingerprint },
+    composition: { ...strategies[0].composition },
+    concept: { ...strategies[0].concept },
+    slogan: `Collapsing strategy ${index}`,
+  }));
+  const collapsingRelease = evaluateVisualBatchRelease(collapsingBatch);
+  assert.equal(collapsingRelease.releaseGate.status, "REVIEW");
+  assert.equal(collapsingRelease.releaseGate.repairAttempts, 2, "Release metadata must report actual repair attempts");
+
   const alternateComplexity = strategies.map((strategy) => ({
     ...strategy,
     complexity: { ...strategy.complexity, supportingDetailLevel: "moderate" as const },
   }));
+  const alternateMetrics = analyzeDynamicDesignBatch(alternateComplexity);
+  assert.ok(alternateMetrics, "A valid alternate-complexity batch must produce metrics");
   assert.equal(
-    analyzeDynamicDesignBatch(alternateComplexity).commercialQualityScore,
+    alternateMetrics.commercialQualityScore,
     metrics.commercialQualityScore,
     "Complexity must not inflate commercial quality",
   );
@@ -294,11 +336,10 @@ async function runLiveBenchmark(): Promise<void> {
       printBackground: "transparent",
       marketplace: "general",
     });
-    const metrics = design.analyzeDynamicDesignBatch(strategies);
-    const releaseGate = design.evaluateVisualReleaseGate(
-      metrics,
-      Math.max(0, ...strategies.map((strategy) => strategy.batchRepairAttempts)),
-    );
+    const release = design.evaluateVisualBatchRelease(strategies);
+    const metrics = release.metrics;
+    assert.ok(metrics, `${testCase.niche}: valid visual batch was not evaluated`);
+    const releaseGate = release.releaseGate;
     console.table([{ niche: testCase.niche, ...metrics, collapsedStrategyIndexes: metrics.collapsedStrategyIndexes.join(",") || "none" }]);
     assert.ok(metrics.primaryFocusDiversity >= 0.667, `${testCase.niche}: primary-focus diversity collapsed`);
     assert.ok(metrics.compositionFamilyDiversity >= 0.5, `${testCase.niche}: composition-family diversity collapsed`);

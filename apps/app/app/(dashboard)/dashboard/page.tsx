@@ -7,6 +7,7 @@ import { Copy, Sparkles, Wand2, Target, Tags, ShoppingCart, BarChart2 } from "lu
 import { InsightPanel } from "../../../components/dashboard/InsightPanel";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
 import { safeJson } from "@/lib/utils/safeJson";
+import { getVisualReleasePresentation } from "@/lib/utils/visualReleasePresentation";
 
 const PRESET_STYLES = [
     "Vintage Distressed",
@@ -18,7 +19,8 @@ const PRESET_STYLES = [
     "Y2K",
 ];
 
-const STORAGE_KEY = "tf_single_strategy_state_v1";
+const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+const STORAGE_KEY = `tf_single_strategy_state_${VISUAL_ENGINE_VERSION}`;
 
 function shortenNiche(name: string): string {
     const s = name
@@ -93,6 +95,38 @@ type VisualStrategy = {
     };
 };
 
+type VisualReleaseWarningView = {
+    metric: string;
+    actual: number;
+    threshold: number;
+    expectation: "minimum" | "maximum";
+};
+
+type VisualReleaseGateView = {
+    status: "NOT_EVALUATED" | "INSUFFICIENT_SAMPLE" | "PASS" | "REVIEW";
+    evaluated: boolean;
+    passed: boolean;
+    sampleSize: number;
+    repairAttempts: number;
+    maxRepairAttempts: number;
+    unresolvedMetrics: string[];
+    warnings: VisualReleaseWarningView[];
+    reason?: string;
+};
+
+const visualMetricLabels: Record<string, string> = {
+    primaryFocusDiversity: "Focus diversity",
+    compositionFamilyDiversity: "Composition diversity",
+    visualMetaphorDiversity: "Metaphor diversity",
+    supportingObjectOverlap: "Supporting-object overlap",
+    typographyRoleDiversity: "Typography-role diversity",
+    commercialQualityScore: "Commercial quality",
+};
+
+function formatVisualMetric(value: number): string {
+    return Math.abs(value) <= 1 ? value.toFixed(2) : Math.round(value).toString();
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 function SingleStrategyContent() {
@@ -123,6 +157,11 @@ function SingleStrategyContent() {
     const rankedSlogans = (result?.sloganInsights || []) as RankedSlogan[];
     const designSlogans = result?.shirtSlogans || [];
     const visualStrategies = (result?.visualStrategies || []) as VisualStrategy[];
+    const visualReleaseGate = result?.visualReleaseGate as VisualReleaseGateView | undefined;
+    const visualReleaseEvaluated = visualReleaseGate?.evaluated === true;
+    const visualReleasePresentation = getVisualReleasePresentation(visualReleaseGate);
+    const visualReleasePassed = visualReleasePresentation.tone === "success";
+    const visualReleaseNeedsReview = visualReleasePresentation.showReviewWarning;
 
     const describeBand = (value: number | null) => {
         if (value == null || Number.isNaN(value)) return "Medium";
@@ -183,6 +222,10 @@ function SingleStrategyContent() {
             if (!raw) return;
             const saved = JSON.parse(raw);
             if (saved && typeof saved === "object") {
+                if (saved.result?.visualEngineVersion !== VISUAL_ENGINE_VERSION) {
+                    window.localStorage.removeItem(STORAGE_KEY);
+                    return;
+                }
                 if (typeof saved.prompt === "string") setPrompt(saved.prompt);
                 if (typeof saved.platform === "string") setPlatform(saved.platform);
                 if (typeof saved.audience === "string") setAudience(saved.audience);
@@ -327,7 +370,7 @@ function SingleStrategyContent() {
             impressions: feedbackInputs.impressions ? parseInt(feedbackInputs.impressions, 10) : undefined,
             clicks: feedbackInputs.clicks ? parseInt(feedbackInputs.clicks, 10) : undefined,
             orders: feedbackInputs.orders ? parseInt(feedbackInputs.orders, 10) : undefined,
-            visualBatchMetrics: result.visualBatchMetrics,
+            visualBatchMetrics: result.visualBatchMetrics ?? undefined,
             visualStrategyMetrics: selectedVisualStrategy ? {
                 visualImpact: selectedVisualStrategy.visualImpact,
                 qualityGatePassed: selectedVisualStrategy.qualityGatePassed,
@@ -980,9 +1023,14 @@ function SingleStrategyContent() {
                                         <p className="text-xs text-gray-500 mt-1">Refine and copy ready-to-use image prompts.</p>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        {result.visualReleaseGate && (
-                                            <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${result.visualReleaseGate.passed ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-amber-500/40 bg-amber-500/10 text-amber-300"}`}>
-                                                Visual release: {result.visualReleaseGate.passed ? "pass" : "review"}
+                                        {visualReleaseGate && (
+                                            <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${visualReleasePassed
+                                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                                : visualReleaseNeedsReview
+                                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                                    : "border-slate-500/40 bg-slate-500/10 text-slate-300"
+                                            }`}>
+                                                Visual release: {visualReleasePresentation.label}
                                             </span>
                                         )}
                                         <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-indigo-300">
@@ -991,9 +1039,31 @@ function SingleStrategyContent() {
                                     </div>
                                 </div>
 
-                                {Array.isArray(result.visualReleaseGate?.warnings) && result.visualReleaseGate.warnings.length > 0 && (
+                                {visualReleaseGate && !visualReleaseEvaluated && (
+                                    <div className="mb-4 rounded-xl border border-slate-500/25 bg-slate-500/5 px-3 py-2 text-[11px] text-slate-300">
+                                        {visualReleaseGate.reason || "Visual benchmark will run once enough valid design concepts are available."}
+                                    </div>
+                                )}
+
+                                {visualReleaseNeedsReview && Array.isArray(visualReleaseGate?.warnings) && visualReleaseGate.warnings.length > 0 && (
                                     <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
-                                        Soft release warning after {result.visualReleaseGate.repairAttempts}/{result.visualReleaseGate.maxRepairAttempts} repair attempts: {result.visualReleaseGate.warnings.map((warning: any) => `${warning.metric} ${warning.actual} (${warning.expectation === "maximum" ? "max" : "min"} ${warning.threshold})`).join(" · ")}
+                                        <div className="font-bold">Visual batch needs review.</div>
+                                        <div className="mt-0.5 text-amber-100/80">Some concepts remain below the commercial diversity or quality thresholds.</div>
+                                        {visualReleaseGate.repairAttempts > 0 && (
+                                            <div className="mt-1 text-amber-100/70">
+                                                Automated repair attempts: {visualReleaseGate.repairAttempts}/{visualReleaseGate.maxRepairAttempts}
+                                            </div>
+                                        )}
+                                        <details className="mt-2">
+                                            <summary className="cursor-pointer font-bold text-amber-100">Details</summary>
+                                            <div className="mt-1 space-y-0.5 text-amber-100/75">
+                                                {visualReleaseGate.warnings.map((warning) => (
+                                                    <div key={warning.metric}>
+                                                        {visualMetricLabels[warning.metric] ?? warning.metric}: {formatVisualMetric(warning.actual)} / {warning.expectation === "maximum" ? "max" : "min"} {formatVisualMetric(warning.threshold)}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </details>
                                     </div>
                                 )}
 
