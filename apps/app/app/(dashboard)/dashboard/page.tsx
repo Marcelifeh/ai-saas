@@ -20,7 +20,7 @@ const PRESET_STYLES = [
 ];
 
 const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
-const LISTING_ENGINE_VERSION = "dynamic-listing-v1";
+const LISTING_ENGINE_VERSION = "dynamic-listing-v3";
 const STORAGE_KEY = `tf_single_strategy_state_${VISUAL_ENGINE_VERSION}_${LISTING_ENGINE_VERSION}`;
 
 function shortenNiche(name: string): string {
@@ -135,12 +135,25 @@ type DynamicListingView = {
         nicheSpecificity: number;
         behavioralRelevance: number;
         searchIntentCoverage: number;
+        bulletSeoQuality: number;
         keywordNaturalness: number;
         giftIntent: number;
         repetitionScore: number;
         readability: number;
         complianceConfidence: number;
+        claimGrounding: number;
         listingQualityScore: number;
+    };
+    seoAudit: {
+        titleCoverage: number;
+        bulletCoverage: number;
+        backendCoverage: number;
+        buyerIntent: number;
+        naturalness: number;
+        duplicatePhraseRate: number;
+        unsupportedTerms: number;
+        overallScore: number;
+        bulletKeywords: string[];
     };
     qualityGate: {
         status: "PASS" | "REVIEW";
@@ -149,6 +162,7 @@ type DynamicListingView = {
         repairAttempts: number;
     };
     compliance: { safe: boolean; confidence: number; riskLevel: string; warnings: string[] };
+    grounding: { score: number; attributionCoverage: number; unsupportedClaims: unknown[] };
     engineVersion: string;
 };
 
@@ -199,6 +213,7 @@ function SingleStrategyContent() {
     const [feedbackInputs, setFeedbackInputs] = useState({ impressions: "", clicks: "", orders: "" });
     const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
     const [showListingMetrics, setShowListingMetrics] = useState(false);
+    const [showSeoAudit, setShowSeoAudit] = useState(false);
 
     const demandScore = result ? Math.round(result.searchVolume ?? 0) : null;
     const compScore = result ? Math.round(result.competitionDensity ?? 0) : null;
@@ -1066,11 +1081,19 @@ function SingleStrategyContent() {
                                             <span className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-200">
                                                 Buyer fit: {listingBand(listingQuality?.buyerIdentityAlignment)}
                                             </span>
-                                            <span className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-200">
-                                                SEO: {listingBand(listingQuality?.searchIntentCoverage)}
-                                            </span>
+                                            <button
+                                                type="button"
+                                                aria-expanded={showSeoAudit}
+                                                onClick={() => setShowSeoAudit((value) => !value)}
+                                                className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 hover:border-indigo-400"
+                                            >
+                                                SEO: {listingBand(dynamicListing?.seoAudit?.overallScore ?? listingQuality?.searchIntentCoverage)}
+                                            </button>
                                             <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${dynamicListing?.compliance.safe ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200" : "bg-amber-500/10 border-amber-500/30 text-amber-200"}`}>
                                                 Compliance: {dynamicListing?.compliance.safe ? "Pass" : "Review"}
+                                            </span>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${dynamicListing?.grounding?.score === 100 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200" : "bg-amber-500/10 border-amber-500/30 text-amber-200"}`}>
+                                                Grounding: {dynamicListing?.grounding?.score === 100 ? "Pass" : "Review"}
                                             </span>
                                         </div>
                                         <div className="flex flex-wrap gap-1.5" aria-label="Marketplace intent">
@@ -1089,6 +1112,54 @@ function SingleStrategyContent() {
                                     </div>
                                 </div>
 
+                                {showSeoAudit && dynamicListing?.seoAudit && (
+                                    <div className="mb-4 p-4 rounded-xl bg-gray-950 border border-indigo-500/30">
+                                        <div className="flex items-center justify-between gap-3 mb-3">
+                                            <div>
+                                                <div className="text-[10px] font-black uppercase tracking-widest text-indigo-200">SEO coverage audit</div>
+                                                <div className="mt-1 text-xs text-gray-400">Grounded customer-copy phrases are measured separately from backend-only terms.</div>
+                                            </div>
+                                            <div className="text-lg font-black text-white">{dynamicListing.seoAudit.overallScore}</div>
+                                        </div>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                                            {[
+                                                ["Title coverage", dynamicListing.seoAudit.titleCoverage],
+                                                ["Bullet coverage", dynamicListing.seoAudit.bulletCoverage],
+                                                ["Backend coverage", dynamicListing.seoAudit.backendCoverage],
+                                                ["Buyer intent", dynamicListing.seoAudit.buyerIntent],
+                                                ["Naturalness", dynamicListing.seoAudit.naturalness],
+                                            ].map(([label, value]) => (
+                                                <div key={String(label)}>
+                                                    <div className="text-[9px] uppercase tracking-widest text-gray-500">{label}</div>
+                                                    <div className="mt-1 font-black text-white">{value}</div>
+                                                </div>
+                                            ))}
+                                            <div>
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500">Duplicate phrase rate</div>
+                                                <div className="mt-1 font-black text-white">{dynamicListing.seoAudit.duplicatePhraseRate}%</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500">Unsupported terms</div>
+                                                <div className={`mt-1 font-black ${dynamicListing.seoAudit.unsupportedTerms === 0 ? "text-emerald-300" : "text-amber-300"}`}>{dynamicListing.seoAudit.unsupportedTerms}</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500">Bullet SEO quality</div>
+                                                <div className="mt-1 font-black text-white">{listingQuality?.bulletSeoQuality}</div>
+                                            </div>
+                                        </div>
+                                        {dynamicListing.seoAudit.bulletKeywords.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-gray-800">
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500 mb-2">Grounded bullet phrases</div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {dynamicListing.seoAudit.bulletKeywords.map((term) => (
+                                                        <span key={term} className="px-2 py-1 rounded-md bg-indigo-500/10 border border-indigo-500/20 text-[10px] text-indigo-100">{term}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {showListingMetrics && listingQuality && (
                                     <div className="mb-4 p-4 rounded-xl bg-gray-950 border border-gray-800">
                                         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
@@ -1097,10 +1168,12 @@ function SingleStrategyContent() {
                                                 ["Niche specificity", listingQuality.nicheSpecificity],
                                                 ["Behavioral relevance", listingQuality.behavioralRelevance],
                                                 ["Search intent", listingQuality.searchIntentCoverage],
+                                                ["Bullet SEO", listingQuality.bulletSeoQuality],
                                                 ["Natural language", listingQuality.keywordNaturalness],
                                                 ["Gift relevance", listingQuality.giftIntent],
                                                 ["Readability", listingQuality.readability],
                                                 ["Compliance", listingQuality.complianceConfidence],
+                                                ["Claim grounding", listingQuality.claimGrounding],
                                             ].map(([label, value]) => (
                                                 <div key={String(label)}>
                                                     <div className="text-[9px] uppercase tracking-widest text-gray-500">{label}</div>
@@ -1139,19 +1212,26 @@ function SingleStrategyContent() {
                                         <div className="p-4 bg-gray-950 rounded-xl space-y-2">
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Brand Strategy</div>
-                                                <a href="/settings#merch-brand" className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200">Verify / Configure</a>
+                                                <a href="/settings#merch-brand" className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200">
+                                                    {dynamicListing?.brandStrategy.source === "none" ? "Configure brand →" : "Change →"}
+                                                </a>
                                             </div>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <div className="inline-flex items-center px-3 py-1 rounded-md bg-blue-500/15 text-blue-200 text-xs font-semibold">
-                                                    {result.amazonListing?.brandName || "No brand configured"}
+                                            {dynamicListing?.brandStrategy.source === "none" ? (
+                                                <div>
+                                                    <div className="text-sm font-semibold text-white">No seller brand configured</div>
+                                                    <p className="mt-1 text-[11px] leading-relaxed text-gray-400">Add your storefront brand once and TrendForge will reuse it across eligible listings.</p>
                                                 </div>
-                                                {dynamicListing?.brandStrategy && (
-                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${dynamicListing.brandStrategy.verified ? "text-emerald-300" : "text-amber-300"}`}>
-                                                        {dynamicListing.brandStrategy.label}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            {dynamicListing?.brandStrategy.warning && <p className="text-[10px] leading-relaxed text-amber-200">⚠ {dynamicListing.brandStrategy.warning}</p>}
+                                            ) : (
+                                                <div>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <div className="text-sm font-semibold text-white">{result.amazonListing?.brandName}</div>
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest ${dynamicListing?.brandStrategy.source === "configured" ? "text-blue-300" : "text-amber-300"}`}>
+                                                            {dynamicListing?.brandStrategy.source === "configured" ? "Seller brand" : "Unverified candidate"}
+                                                        </span>
+                                                    </div>
+                                                    {dynamicListing?.brandStrategy.warning && <p className="mt-1 text-[10px] leading-relaxed text-amber-200">⚠ {dynamicListing.brandStrategy.warning}</p>}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="p-4 bg-gray-950 rounded-xl">

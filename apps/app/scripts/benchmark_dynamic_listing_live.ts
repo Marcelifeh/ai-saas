@@ -262,6 +262,9 @@ async function main() {
       assert.equal(unsupportedGift && result.qualityGate.passed, false, `${item.name}/${marketplace}: unsupported gift language passed the gate`);
       assert.equal(styleLed && result.qualityGate.passed, false, `${item.name}/${marketplace}: style-led title passed the gate`);
       assert.equal(generic && result.qualityGate.passed, false, `${item.name}/${marketplace}: generic phrase passed the gate`);
+      assert.equal(result.qualityGate.passed && result.grounding.score < 100, false, `${item.name}/${marketplace}: ungrounded claims passed the gate`);
+      assert.equal(result.qualityGate.passed && result.seoAudit.bulletCoverage < 50, false, `${item.name}/${marketplace}: weak bullet keyword coverage passed the gate`);
+      assert.equal(result.qualityGate.passed && result.seoAudit.unsupportedTerms > 0, false, `${item.name}/${marketplace}: unsupported SEO terms passed the gate`);
       assert.ok(coverage >= 0.5, `${item.name}/${marketplace}: core semantic coverage ${coverage.toFixed(2)}`);
 
       rows.push({
@@ -271,26 +274,48 @@ async function main() {
         gate: result.qualityGate.status,
         repaired: result.qualityGate.repairAttempts,
         coverage: Number(coverage.toFixed(2)),
+        grounding: result.grounding.score,
+        attribution: result.grounding.attributionCoverage,
+        bulletSeo: result.quality.bulletSeoQuality,
+        bulletCoverage: result.seoAudit.bulletCoverage,
+        seoNaturalness: result.seoAudit.naturalness,
+        backendCoverage: result.seoAudit.backendCoverage,
         compliance: result.compliance.safe,
         giftAppropriate: !unsupportedGift,
         genericFree: !generic,
         searchTerms: result.searchTerms.length,
         warnings: result.qualityGate.warnings.join(" | "),
+        ...(caseFilter ? {
+          bulletPhrases: result.seoAudit.bulletKeywords.join(" / "),
+          bullets: result.bullets.join(" || "),
+        } : {}),
       });
     }
 
     const coverages = nicheResults.map((result) => evidenceCoverage(result, item.coreTerms));
     const semanticSpread = Math.max(...coverages) - Math.min(...coverages);
+    if (caseFilter) console.table(rows);
     assert.ok(semanticSpread <= 0.34, `${item.name}: marketplace semantic spread ${semanticSpread.toFixed(2)}`);
-    assert.ok(new Set(nicheResults.map((result) => result.title.toLowerCase())).size >= 2, `${item.name}: marketplace titles did not repackage`);
+    const packagingFingerprints = nicheResults.map((result) => [
+      result.title,
+      ...result.bullets,
+      result.description,
+      ...result.searchTerms,
+    ].join(" | ").toLowerCase());
+    assert.ok(new Set(packagingFingerprints).size >= 2, `${item.name}: marketplace packaging did not change`);
   }
 
   const averageQuality = rows.reduce((sum, row) => sum + Number(row.quality), 0) / rows.length;
   const passRate = rows.filter((row) => row.gate === "PASS").length / rows.length;
   const averageCoverage = rows.reduce((sum, row) => sum + Number(row.coverage), 0) / rows.length;
-  console.table(rows);
+  const averageGrounding = rows.reduce((sum, row) => sum + Number(row.grounding), 0) / rows.length;
+  const averageBulletSeo = rows.reduce((sum, row) => sum + Number(row.bulletSeo), 0) / rows.length;
+  const minimumPassRate = selectedCases.length === cases.length ? 0.75 : 1 / marketplaces.length;
+  if (!caseFilter) console.table(rows);
   assert.ok(averageQuality >= 70, `average quality ${averageQuality.toFixed(1)} is below 70`);
-  assert.ok(passRate >= 0.75, `listing gate pass rate ${(passRate * 100).toFixed(0)}% is below 75%`);
+  assert.ok(passRate >= minimumPassRate, `listing gate pass rate ${(passRate * 100).toFixed(0)}% is below ${(minimumPassRate * 100).toFixed(0)}%`);
+  assert.ok(averageGrounding >= 75, `average claim grounding ${averageGrounding.toFixed(1)} is below 75`);
+  assert.ok(averageBulletSeo >= 70, `average bullet SEO quality ${averageBulletSeo.toFixed(1)} is below 70`);
 
   console.log(JSON.stringify({
     cases: selectedCases.length,
@@ -298,6 +323,8 @@ async function main() {
     averageQuality: Number(averageQuality.toFixed(1)),
     passRate: Number(passRate.toFixed(2)),
     averageSemanticCoverage: Number(averageCoverage.toFixed(2)),
+    averageClaimGrounding: Number(averageGrounding.toFixed(1)),
+    averageBulletSeo: Number(averageBulletSeo.toFixed(1)),
   }, null, 2));
 }
 
