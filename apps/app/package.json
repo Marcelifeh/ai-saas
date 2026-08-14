@@ -12,6 +12,8 @@
     "benchmark:dynamic": "tsx scripts/benchmark_dynamic_behavior.ts",
     "benchmark:design": "tsx scripts/benchmark_dynamic_design.ts",
     "benchmark:design:live": "tsx scripts/benchmark_dynamic_design.ts --live",
+    "benchmark:listing": "tsx scripts/regression_dynamic_listing.ts",
+    "benchmark:listing:live": "tsx scripts/benchmark_dynamic_listing_live.ts",
     "verify:visual-learning": "tsx scripts/verify_visual_learning_persistence.ts"
   },
   "dependencies": {

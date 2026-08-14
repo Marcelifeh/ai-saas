@@ -75,6 +75,9 @@ export default function SettingsPage() {
     const [error, setError] = useState<string | null>(null);
     const [isRedirecting, setIsRedirecting] = useState(false);
     const [billingPeriod, setBillingPeriod] = useState<"monthly" | "yearly">("monthly");
+    const [merchBrand, setMerchBrand] = useState("");
+    const [brandSaved, setBrandSaved] = useState(false);
+    const [brandSaving, setBrandSaving] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -83,7 +86,7 @@ export default function SettingsPage() {
             setIsLoading(true);
             setError(null);
             try {
-                const res = await fetch("/api/usage");
+                const [res, brandRes] = await Promise.all([fetch("/api/usage"), fetch("/api/settings/brand")]);
                 const data: UsageResponse = await safeJson<UsageResponse>(res);
 
                 if (!res.ok || !data.success) {
@@ -94,6 +97,10 @@ export default function SettingsPage() {
                 setPlan(data.plan ?? "free");
                 setUsage(data.usage ?? null);
                 setLimits(data.limits ?? null);
+                if (brandRes.ok) {
+                    const brandData = await safeJson<{ success?: boolean; brand?: string | null }>(brandRes);
+                    setMerchBrand(brandData.brand ?? "");
+                }
             } catch (err: unknown) {
                 if (cancelled) return;
                 if (err instanceof Error) {
@@ -114,6 +121,28 @@ export default function SettingsPage() {
     }, []);
 
     const normalizedPlan = (plan || "free").toLowerCase();
+
+    async function saveMerchBrand() {
+        setBrandSaving(true);
+        setBrandSaved(false);
+        setError(null);
+        try {
+            const res = await fetch("/api/settings/brand", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ brand: merchBrand.trim() || null }),
+            });
+            const data = await safeJson<{ success?: boolean; brand?: string | null; error?: string }>(res);
+            if (!res.ok || !data.success) throw new Error(data.error || "Failed to save brand");
+            setMerchBrand(data.brand ?? "");
+            setBrandSaved(true);
+            setTimeout(() => setBrandSaved(false), 1800);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Failed to save brand");
+        } finally {
+            setBrandSaving(false);
+        }
+    }
 
     async function startCheckout(targetPlan: string) {
         setIsRedirecting(true);
@@ -161,6 +190,33 @@ export default function SettingsPage() {
                     {error}
                 </div>
             )}
+
+            <section id="merch-brand" className="p-5 rounded-2xl bg-gray-900 border border-gray-800 space-y-4">
+                <div>
+                    <div className="text-[11px] font-bold uppercase tracking-widest text-blue-300 mb-1">Listing identity</div>
+                    <h2 className="text-lg font-semibold text-white">Configured merch brand</h2>
+                    <p className="mt-1 text-xs text-gray-400 max-w-2xl">
+                        Reused across winner-aware listings. Saving a name does not replace trademark or marketplace verification.
+                    </p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                    <input
+                        value={merchBrand}
+                        onChange={(event) => setMerchBrand(event.target.value)}
+                        maxLength={80}
+                        placeholder="Your established seller brand"
+                        className="flex-1 bg-gray-950 border border-gray-700 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    />
+                    <button
+                        type="button"
+                        onClick={saveMerchBrand}
+                        disabled={brandSaving}
+                        className="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-black uppercase tracking-wider text-white"
+                    >
+                        {brandSaving ? "Saving…" : brandSaved ? "Saved" : "Save brand"}
+                    </button>
+                </div>
+            </section>
 
             <section className="p-5 rounded-2xl bg-gray-900 border border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>

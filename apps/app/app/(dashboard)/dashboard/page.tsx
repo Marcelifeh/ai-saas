@@ -20,7 +20,8 @@ const PRESET_STYLES = [
 ];
 
 const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
-const STORAGE_KEY = `tf_single_strategy_state_${VISUAL_ENGINE_VERSION}`;
+const LISTING_ENGINE_VERSION = "dynamic-listing-v1";
+const STORAGE_KEY = `tf_single_strategy_state_${VISUAL_ENGINE_VERSION}_${LISTING_ENGINE_VERSION}`;
 
 function shortenNiche(name: string): string {
     const s = name
@@ -114,6 +115,55 @@ type VisualReleaseGateView = {
     reason?: string;
 };
 
+type ListingMarketplace = "amazon_merch" | "etsy" | "general";
+
+type DynamicListingView = {
+    title: string;
+    brand: string | null;
+    brandStrategy: {
+        source: "configured" | "generated_candidate" | "none";
+        label: string;
+        verified: boolean;
+        warning?: string;
+    };
+    bullets: string[];
+    description: string;
+    searchTerms: string[];
+    marketplace: ListingMarketplace;
+    quality: {
+        buyerIdentityAlignment: number;
+        nicheSpecificity: number;
+        behavioralRelevance: number;
+        searchIntentCoverage: number;
+        keywordNaturalness: number;
+        giftIntent: number;
+        repetitionScore: number;
+        readability: number;
+        complianceConfidence: number;
+        listingQualityScore: number;
+    };
+    qualityGate: {
+        status: "PASS" | "REVIEW";
+        passed: boolean;
+        warnings: string[];
+        repairAttempts: number;
+    };
+    compliance: { safe: boolean; confidence: number; riskLevel: string; warnings: string[] };
+    engineVersion: string;
+};
+
+const marketplaceLabels: Record<ListingMarketplace, string> = {
+    amazon_merch: "Amazon Merch",
+    etsy: "Etsy",
+    general: "General POD",
+};
+
+function mapListingMarketplace(value: string): ListingMarketplace {
+    if (value === "amazon") return "amazon_merch";
+    if (value === "etsy") return "etsy";
+    return "general";
+}
+
 const visualMetricLabels: Record<string, string> = {
     primaryFocusDiversity: "Focus diversity",
     compositionFamilyDiversity: "Composition diversity",
@@ -130,7 +180,7 @@ function formatVisualMetric(value: number): string {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 function SingleStrategyContent() {
-    const { generateSingleStrategy, regenerateSlogans, recordSalesFeedback, isLoading, isSloganRefreshing, error } = useFactory();
+    const { generateSingleStrategy, regenerateSlogans, repackageListing, recordSalesFeedback, isLoading, isSloganRefreshing, isListingRefreshing, error } = useFactory();
     const searchParams = useSearchParams();
     const [prompt, setPrompt] = useState("");
     const [platform, setPlatform] = useState("amazon");
@@ -148,6 +198,7 @@ function SingleStrategyContent() {
     const [feedbackModal, setFeedbackModal] = useState<{ slogan: string; sloganIdx: number } | null>(null);
     const [feedbackInputs, setFeedbackInputs] = useState({ impressions: "", clicks: "", orders: "" });
     const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+    const [showListingMetrics, setShowListingMetrics] = useState(false);
 
     const demandScore = result ? Math.round(result.searchVolume ?? 0) : null;
     const compScore = result ? Math.round(result.competitionDensity ?? 0) : null;
@@ -162,6 +213,10 @@ function SingleStrategyContent() {
     const visualReleasePresentation = getVisualReleasePresentation(visualReleaseGate);
     const visualReleasePassed = visualReleasePresentation.tone === "success";
     const visualReleaseNeedsReview = visualReleasePresentation.showReviewWarning;
+    const dynamicListing = result?.dynamicListing as DynamicListingView | undefined;
+    const listingQuality = dynamicListing?.quality;
+    const listingScore = listingQuality?.listingQualityScore;
+    const listingBand = (value?: number) => value == null ? "Pending" : value >= 85 ? "High" : value >= 70 ? "Strong" : "Review";
 
     const describeBand = (value: number | null) => {
         if (value == null || Number.isNaN(value)) return "Medium";
@@ -222,7 +277,10 @@ function SingleStrategyContent() {
             if (!raw) return;
             const saved = JSON.parse(raw);
             if (saved && typeof saved === "object") {
-                if (saved.result?.visualEngineVersion !== VISUAL_ENGINE_VERSION) {
+                if (
+                    saved.result?.visualEngineVersion !== VISUAL_ENGINE_VERSION
+                    || saved.result?.dynamicListing?.engineVersion !== LISTING_ENGINE_VERSION
+                ) {
                     window.localStorage.removeItem(STORAGE_KEY);
                     return;
                 }
@@ -520,6 +578,46 @@ function SingleStrategyContent() {
         navigator.clipboard.writeText(text);
         setCopiedListing(true);
         setTimeout(() => setCopiedListing(false), 1500);
+    };
+
+    const handleListingRefresh = async (marketplace: ListingMarketplace) => {
+        if (!result?.dynamicProfile || !result?.winningSlogan) return;
+        const selectedStrategy = visualStrategies.find((entry) => entry.slogan === result.winningSlogan);
+        const seo = result.seoKeywords || {};
+        const marketTerms = [
+            seo.primary,
+            ...(Array.isArray(seo.longTail) ? seo.longTail : []),
+            ...(Array.isArray(seo.buyerIntent) ? seo.buyerIntent : []),
+            ...(Array.isArray(seo.platformTags) ? seo.platformTags : []),
+        ].filter((term): term is string => typeof term === "string" && term.trim().length > 0);
+        const data = await repackageListing({
+            niche: result.niche || prompt,
+            slogan: result.winningSlogan,
+            audience: audience || result.dynamicProfile.audience,
+            profile: result.dynamicProfile,
+            visualStrategy: selectedStrategy,
+            marketTerms,
+            purchaseMotives: result.dynamicProfile.purchaseMotives,
+            marketplace,
+            visualStyle: selectedDesignStyle || style,
+        }) as { dynamicListing?: DynamicListingView; amazonListing?: Record<string, unknown> } | null;
+        if (!data?.dynamicListing || !data.amazonListing) return;
+
+        const nextPlatform = marketplace === "amazon_merch" ? "amazon" : marketplace === "etsy" ? "etsy" : "shopify";
+        const nextResult = { ...result, ...data, platform: nextPlatform, detectedPlatform: nextPlatform };
+        setPlatform(nextPlatform);
+        setResult(nextResult);
+        try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                prompt,
+                platform: nextPlatform,
+                audience,
+                style,
+                result: nextResult,
+            }));
+        } catch (err) {
+            console.error("Failed to persist repackaged listing", err);
+        }
     };
 
     const handleRegenerateSlogans = async () => {
@@ -923,16 +1021,28 @@ function SingleStrategyContent() {
 
                             {/* Listing Optimization */}
                             <div className="p-5 bg-gray-900 border border-gray-800 rounded-2xl">
-                                <div className="flex items-center justify-between mb-4 gap-3">
-                                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                        <Tags className="w-5 h-5 text-blue-400" />
-                                        {platform === "amazon" ? "Amazon Merch Listing" : `${platform.toUpperCase()} Listing`}
-                                    </h3>
-                                    <button
-                                        type="button"
-                                        onClick={handleCopyListing}
-                                        className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 text-xs font-black py-2 px-4 rounded-lg shadow-sm flex items-center justify-center min-w-[150px] transition-colors uppercase tracking-wider"
-                                    >
+                                <div className="flex flex-col gap-4 mb-4">
+                                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                                        <div className="flex flex-wrap items-center gap-3">
+                                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                                <Tags className="w-5 h-5 text-blue-400" />
+                                                {dynamicListing ? `${marketplaceLabels[dynamicListing.marketplace]} Listing` : platform === "amazon" ? "Amazon Merch Listing" : `${platform.toUpperCase()} Listing`}
+                                            </h3>
+                                            {listingScore != null && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowListingMetrics((value) => !value)}
+                                                    className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${dynamicListing?.qualityGate.passed ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-amber-500/40 bg-amber-500/10 text-amber-300"}`}
+                                                >
+                                                    Listing quality {listingScore}
+                                                </button>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleCopyListing}
+                                            className="bg-yellow-400 hover:bg-yellow-500 text-yellow-900 text-xs font-black py-2 px-4 rounded-lg shadow-sm flex items-center justify-center min-w-[150px] transition-colors uppercase tracking-wider"
+                                        >
                                         {copiedListing ? (
                                             <span className="flex items-center gap-2">
                                                 <svg className="w-4 h-4 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -948,27 +1058,107 @@ function SingleStrategyContent() {
                                                 Copy Full Listing
                                             </span>
                                         )}
-                                    </button>
+                                        </button>
+                                    </div>
+
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-gray-800 pt-3">
+                                        <div className="flex flex-wrap gap-2">
+                                            <span className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-200">
+                                                Buyer fit: {listingBand(listingQuality?.buyerIdentityAlignment)}
+                                            </span>
+                                            <span className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-200">
+                                                SEO: {listingBand(listingQuality?.searchIntentCoverage)}
+                                            </span>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full border ${dynamicListing?.compliance.safe ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200" : "bg-amber-500/10 border-amber-500/30 text-amber-200"}`}>
+                                                Compliance: {dynamicListing?.compliance.safe ? "Pass" : "Review"}
+                                            </span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-1.5" aria-label="Marketplace intent">
+                                            {(["amazon_merch", "etsy", "general"] as ListingMarketplace[]).map((marketplace) => (
+                                                <button
+                                                    key={marketplace}
+                                                    type="button"
+                                                    disabled={isListingRefreshing}
+                                                    onClick={() => handleListingRefresh(marketplace)}
+                                                    className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider border transition-colors disabled:opacity-50 ${dynamicListing?.marketplace === marketplace ? "bg-blue-600 border-blue-500 text-white" : "bg-gray-950 border-gray-700 text-gray-400 hover:border-blue-500 hover:text-blue-200"}`}
+                                                >
+                                                    {isListingRefreshing && dynamicListing?.marketplace !== marketplace ? "…" : marketplaceLabels[marketplace]}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
+
+                                {showListingMetrics && listingQuality && (
+                                    <div className="mb-4 p-4 rounded-xl bg-gray-950 border border-gray-800">
+                                        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+                                            {[
+                                                ["Buyer alignment", listingQuality.buyerIdentityAlignment],
+                                                ["Niche specificity", listingQuality.nicheSpecificity],
+                                                ["Behavioral relevance", listingQuality.behavioralRelevance],
+                                                ["Search intent", listingQuality.searchIntentCoverage],
+                                                ["Natural language", listingQuality.keywordNaturalness],
+                                                ["Gift relevance", listingQuality.giftIntent],
+                                                ["Readability", listingQuality.readability],
+                                                ["Compliance", listingQuality.complianceConfidence],
+                                            ].map(([label, value]) => (
+                                                <div key={String(label)}>
+                                                    <div className="text-[9px] uppercase tracking-widest text-gray-500">{label}</div>
+                                                    <div className="mt-1 font-black text-white">{value}</div>
+                                                </div>
+                                            ))}
+                                            <div>
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500">Repetition</div>
+                                                <div className="mt-1 font-black text-white">{listingQuality.repetitionScore}%</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-[9px] uppercase tracking-widest text-gray-500">Gate</div>
+                                                <div className={`mt-1 font-black ${dynamicListing?.qualityGate.passed ? "text-emerald-300" : "text-amber-300"}`}>{dynamicListing?.qualityGate.status}</div>
+                                            </div>
+                                        </div>
+                                        {dynamicListing && !dynamicListing.qualityGate.passed && dynamicListing.qualityGate.warnings.length > 0 && (
+                                            <div className="mt-3 pt-3 border-t border-gray-800 text-xs text-amber-200">
+                                                {dynamicListing.qualityGate.warnings.join(" · ")}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                     <div className="space-y-4">
                                         <div className="p-4 bg-gray-950 rounded-xl">
-                                            <div className="text-[10px] text-gray-500 mb-1 font-bold uppercase tracking-widest">Product Title</div>
+                                            <div className="flex items-center justify-between gap-2 mb-1">
+                                                <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Product Title</div>
+                                                <button type="button" disabled={isListingRefreshing} onClick={() => handleListingRefresh(dynamicListing?.marketplace ?? mapListingMarketplace(platform))} className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200 disabled:opacity-50">Optimize</button>
+                                            </div>
                                             <div className="text-white font-semibold text-sm sm:text-base leading-snug">
                                                 {result.amazonListing?.title || "Product Title"}
                                             </div>
                                         </div>
 
                                         <div className="p-4 bg-gray-950 rounded-xl space-y-2">
-                                            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Brand Name</div>
-                                            <div className="inline-flex items-center px-3 py-1 rounded-md bg-blue-500/15 text-blue-200 text-xs font-semibold">
-                                                {result.amazonListing?.brandName || "Brand"}
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Brand Strategy</div>
+                                                <a href="/settings#merch-brand" className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200">Verify / Configure</a>
                                             </div>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <div className="inline-flex items-center px-3 py-1 rounded-md bg-blue-500/15 text-blue-200 text-xs font-semibold">
+                                                    {result.amazonListing?.brandName || "No brand configured"}
+                                                </div>
+                                                {dynamicListing?.brandStrategy && (
+                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${dynamicListing.brandStrategy.verified ? "text-emerald-300" : "text-amber-300"}`}>
+                                                        {dynamicListing.brandStrategy.label}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {dynamicListing?.brandStrategy.warning && <p className="text-[10px] leading-relaxed text-amber-200">⚠ {dynamicListing.brandStrategy.warning}</p>}
                                         </div>
 
                                         <div className="p-4 bg-gray-950 rounded-xl">
-                                            <div className="text-[10px] text-gray-500 mb-2 font-bold uppercase tracking-widest">Bullet Points</div>
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Bullet Points</div>
+                                                <button type="button" disabled={isListingRefreshing} onClick={() => handleListingRefresh(dynamicListing?.marketplace ?? mapListingMarketplace(platform))} className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200 disabled:opacity-50">Regenerate</button>
+                                            </div>
                                             <ul className="list-disc pl-4 space-y-1.5 text-gray-300 text-sm">
                                                 <li>{result.amazonListing?.bulletPoint1}</li>
                                                 <li>{result.amazonListing?.bulletPoint2}</li>
@@ -985,23 +1175,13 @@ function SingleStrategyContent() {
                                         </div>
 
                                         <div className="p-4 bg-gray-950 rounded-xl">
-                                            <div className="text-[10px] text-gray-500 mb-2 font-bold uppercase tracking-widest">Backend Search Terms</div>
+                                            <div className="flex items-center justify-between gap-2 mb-2">
+                                                <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{dynamicListing?.marketplace === "etsy" ? "Discovery Tags" : "Backend Search Terms"}</div>
+                                                <button type="button" onClick={() => setShowListingMetrics(true)} className="text-[9px] font-bold uppercase tracking-widest text-blue-300 hover:text-blue-200">Analyze</button>
+                                            </div>
                                             <div className="flex flex-wrap gap-1.5">
-                                                {result.seoKeywords?.primary && (
-                                                    <span className="px-2 py-1 rounded-full bg-gray-800 text-gray-200 text-xs font-medium">
-                                                        {result.seoKeywords.primary}
-                                                    </span>
-                                                )}
-                                                {result.seoKeywords?.longTail?.slice(0, 4).map((kw: string, i: number) => (
-                                                    <span
-                                                        key={i}
-                                                        className="px-2 py-1 rounded-full bg-gray-800 text-gray-200 text-xs font-medium"
-                                                    >
-                                                        {kw}
-                                                    </span>
-                                                ))}
                                                 {Array.isArray(result.amazonListing?.keywords) &&
-                                                    result.amazonListing.keywords.slice(0, 4).map((kw: string, i: number) => (
+                                                    result.amazonListing.keywords.map((kw: string, i: number) => (
                                                         <span
                                                             key={`k-${i}`}
                                                             className="px-2 py-1 rounded-full bg-gray-800 text-gray-200 text-xs font-medium"

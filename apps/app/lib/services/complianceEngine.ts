@@ -664,6 +664,7 @@ export interface ProductFields {
     slogan?: string;
     shirtSlogans?: string[];
     title?: string;
+    brandName?: string;
     description?: string;
     bullet_point_1?: string;
     bullet_point_2?: string;
@@ -695,6 +696,7 @@ export function checkCompliance(product: ProductFields): ComplianceReport & { sa
         product.slogan ?? "",
         ...(Array.isArray(product.shirtSlogans) ? product.shirtSlogans : []),
         product.title ?? "",
+        product.brandName ?? "",
         product.description ?? "",
         product.bullet_point_1 ?? "",
         product.bullet_point_2 ?? "",

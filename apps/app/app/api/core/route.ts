@@ -52,7 +52,7 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             if (!guard.allowed) {
                 return NextResponse.json({ success: false, error: guard.reason, plan: guard.plan }, { status: 429 });
             }
-            const data = await bulkDiscover();
+            const data = await bulkDiscover(userId);
             return NextResponse.json({ success: true, niches: data.niches, signalSources: data.signalSources, signalConfidence: data.signalConfidence });
         }
 

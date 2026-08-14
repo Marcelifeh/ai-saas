@@ -14,6 +14,12 @@ import {
     type DynamicDesignStrategy,
     type VisualReleaseGate,
 } from "../ai/dynamicDesignPrompt";
+import {
+    generateDynamicListing,
+    toLegacyListingShape,
+    type DynamicListingInput,
+    type DynamicListingResult,
+} from "../ai/dynamicListingEngine";
 import { getPersistedSalesSignalsForRankedSlogans, mergeSalesSignalsInputs } from "./salesFeedbackService";
 import { checkCompliance, filterSafeSlogans } from "./complianceEngine";
 import { prisma } from "../db/prisma";
@@ -35,6 +41,10 @@ export interface SloganRegenerationResult {
     visualBatchMetrics: DesignBatchDiversityMetrics | null;
     visualReleaseGate: VisualReleaseGate;
     visualEngineVersion: string;
+    winningSlogan: string;
+    dynamicProfile: unknown;
+    dynamicListing: DynamicListingResult;
+    amazonListing: ReturnType<typeof toLegacyListingShape>;
     sloganInsights: any[];
     sloganCollections: any;
     sloganPersona: string;
@@ -70,6 +80,45 @@ function mapDesignMarketplace(platform?: string): "amazon_merch" | "etsy" | "gen
     return "general";
 }
 
+function collectListingMarketTerms(parsed: any): string[] {
+    const seo = parsed?.seoKeywords;
+    return [...new Set([
+        typeof seo?.primary === "string" ? seo.primary : "",
+        ...(Array.isArray(seo?.longTail) ? seo.longTail : []),
+        ...(Array.isArray(seo?.buyerIntent) ? seo.buyerIntent : []),
+        ...(Array.isArray(seo?.platformTags) ? seo.platformTags : []),
+    ].filter((term): term is string => typeof term === "string" && term.trim().length > 0))];
+}
+
+async function getConfiguredMerchBrand(userId?: string): Promise<string | null> {
+    if (!userId) return null;
+    try {
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { merchBrand: true },
+        });
+        return user?.merchBrand?.trim() || null;
+    } catch (err: unknown) {
+        logError("Configured merch brand unavailable", err);
+        return null;
+    }
+}
+
+export async function repackageDynamicListing(
+    input: Omit<DynamicListingInput, "configuredBrand" | "userId">,
+    userId: string,
+) {
+    const dynamicListing = await generateDynamicListing({
+        ...input,
+        configuredBrand: await getConfiguredMerchBrand(userId),
+        userId,
+    });
+    return {
+        dynamicListing,
+        amazonListing: toLegacyListingShape(dynamicListing),
+    };
+}
+
 async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string) {
     const sloganMode = detectSloganMode(style);
 
@@ -99,23 +148,45 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
     // ── Compliance: filter slogans and attach report ──────────────────────
     const { safe: safeSlogans } = filterSafeSlogans(sloganEngine.slogans);
     const finalSlogans = safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans;
-    const visualStrategies = sloganEngine.dynamicProfile
-        ? await generateDynamicDesignBatch({
+    const dynamicProfile = sloganEngine.dynamicProfile;
+    if (!dynamicProfile) {
+        throw new Error("Dynamic niche profile unavailable for winner-aware creative generation");
+    }
+    const visualStrategies = await generateDynamicDesignBatch({
             niche,
             slogans: finalSlogans,
-            profile: sloganEngine.dynamicProfile,
+            profile: dynamicProfile,
             style: style?.trim() || "Bold Graphic",
             garmentBackground: "either",
             printBackground: "transparent",
             marketplace: mapDesignMarketplace(platform),
             userId,
-        })
-        : [];
+        });
     const visualBenchmark = evaluateVisualBatchRelease(visualStrategies);
+    const winningSlogan = sloganEngine.ranked.find((entry) => finalSlogans.includes(entry.slogan))?.slogan
+        ?? finalSlogans[0]
+        ?? "";
+    const winningVisualStrategy = visualStrategies.find((strategy) => strategy.slogan === winningSlogan);
+    const configuredBrand = await getConfiguredMerchBrand(userId);
+    const dynamicListing = await generateDynamicListing({
+        niche,
+        slogan: winningSlogan,
+        audience: audience || dynamicProfile.audience,
+        profile: dynamicProfile,
+        visualStrategy: winningVisualStrategy,
+        marketTerms: collectListingMarketTerms(parsed),
+        purchaseMotives: dynamicProfile.purchaseMotives,
+        marketplace: mapDesignMarketplace(platform),
+        visualStyle: style?.trim() || "Bold Graphic",
+        configuredBrand,
+        userId,
+    });
+    const amazonListing = toLegacyListingShape(dynamicListing);
     const complianceReport = checkCompliance({
         niche,
         shirtSlogans: finalSlogans,
-        amazonListing: parsed?.amazonListing,
+        brandName: dynamicListing.brand ?? undefined,
+        amazonListing,
     });
 
     return {
@@ -126,6 +197,10 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         visualBatchMetrics: visualBenchmark.metrics,
         visualReleaseGate: visualBenchmark.releaseGate,
         visualEngineVersion: VISUAL_ENGINE_VERSION,
+        winningSlogan,
+        dynamicProfile,
+        dynamicListing,
+        amazonListing,
         sloganInsights: sloganEngine.ranked,
         sloganCollections: sloganEngine.collections,
         sloganPersona: sloganEngine.persona,
@@ -259,6 +334,10 @@ JSON SHAPE:
         visualBatchMetrics: merchPayload.visualBatchMetrics,
         visualReleaseGate: merchPayload.visualReleaseGate,
         visualEngineVersion: merchPayload.visualEngineVersion,
+        winningSlogan: merchPayload.winningSlogan,
+        dynamicProfile: merchPayload.dynamicProfile,
+        dynamicListing: merchPayload.dynamicListing,
+        amazonListing: merchPayload.amazonListing,
         sloganInsights: merchPayload.sloganInsights,
         sloganCollections: merchPayload.sloganCollections,
         sloganPersona: merchPayload.sloganPersona,
@@ -286,8 +365,8 @@ export async function generateSingleStrategy(prompt: string, platform?: string, 
                 {
                     role: 'system',
                     content: `
-You are a cross-platform print-on-demand listing expert and commercial design strategist.
-Create a COMPLETE strategy and listing for the idea below.
+You are a cross-platform print-on-demand market strategist.
+Create a complete behavioral and market strategy for the idea below.
 SLOGAN SYSTEM (Elite Behavioral Design):
 - Generate slogans using COGNITIVE HOOKS: Recognition ("That's me"), Emotion ("That hits"), Social Signal ("Others get this").
 - Patterns: INSIDER_JOKE, STATUS_SIGNAL, HUMBLE_BRAG, RELATABLE_STRUGGLE.
@@ -314,10 +393,10 @@ Output ONLY valid JSON:
   "estimatedTrend": 0,
   "estimatedBuyerIntent": 0,
   "shirtSlogans": ["slogan 1","slogan 2","...","slogan 10"],
-  "amazonListing": { "title": "", "brandName": "", "bulletPoint1": "", "bulletPoint2": "", "description": "", "keywords": [] }
+  "salesSignals": {}
 }
 
-Do not generate image prompts or visual concepts here. A separate visual-semantic engine will interpret the winning slogans after behavioral ranking.`
+Do not generate image prompts, visual concepts, or product listings here. Separate winner-aware visual and listing engines run after behavioral ranking.`
                 },
                 {
                     role: 'user',
@@ -370,7 +449,7 @@ Do not generate image prompts or visual concepts here. A separate visual-semanti
     };
 }
 
-export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
+export async function bulkDiscover(userId?: string): Promise<BulkDiscoveryResult> {
     const discoveryResult = await discoverTrends();
     const startTime = Date.now();
     
@@ -524,6 +603,7 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                 wearabilityScore,
                 conversionScore,
                 topInsight: top || null,
+                dynamicProfile: engine.dynamicProfile,
             };
         } catch (err) {
             return null;
@@ -550,22 +630,30 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
         }
     }
 
-    async function generateListingPayloadFor(nicheItem: any, winningSlogan: string | undefined) {
+    async function generateListingPayloadFor(nicheItem: any, conversion: any) {
         try {
-            const sloganPart = winningSlogan ? `Winning slogan: "${winningSlogan}"` : '';
-            const prompt = `You are a top Amazon/Etsy POD seller and product copywriter.\n\nINPUT:\n- Niche: ${nicheItem.niche}\n${sloganPart ? `- ${sloganPart}\n` : ''}\nGOAL:\nCreate a HIGH-CONVERTING product listing JSON for a POD shirt.\nRULES:\n- Title must read like a bestseller (not keyword stuffing).\n- Provide 2 short bullet points targeting buyer emotion (gift, identity, humor).\n- Provide 4-6 tags mixing long-tail and buyer-intent keywords.\n- Description: one short human-sounding paragraph.\n- mockupPrompt: concise image prompt for the slogan (mention style).\nOUTPUT: Return valid JSON exactly as: { "title":"", "bullets":["",""], "tags":[""], "description":"", "mockupPrompt":"" }`;
-
-            const ai = await chatCompletionSafe({
-                model: 'gpt-4o-mini',
-                temperature: 0.7,
-                max_tokens: 800,
-                response_format: { type: 'json_object' },
-                messages: [{ role: 'system', content: 'You are a concise listing writer that produces high-converting e-commerce titles and bullets.' }, { role: 'user', content: prompt }],
+            if (!conversion?.slogan || !conversion?.dynamicProfile) return null;
+            const dynamicListing = await generateDynamicListing({
+                niche: nicheItem.niche,
+                slogan: conversion.slogan,
+                audience: nicheItem.targetAudience || conversion.dynamicProfile.audience,
+                profile: conversion.dynamicProfile,
+                marketTerms: [
+                    ...(Array.isArray(nicheItem.opportunityReasons) ? nicheItem.opportunityReasons : []),
+                    nicheItem.insight || "",
+                ],
+                purchaseMotives: conversion.dynamicProfile.purchaseMotives,
+                marketplace: "etsy",
+                configuredBrand: await getConfiguredMerchBrand(userId),
+                userId,
             });
-            if (ai.error || !ai.data) return null;
-            const text = ai.data.choices[0].message.content || '{}';
-            const parsed = parseJsonPayload(text);
-            return parsed;
+            return {
+                ...toLegacyListingShape(dynamicListing),
+                bullets: dynamicListing.bullets,
+                tags: dynamicListing.searchTerms,
+                mockupPrompt: dynamicListing.description,
+                dynamicListing,
+            };
         } catch (err) {
             return null;
         }
@@ -589,7 +677,7 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
         // Run creative conversion eval for top candidates
         let conversion = null;
         if (score >= 60) {
-            conversion = await evaluateConversionFor(item.niche);
+            conversion = await evaluateConversionFor(item.niche, userId);
             item.conversion = conversion;
         }
 
@@ -599,29 +687,40 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
             item.status = 'WINNER';
             // generate listing payload tailored to the winning slogan
             try {
-                const listing = await generateListingPayloadFor(item, conversion?.slogan);
-                if (listing) item.autoListing = listing;
+                const listing = await generateListingPayloadFor(item, conversion);
+                if (listing) {
+                    item.autoListing = listing;
+                    item.listingQuality = listing.dynamicListing?.quality;
+                    item.listingReleaseGate = listing.dynamicListing?.qualityGate;
+                    item.listingCompliance = listing.dynamicListing?.compliance;
+                }
+                const listingReady = Boolean(
+                    listing?.dynamicListing?.qualityGate?.passed
+                    && listing?.dynamicListing?.compliance?.safe,
+                );
+                item.listingReviewRequired = !listingReady;
                 // also generate ad hooks
                 const hooks = await generateAdHooksFor(conversion?.slogan || '');
                 if (hooks && hooks.length) item.adHooks = hooks;
-                // enqueue for launch pipeline
-                try {
-                    const learning = require('./learningService');
-                    learning.enqueueLaunch({
-                        niche: item.niche,
-                        slogan: conversion?.slogan || '',
-                        listing: item.autoListing,
-                        adHooks: item.adHooks,
-                        visualBatchMetrics: item.visualBatchMetrics ?? undefined,
-                        visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
-                        visualReleaseGate: item.visualReleaseGate,
-                    });
-                } catch (e) {
-                    // ignore queue failures
-                }
-                // Persist to DB-backed queue when prisma is available
-                try {
-                    if (prisma && prisma.listingQueue && typeof prisma.listingQueue.create === 'function' && item.autoListing) {
+                if (listingReady) {
+                    // enqueue for launch pipeline only after listing quality and compliance pass
+                    try {
+                        const learning = require('./learningService');
+                        learning.enqueueLaunch({
+                            niche: item.niche,
+                            slogan: conversion?.slogan || '',
+                            listing: item.autoListing,
+                            adHooks: item.adHooks,
+                            visualBatchMetrics: item.visualBatchMetrics ?? undefined,
+                            visualStrategyMetrics: item.visualStrategies?.find((strategy: DynamicDesignStrategy) => strategy.slogan === conversion?.slogan),
+                            visualReleaseGate: item.visualReleaseGate,
+                        });
+                    } catch (e) {
+                        // ignore queue failures
+                    }
+                    // Persist to DB-backed queue when prisma is available
+                    try {
+                        if (prisma && prisma.listingQueue && typeof prisma.listingQueue.create === 'function' && item.autoListing) {
                         await prisma.listingQueue.create({
                             data: {
                                 niche: item.niche,
@@ -647,8 +746,9 @@ export async function bulkDiscover(): Promise<BulkDiscoveryResult> {
                             // ignore
                         }
                     }
-                } catch (e) {
-                    // DB persistence is best-effort; ignore errors here
+                    } catch (e) {
+                        // DB persistence is best-effort; ignore errors here
+                    }
                 }
             } catch (e) { /* ignore */ }
         } else if (score >= 60) {
@@ -680,13 +780,13 @@ export async function generateChunk(niches: any[], isAutopilot: boolean = false,
                         {
                             role: 'system',
                             content: isAutopilot
-                                ? 'You create Amazon POD listings. Always output valid JSON exactly: { "slogan": "", "title": "", "bullet_point_1": "", "bullet_point_2": "", "description": "" }'
-                                : `You create Amazon POD shirt listings. Always output valid JSON in exactly this structure:\n{\n    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],\n    "designDirections": ["", ""],\n    "amazonListing": { "title": "", "bulletPoint1": "", "bulletPoint2": "", "description": "", "keywords": ["", ""] }\n}\n\nSLOGAN RULES:\n- Use behavioral recognition, emotion, and social signaling.\n- Keep most slogans between 2 and 7 words.\n- Make them wearable, commercial, and emotionally sticky.\n- Include a mix of safe winners, bold lines, and experimental ideas.\n- Avoid generic motivational filler.\n\nDo not generate image prompts or visual concepts. A separate visual-semantic engine runs after slogan ranking.`
+                                ? 'Generate one commercially safe POD slogan candidate. Return valid JSON exactly: { "slogan": "" }. Do not generate listing copy or artwork.'
+                                : `Generate POD slogan candidates. Always output valid JSON in exactly this structure:\n{\n    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],\n    "designDirections": ["", ""]\n}\n\nSLOGAN RULES:\n- Use behavioral recognition, emotion, and social signaling.\n- Keep most slogans between 2 and 7 words.\n- Make them wearable, commercial, and emotionally sticky.\n- Include a mix of safe winners, bold lines, and experimental ideas.\n- Avoid generic motivational filler.\n\nDo not generate listing copy, image prompts, or visual concepts. Winner-aware engines run after slogan ranking.`
                         },
                         {
                             role: 'user',
                             content: isAutopilot
-                                ? `Create a listing for this POD niche: ${nicheData.niche}\nTarget Audience: ${nicheData.targetAudience || 'Broad'}\n\nOutput only JSON.`
+                                ? `Create a slogan candidate for this POD niche: ${nicheData.niche}\nTarget Audience: ${nicheData.targetAudience || 'Broad'}\n\nOutput only JSON.`
                                 : `Create a POD shirt concept for:\n\nNiche: ${nicheData.niche}\nAudience: ${nicheData.targetAudience || 'Broad'}\n\nReturn valid JSON exactly as structured. The slogans should be varied enough to rank into top picks, bold picks, and experimental picks.`
                         }
                     ],
@@ -707,30 +807,18 @@ export async function generateChunk(niches: any[], isAutopilot: boolean = false,
             let product;
             if (isAutopilot) {
                 const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
-                // Enhance the GPT slogan through the elite engine for scoring + DB pattern boosts
-                let topSlogan = gen.slogan;
-                let topSloganInsight: any = null;
-                try {
-                    const engineResult = await runEliteSloganEngine({
-                        niche: nicheData.niche,
-                        shirtSlogans: gen.slogan ? [gen.slogan] : undefined,
-                    });
-                    topSlogan = engineResult.ranked[0]?.slogan ?? gen.slogan;
-                    topSloganInsight = engineResult.ranked[0] ?? null;
-                } catch (_) { /* non-blocking */ }
-                const autoCompliance = checkCompliance({
-                    niche: nicheData.niche,
-                    slogan: topSlogan,
-                    title: gen.title,
-                    description: gen.description,
-                    bullet_point_1: gen.bullet_point_1,
-                    bullet_point_2: gen.bullet_point_2,
-                });
+                const merchPayload = await buildMerchPayload({
+                    shirtSlogans: gen.slogan ? [gen.slogan] : undefined,
+                }, nicheData.niche, nicheData.targetAudience, nicheData.style, userId, nicheData.platform || "amazon");
+                const topSlogan = merchPayload.winningSlogan;
+                const topSloganInsight = merchPayload.sloganInsights?.find((entry: any) => entry.slogan === topSlogan) ?? merchPayload.sloganInsights?.[0] ?? null;
                 product = {
                     niche: nicheData.niche, slogan: topSlogan, sloganInsight: topSloganInsight,
-                    title: gen.title, bullet_point_1: gen.bullet_point_1, bullet_point_2: gen.bullet_point_2,
-                    description: gen.description, trend, projectedRevenue, revenueCategory, ...market, ...score,
-                    compliance: autoCompliance,
+                    title: merchPayload.amazonListing.title,
+                    bullet_point_1: merchPayload.amazonListing.bulletPoint1,
+                    bullet_point_2: merchPayload.amazonListing.bulletPoint2,
+                    description: merchPayload.amazonListing.description,
+                    trend, projectedRevenue, revenueCategory, ...market, ...merchPayload, ...score,
                 };
             } else {
                 const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);

@@ -39,6 +39,18 @@ type CoreSloganResponse = {
 
 type ChunkNiche = { niche: string };
 
+type ListingRepackageInput = {
+    niche: string;
+    slogan: string;
+    audience?: string;
+    profile: Record<string, unknown>;
+    visualStrategy?: Record<string, unknown>;
+    marketTerms?: string[];
+    purchaseMotives?: string[];
+    marketplace: "amazon_merch" | "etsy" | "general";
+    visualStyle?: string;
+};
+
 type SalesFeedbackInput = {
     niche: string;
     platform?: string;
@@ -64,6 +76,7 @@ export function useFactory() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isSloganRefreshing, setIsSloganRefreshing] = useState(false);
+    const [isListingRefreshing, setIsListingRefreshing] = useState(false);
 
     const generateSingleStrategy = async (prompt: string, platform?: string, audience?: string, style?: string) => {
         setIsLoading(true);
@@ -258,5 +271,25 @@ export function useFactory() {
         }
     };
 
-    return { generateSingleStrategy, bulkDiscover, generateChunk, recordSalesFeedback, regenerateSlogans, isLoading, isSloganRefreshing, error };
+    const repackageListing = async (payload: ListingRepackageInput) => {
+        setIsListingRefreshing(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/factory/listing", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const json = await safeJson<CoreStrategyResponse>(res);
+            if (!res.ok || !json.success) throw new Error(json.error || "Listing optimization failed");
+            return json.data;
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Listing optimization failed");
+            return null;
+        } finally {
+            setIsListingRefreshing(false);
+        }
+    };
+
+    return { generateSingleStrategy, bulkDiscover, generateChunk, recordSalesFeedback, regenerateSlogans, repackageListing, isLoading, isSloganRefreshing, isListingRefreshing, error };
 }
