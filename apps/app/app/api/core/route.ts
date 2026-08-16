@@ -10,6 +10,7 @@ const CoreRequestSchema = z.object({
     platform: z.string().optional(),
     audience: z.string().optional(),
     style: z.string().optional(),
+    designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]).optional(),
     niches: z.array(z.any()).optional(),
     isAutopilot: z.boolean().optional()
 });
@@ -23,7 +24,7 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             return NextResponse.json({ success: false, error: "Invalid payload format", details: parsed.error }, { status: 400 });
         }
 
-        const { action, prompt, platform, audience, style, niches, isAutopilot } = parsed.data;
+        const { action, prompt, platform, audience, style, designMode, niches, isAutopilot } = parsed.data;
 
         const userId = session.user?.id as string | undefined;
 
@@ -40,7 +41,7 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
                 return NextResponse.json({ success: false, error: guard.reason, plan: guard.plan }, { status: 429 });
             }
 
-            const data = await generateSingleStrategy(prompt, platform, audience, style, userId);
+            const data = await generateSingleStrategy(prompt, platform, audience, style, userId, designMode);
             return NextResponse.json({ success: true, data });
         }
 

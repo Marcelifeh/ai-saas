@@ -12,6 +12,7 @@ import {
     VISUAL_ENGINE_VERSION,
     type DesignBatchDiversityMetrics,
     type DynamicDesignStrategy,
+    type DesignMode,
     type VisualReleaseGate,
 } from "../ai/dynamicDesignPrompt";
 import {
@@ -119,7 +120,37 @@ export async function repackageDynamicListing(
     };
 }
 
-async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string) {
+export async function regenerateVisualDesigns(input: {
+    niche: string;
+    slogans: string[];
+    profile: Parameters<typeof generateDynamicDesignBatch>[0]["profile"];
+    style?: string;
+    platform?: string;
+    designMode?: DesignMode;
+    userId?: string;
+}) {
+    const visualStrategies = await generateDynamicDesignBatch({
+        niche: input.niche,
+        slogans: input.slogans,
+        profile: input.profile,
+        style: input.style?.trim() || "Bold Graphic",
+        garmentBackground: "either",
+        printBackground: "transparent",
+        marketplace: mapDesignMarketplace(input.platform),
+        designMode: input.designMode ?? "AUTO",
+        userId: input.userId,
+    });
+    const visualBenchmark = evaluateVisualBatchRelease(visualStrategies);
+    return {
+        imagePrompts: visualStrategies.map((strategy) => strategy.prompt),
+        visualStrategies,
+        visualBatchMetrics: visualBenchmark.metrics,
+        visualReleaseGate: visualBenchmark.releaseGate,
+        visualEngineVersion: VISUAL_ENGINE_VERSION,
+    };
+}
+
+async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string, designMode: DesignMode = "AUTO") {
     const sloganMode = detectSloganMode(style);
 
     const learnedSalesSignals = await getPersistedSalesSignalsForRankedSlogans({
@@ -161,6 +192,7 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
             printBackground: "transparent",
             marketplace: mapDesignMarketplace(platform),
             userId,
+            designMode,
         });
     const visualBenchmark = evaluateVisualBatchRelease(visualStrategies);
     const winningSlogan = sloganEngine.ranked.find((entry) => finalSlogans.includes(entry.slogan))?.slogan
@@ -263,7 +295,7 @@ function buildBestSellerPredictor(result: any, market: MarketIntel, topSloganSco
     };
 }
 
-export async function regenerateSlogansOnly(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, excludeSlogans?: string[]): Promise<SloganRegenerationResult> {
+export async function regenerateSlogansOnly(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, excludeSlogans?: string[], designMode: DesignMode = "AUTO"): Promise<SloganRegenerationResult> {
     const detectedPlatform = detectPlatform(platform);
     const blockedSlogans = Array.isArray(excludeSlogans)
         ? excludeSlogans.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 20)
@@ -325,7 +357,7 @@ JSON SHAPE:
 
     const merchPayload = await buildMerchPayload({
         shirtSlogans: parsed?.shirtSlogans,
-    }, prompt, audience, style, userId, detectedPlatform);
+    }, prompt, audience, style, userId, detectedPlatform, designMode);
 
     return {
         shirtSlogans: merchPayload.shirtSlogans,
@@ -353,7 +385,7 @@ JSON SHAPE:
     };
 }
 
-export async function generateSingleStrategy(prompt: string, platform?: string, audience?: string, style?: string, userId?: string): Promise<any> {
+export async function generateSingleStrategy(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, designMode: DesignMode = "AUTO"): Promise<any> {
     const detectedPlatform = detectPlatform(platform);
 
     const aiResponse = await chatCompletionSafe({
@@ -421,7 +453,7 @@ Do not generate image prompts, visual concepts, or product listings here. Separa
         throw new Error("AI did not return valid JSON");
     }
 
-    parsed = await buildMerchPayload(parsed, parsed?.niche || prompt, audience, style, userId, detectedPlatform);
+    parsed = await buildMerchPayload(parsed, parsed?.niche || prompt, audience, style, userId, detectedPlatform, designMode);
 
     const trend = createTrendSnapshot({
         trend_score: parsed.estimatedTrend,

@@ -11,6 +11,31 @@ export interface DynamicDesignInput {
   garmentBackground: "dark" | "light" | "either";
   printBackground: "transparent" | "solid";
   marketplace?: "amazon_merch" | "etsy" | "general";
+  requestedDesignMode?: DesignMode;
+  resolvedDesignMode?: ResolvedDesignMode;
+}
+
+export type DesignMode =
+  | "AUTO"
+  | "TEXT_ONLY"
+  | "HYBRID"
+  | "CHARACTER"
+  | "CARTOON"
+  | "ILLUSTRATION_ONLY";
+
+export type ResolvedDesignMode = Exclude<DesignMode, "AUTO">;
+
+export interface DesignModeSignals {
+  typographyStrength: number;
+  humanActionStrength: number;
+  mascotPotential: number;
+  standaloneIllustrationStrength: number;
+}
+
+export interface DesignModeDecision {
+  mode: ResolvedDesignMode;
+  confidence: number;
+  rationale: string;
 }
 
 export interface SloganVisualMeaning {
@@ -40,6 +65,8 @@ export interface DynamicVisualConcept {
     contrastNeed: string;
     viewingDistance: string;
   };
+  recommendedDesignMode: DesignModeDecision;
+  modeSignals: DesignModeSignals;
 }
 
 export interface CompositionPlan {
@@ -53,6 +80,25 @@ export interface CompositionPlan {
   negativeSpaceStrategy: string;
   silhouette: string;
   balance: string;
+  visibleTextRequired: boolean;
+  maxPrimarySubjects: number;
+}
+
+export interface DesignModeCompliance {
+  requestedMode: DesignMode;
+  resolvedMode: ResolvedDesignMode;
+  modeComplianceScore: number;
+  violations: string[];
+}
+
+export interface AutoModeDistribution {
+  sampleSize: number;
+  counts: Record<ResolvedDesignMode, number>;
+  percentages: Record<ResolvedDesignMode, number>;
+  distinctModes: number;
+  dominantMode: ResolvedDesignMode | null;
+  dominantShare: number;
+  collapsed: boolean;
 }
 
 export interface TshirtVisualQuality {
@@ -87,6 +133,10 @@ export interface DynamicDesignStrategy {
   concept: DynamicVisualConcept;
   composition: CompositionPlan;
   complexity: VisualComplexityBudget;
+  requestedDesignMode: DesignMode;
+  resolvedDesignMode: ResolvedDesignMode;
+  designModeDecision: DesignModeDecision;
+  modeCompliance: DesignModeCompliance;
   quality: TshirtVisualQuality;
   visualImpact: number;
   fingerprint: VisualFingerprint;
@@ -117,14 +167,16 @@ export interface DesignBatchDiversityMetrics {
   averageSloganReinforcement: number;
   averageVisualOriginality: number;
   averageVisualImpact: number;
+  averageModeCompliance: number;
   commercialQualityScore: number;
   qualityGatePassRate: number;
   collapsedStrategyIndexes: number[];
 }
 
-export const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+export const VISUAL_ENGINE_VERSION = "dynamic-visual-v4";
 export const MIN_VISUAL_BATCH_SIZE = 3;
 export const MAX_VISUAL_REPAIR_ATTEMPTS = 2;
+export const AUTO_MODE_COLLAPSE_THRESHOLD = 0.65;
 
 export const VISUAL_RELEASE_THRESHOLDS = {
   primaryFocusDiversity: 0.6,
@@ -133,6 +185,7 @@ export const VISUAL_RELEASE_THRESHOLDS = {
   supportingObjectOverlap: 0.3,
   typographyRoleDiversity: 0.6,
   commercialQualityScore: 70,
+  averageModeCompliance: 70,
 } as const;
 
 export type VisualReleaseMetric = keyof typeof VISUAL_RELEASE_THRESHOLDS;
@@ -173,10 +226,11 @@ export interface DynamicDesignBatchInput {
   printBackground?: "transparent" | "solid";
   marketplace?: "amazon_merch" | "etsy" | "general";
   userId?: string;
+  designMode?: DesignMode;
 }
 
-type UnscoredStrategy = Pick<DynamicDesignStrategy, "slogan" | "meaning" | "concept" | "composition" | "complexity">;
-type EvaluatedStrategy = UnscoredStrategy & { quality: TshirtVisualQuality; fingerprint: VisualFingerprint };
+type UnscoredStrategy = Pick<DynamicDesignStrategy, "slogan" | "meaning" | "concept" | "composition" | "complexity" | "requestedDesignMode" | "resolvedDesignMode" | "designModeDecision">;
+type EvaluatedStrategy = UnscoredStrategy & { quality: TshirtVisualQuality; fingerprint: VisualFingerprint; modeCompliance: DesignModeCompliance };
 
 const QUALITY_GATE_MINIMUM = 65;
 const PRINTABILITY_MINIMUM = 70;
@@ -205,6 +259,75 @@ function score(value: unknown, fallback = 70): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function unitScore(value: unknown, fallback = 0.5): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(1, numeric > 1 ? numeric / 100 : numeric));
+}
+
+function normalizeResolvedDesignMode(value: unknown, fallback: ResolvedDesignMode): ResolvedDesignMode {
+  return value === "TEXT_ONLY" || value === "HYBRID" || value === "CHARACTER" || value === "CARTOON" || value === "ILLUSTRATION_ONLY"
+    ? value
+    : fallback;
+}
+
+export function normalizeDesignMode(value: unknown): DesignMode {
+  return value === "AUTO" ? "AUTO" : normalizeResolvedDesignMode(value, "HYBRID");
+}
+
+export function inferDesignMode(slogan: string, signals: DesignModeSignals): DesignModeDecision {
+  const wordCount = slogan.trim().split(/\s+/).filter(Boolean).length;
+  const illustratedStrength = Math.max(
+    signals.humanActionStrength,
+    signals.mascotPotential,
+    signals.standaloneIllustrationStrength,
+  );
+
+  if (signals.typographyStrength >= 0.68 && illustratedStrength >= 0.62) {
+    return { mode: "HYBRID", confidence: Math.min(1, (signals.typographyStrength + illustratedStrength) / 2), rationale: "Strong wording and a meaning-bearing visual both deserve primary emphasis." };
+  }
+  if (signals.humanActionStrength >= 0.75) {
+    return { mode: "CHARACTER", confidence: signals.humanActionStrength, rationale: "The concept depends on a recognizable human action or behavior." };
+  }
+  if (signals.mascotPotential >= 0.75) {
+    return { mode: "CARTOON", confidence: signals.mascotPotential, rationale: "An expressive mascot or stylized character communicates the idea most clearly." };
+  }
+  if (signals.standaloneIllustrationStrength >= 0.72 && signals.typographyStrength < 0.62) {
+    return { mode: "ILLUSTRATION_ONLY", confidence: signals.standaloneIllustrationStrength, rationale: "The standalone visual metaphor can carry the concept without visible typography." };
+  }
+  if (signals.typographyStrength >= 0.72 && wordCount <= 6) {
+    return { mode: "TEXT_ONLY", confidence: signals.typographyStrength, rationale: "The concise slogan carries the commercial concept through typography." };
+  }
+  return { mode: "HYBRID", confidence: 0.58, rationale: "Typography and illustration together provide the clearest commercial treatment." };
+}
+
+export function resolveDesignMode(
+  requestedMode: DesignMode,
+  slogan: string,
+  concept: DynamicVisualConcept,
+): DesignModeDecision {
+  if (requestedMode !== "AUTO") {
+    return { mode: requestedMode, confidence: 1, rationale: "User-selected composition mode override." };
+  }
+
+  const proposed = concept.recommendedDesignMode;
+  const supportingSignal = proposed.mode === "TEXT_ONLY"
+    ? concept.modeSignals.typographyStrength
+    : proposed.mode === "CHARACTER"
+      ? concept.modeSignals.humanActionStrength
+      : proposed.mode === "CARTOON"
+        ? concept.modeSignals.mascotPotential
+        : proposed.mode === "ILLUSTRATION_ONLY"
+          ? concept.modeSignals.standaloneIllustrationStrength
+          : Math.min(
+            concept.modeSignals.typographyStrength,
+            Math.max(concept.modeSignals.humanActionStrength, concept.modeSignals.mascotPotential, concept.modeSignals.standaloneIllustrationStrength),
+          );
+
+  if (proposed.confidence >= 0.6 && supportingSignal >= 0.45) return proposed;
+  return inferDesignMode(slogan, concept.modeSignals);
 }
 
 function normalizeFocus(value: unknown, fallback: CompositionPlan["primaryFocus"]): CompositionPlan["primaryFocus"] {
@@ -264,17 +387,26 @@ export function collectVisualEvidence(profile: DynamicNicheProfile): string[] {
 export function deriveVisualComplexityBudget(
   slogan: string,
   _concept?: DynamicVisualConcept,
+  designMode?: ResolvedDesignMode,
 ): VisualComplexityBudget {
   void _concept;
   const words = slogan.trim().split(/\s+/).filter(Boolean).length;
   const textDominance = words >= 7 ? 0.75 : words >= 5 ? 0.6 : words >= 3 ? 0.45 : 0.3;
 
-  return {
+  const base: VisualComplexityBudget = {
     textDominance,
     illustrationDominance: Number((1 - textDominance).toFixed(2)),
     maxPrimarySubjects: words >= 6 ? 1 : 2,
     supportingDetailLevel: words >= 7 ? "minimal" : words >= 4 ? "controlled" : "moderate",
   };
+
+  if (designMode === "TEXT_ONLY") return { ...base, textDominance: 1, illustrationDominance: 0, maxPrimarySubjects: 0 };
+  if (designMode === "ILLUSTRATION_ONLY") return { ...base, textDominance: 0, illustrationDominance: 1, maxPrimarySubjects: 1 };
+  if (designMode === "CHARACTER" || designMode === "CARTOON") {
+    return { ...base, textDominance: 0.35, illustrationDominance: 0.65, maxPrimarySubjects: 1 };
+  }
+  if (designMode === "HYBRID") return { ...base, textDominance: 0.5, illustrationDominance: 0.5, maxPrimarySubjects: 1 };
+  return base;
 }
 
 function fallbackMeaning(slogan: string, profile: DynamicNicheProfile): SloganVisualMeaning {
@@ -315,6 +447,17 @@ function fallbackConcept(meaning: SloganVisualMeaning, profile: DynamicNicheProf
       contrastNeed: "strong separation between text, focal action, and garment",
       viewingDistance: "readable first at marketplace thumbnail size, then rewarding up close",
     },
+    recommendedDesignMode: {
+      mode: "HYBRID",
+      confidence: 0.58,
+      rationale: "Typography and a concrete behavioral visual can reinforce each other.",
+    },
+    modeSignals: {
+      typographyStrength: 0.65,
+      humanActionStrength: meaning.visualizableAction ? 0.6 : 0.35,
+      mascotPotential: 0.35,
+      standaloneIllustrationStrength: meaning.strongestContrast ? 0.6 : 0.45,
+    },
   };
 }
 
@@ -332,6 +475,112 @@ function fallbackComposition(slogan: string, meaning: SloganVisualMeaning): Comp
     negativeSpaceStrategy: "Protect the focal relationship and keep counters and word shapes open at thumbnail size",
     silhouette: "A cohesive isolated chest-print shape determined by the focal action",
     balance: "Weight elements according to meaning and reading order, not a default symmetrical template",
+    visibleTextRequired: true,
+    maxPrimarySubjects: 1,
+  };
+}
+
+export function buildCompositionPlanForMode(
+  composition: CompositionPlan,
+  slogan: string,
+  designMode: ResolvedDesignMode,
+): CompositionPlan {
+  const exactText = `exact visible slogan text: ${slogan}`;
+  const illustrationHierarchy = composition.hierarchy
+    .filter((item) => !/text|typograph|slogan/i.test(item.element))
+    .slice(0, 1);
+  switch (designMode) {
+    case "TEXT_ONLY":
+      return {
+        ...composition,
+        primaryFocus: "typography",
+        hierarchy: [{ element: exactText, importance: 100 }],
+        textTreatment: "Use lettering shape, scale, rhythm, texture, spacing, and emphasis to express the exact slogan without a figurative subject.",
+        illustrationRelationship: "Typography is the complete artwork; allow only small non-figurative supporting marks that strengthen hierarchy.",
+        negativeSpaceStrategy: "Protect letter counters, word shapes, and the reading path at thumbnail size.",
+        silhouette: "One cohesive lettering-led chest-print silhouette with no figurative subject.",
+        balance: "Balance word scale and spacing according to the slogan's cadence.",
+        visibleTextRequired: true,
+        maxPrimarySubjects: 0,
+      };
+    case "CHARACTER":
+      return {
+        ...composition,
+        primaryFocus: "illustration",
+        hierarchy: [
+          { element: `one primary human figure performing ${composition.hierarchy[0]?.element ?? "the implied behavior"}`, importance: 100 },
+          { element: exactText, importance: 75 },
+        ],
+        illustrationRelationship: "One recognizable human action is the visual anchor; the exact slogan supports that action.",
+        visibleTextRequired: true,
+        maxPrimarySubjects: 1,
+      };
+    case "CARTOON":
+      return {
+        ...composition,
+        primaryFocus: "illustration",
+        hierarchy: [
+          { element: `one stylized cartoon or mascot character expressing ${composition.hierarchy[0]?.element ?? "the implied behavior"}`, importance: 100 },
+          { element: exactText, importance: 75 },
+        ],
+        illustrationRelationship: "One expressive stylized character is the visual anchor; the exact slogan supports its pose or expression.",
+        visibleTextRequired: true,
+        maxPrimarySubjects: 1,
+      };
+    case "ILLUSTRATION_ONLY":
+      return {
+        ...composition,
+        primaryFocus: "illustration",
+        hierarchy: illustrationHierarchy.length > 0
+          ? illustrationHierarchy
+          : [{ element: "one standalone illustration communicating the source concept", importance: 100 }],
+        textTreatment: "No visible lettering or slogan text; use the source phrase only as semantic direction.",
+        illustrationRelationship: "The illustration alone communicates the source concept with one strong focal idea.",
+        visibleTextRequired: false,
+        maxPrimarySubjects: 1,
+      };
+    case "HYBRID":
+    default:
+      return {
+        ...composition,
+        primaryFocus: "hybrid",
+        hierarchy: [
+          { element: composition.hierarchy[0]?.element ?? "one meaning-bearing illustration", importance: 100 },
+          { element: exactText, importance: 95 },
+        ],
+        illustrationRelationship: `Typography and one meaning-bearing illustration must interact as equally important parts of the idea. ${composition.illustrationRelationship}`,
+        visibleTextRequired: true,
+        maxPrimarySubjects: 1,
+      };
+  }
+}
+
+export function analyzeAutoModeDistribution(
+  candidates: ReadonlyArray<Pick<DynamicDesignStrategy, "requestedDesignMode" | "resolvedDesignMode">>,
+): AutoModeDistribution {
+  const modes: ResolvedDesignMode[] = ["TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"];
+  const counts = Object.fromEntries(modes.map((mode) => [mode, 0])) as Record<ResolvedDesignMode, number>;
+  for (const candidate of candidates) {
+    if (candidate.requestedDesignMode === "AUTO" && modes.includes(candidate.resolvedDesignMode)) counts[candidate.resolvedDesignMode] += 1;
+  }
+  const sampleSize = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const percentages = Object.fromEntries(modes.map((mode) => [
+    mode,
+    sampleSize > 0 ? Math.round((counts[mode] / sampleSize) * 1000) / 10 : 0,
+  ])) as Record<ResolvedDesignMode, number>;
+  const dominantMode = sampleSize > 0
+    ? modes.reduce((highest, mode) => counts[mode] > counts[highest] ? mode : highest, modes[0])
+    : null;
+  const dominantShare = dominantMode ? counts[dominantMode] / sampleSize : 0;
+  const distinctModes = modes.filter((mode) => counts[mode] > 0).length;
+  return {
+    sampleSize,
+    counts,
+    percentages,
+    distinctModes,
+    dominantMode,
+    dominantShare: Math.round(dominantShare * 1000) / 1000,
+    collapsed: sampleSize >= 5 && (distinctModes < 3 || dominantShare > AUTO_MODE_COLLAPSE_THRESHOLD),
   };
 }
 
@@ -352,6 +601,12 @@ function normalizeConcept(value: unknown, fallback: DynamicVisualConcept): Dynam
   const rawPrint = raw.printStrategy && typeof raw.printStrategy === "object"
     ? raw.printStrategy as Record<string, unknown>
     : {};
+  const rawRecommendation = raw.recommendedDesignMode && typeof raw.recommendedDesignMode === "object"
+    ? raw.recommendedDesignMode as Record<string, unknown>
+    : {};
+  const rawSignals = raw.modeSignals && typeof raw.modeSignals === "object"
+    ? raw.modeSignals as Record<string, unknown>
+    : {};
   return {
     coreMessage: cleanString(raw.coreMessage, fallback.coreMessage),
     emotionalTone: cleanStringArray(raw.emotionalTone, fallback.emotionalTone, 4),
@@ -370,6 +625,17 @@ function normalizeConcept(value: unknown, fallback: DynamicVisualConcept): Dynam
       contrastNeed: cleanString(rawPrint.contrastNeed, fallback.printStrategy.contrastNeed),
       viewingDistance: cleanString(rawPrint.viewingDistance, fallback.printStrategy.viewingDistance),
     },
+    recommendedDesignMode: {
+      mode: normalizeResolvedDesignMode(rawRecommendation.mode, fallback.recommendedDesignMode.mode),
+      confidence: unitScore(rawRecommendation.confidence, fallback.recommendedDesignMode.confidence),
+      rationale: cleanString(rawRecommendation.rationale, fallback.recommendedDesignMode.rationale),
+    },
+    modeSignals: {
+      typographyStrength: unitScore(rawSignals.typographyStrength, fallback.modeSignals.typographyStrength),
+      humanActionStrength: unitScore(rawSignals.humanActionStrength, fallback.modeSignals.humanActionStrength),
+      mascotPotential: unitScore(rawSignals.mascotPotential, fallback.modeSignals.mascotPotential),
+      standaloneIllustrationStrength: unitScore(rawSignals.standaloneIllustrationStrength, fallback.modeSignals.standaloneIllustrationStrength),
+    },
   };
 }
 
@@ -384,6 +650,7 @@ function normalizeComposition(value: unknown, fallback: CompositionPlan): Compos
       };
     }).filter((item) => item.element).slice(0, 6)
     : [];
+  const parsedMaxSubjects = Number(raw.maxPrimarySubjects ?? fallback.maxPrimarySubjects);
 
   return {
     primaryFocus: normalizeFocus(raw.primaryFocus, fallback.primaryFocus),
@@ -393,6 +660,24 @@ function normalizeComposition(value: unknown, fallback: CompositionPlan): Compos
     negativeSpaceStrategy: cleanString(raw.negativeSpaceStrategy, fallback.negativeSpaceStrategy),
     silhouette: cleanString(raw.silhouette, fallback.silhouette),
     balance: cleanString(raw.balance, fallback.balance),
+    visibleTextRequired: typeof raw.visibleTextRequired === "boolean" ? raw.visibleTextRequired : fallback.visibleTextRequired,
+    maxPrimarySubjects: Number.isFinite(parsedMaxSubjects)
+      ? Math.max(0, Math.min(2, Math.round(parsedMaxSubjects)))
+      : fallback.maxPrimarySubjects,
+  };
+}
+
+function normalizeModeCompliance(
+  value: unknown,
+  requestedMode: DesignMode,
+  resolvedMode: ResolvedDesignMode,
+): DesignModeCompliance {
+  const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return {
+    requestedMode,
+    resolvedMode,
+    modeComplianceScore: score(raw.modeComplianceScore, 55),
+    violations: cleanStringArray(raw.violations, [], 8),
   };
 }
 
@@ -445,7 +730,7 @@ function visualImpact(quality: TshirtVisualQuality): number {
   );
 }
 
-function passesQualityGate(quality: TshirtVisualQuality): boolean {
+function passesQualityGate(quality: TshirtVisualQuality, modeCompliance: DesignModeCompliance): boolean {
   return quality.thumbnailLegibility >= QUALITY_GATE_MINIMUM &&
     quality.focalClarity >= QUALITY_GATE_MINIMUM &&
     quality.silhouetteStrength >= QUALITY_GATE_MINIMUM &&
@@ -453,7 +738,19 @@ function passesQualityGate(quality: TshirtVisualQuality): boolean {
     quality.contrast >= QUALITY_GATE_MINIMUM &&
     quality.printability >= PRINTABILITY_MINIMUM &&
     quality.visualOriginality >= QUALITY_GATE_MINIMUM &&
-    quality.sloganReinforcement >= QUALITY_GATE_MINIMUM;
+    quality.sloganReinforcement >= QUALITY_GATE_MINIMUM &&
+    modeCompliance.modeComplianceScore >= QUALITY_GATE_MINIMUM &&
+    modeCompliance.violations.length === 0;
+}
+
+export function buildVisualCacheKey(
+  niche: string,
+  slogan: string,
+  resolvedMode: ResolvedDesignMode,
+  style: string,
+  layoutMode = "standard",
+): string {
+  return [VISUAL_ENGINE_VERSION, niche.trim(), slogan.trim(), resolvedMode, style.trim(), layoutMode].join(":");
 }
 
 function fingerprintKey(fingerprint: VisualFingerprint): string {
@@ -651,13 +948,15 @@ SLOGANS: ${JSON.stringify(input.slogans)}
 BEHAVIORAL PROFILE: ${JSON.stringify(profileForPrompt(input.profile))}
 VISUAL EVIDENCE: ${JSON.stringify(evidence)}
 SELECTED RENDERING STYLE (reserved for a later transformation; do not let it invent the idea): ${input.style ?? "Bold Graphic"}
+REQUESTED DESIGN MODE: ${input.designMode ?? "AUTO"}
 
 For EACH slogan, reason in this order:
 1. What is its literal subject?
 2. What does the wearer really mean?
 3. What concrete behavior, contradiction, joke, status signal, ritual, or emotional truth does THIS line express?
 4. What visible action or relationship demonstrates that meaning before the viewer finishes reading?
-5. What composition follows from that meaning and the slogan's length and rhythm?
+5. Which design mode best carries the concept: TEXT_ONLY, HYBRID, CHARACTER, CARTOON, or ILLUSTRATION_ONLY?
+6. What composition follows from that meaning, mode, and the slogan's length and rhythm?
 
 Treat profile fields as evidence. Select only the smallest number of cues that materially strengthen this slogan. Never dump an evidence list into the artwork.
 The slogan must control the art more strongly than the broad niche.
@@ -695,7 +994,9 @@ Return this exact JSON shape:
           "detailDensity": "",
           "contrastNeed": "",
           "viewingDistance": ""
-        }
+        },
+        "recommendedDesignMode": { "mode": "TEXT_ONLY|HYBRID|CHARACTER|CARTOON|ILLUSTRATION_ONLY", "confidence": 0, "rationale": "" },
+        "modeSignals": { "typographyStrength": 0, "humanActionStrength": 0, "mascotPotential": 0, "standaloneIllustrationStrength": 0 }
       },
       "composition": {
         "primaryFocus": "typography|illustration|hybrid",
@@ -704,7 +1005,9 @@ Return this exact JSON shape:
         "illustrationRelationship": "describe an actual interaction, not graphics sitting near text",
         "negativeSpaceStrategy": "",
         "silhouette": "",
-        "balance": ""
+        "balance": "",
+        "visibleTextRequired": true,
+        "maxPrimarySubjects": 1
       }
     }
   ]
@@ -737,12 +1040,22 @@ Return this exact JSON shape:
     const conceptFallback = fallbackConcept(meaning, input.profile);
     const concept = normalizeConcept(raw.concept, conceptFallback);
     const compositionFallback = fallbackComposition(slogan, meaning);
+    const requestedDesignMode = normalizeDesignMode(input.designMode ?? "AUTO");
+    const designModeDecision = resolveDesignMode(requestedDesignMode, slogan, concept);
+    const composition = buildCompositionPlanForMode(
+      normalizeComposition(raw.composition, compositionFallback),
+      slogan,
+      designModeDecision.mode,
+    );
     return {
       slogan,
       meaning,
       concept,
-      composition: normalizeComposition(raw.composition, compositionFallback),
-      complexity: deriveVisualComplexityBudget(slogan, concept),
+      composition,
+      complexity: deriveVisualComplexityBudget(slogan, concept, designModeDecision.mode),
+      requestedDesignMode,
+      resolvedDesignMode: designModeDecision.mode,
+      designModeDecision,
     };
   });
 }
@@ -775,11 +1088,14 @@ For each strategy, evaluate:
 - thumbnailLegibility: does the basic design still read around 150–250 px?
 - focalClarity: is there one obvious visual destination?
 - silhouetteStrength: does it form a recognizable isolated printable shape?
-- textGraphicIntegration: does the illustration interact with the message instead of sitting underneath it?
+- textGraphicIntegration: does the visual system feel cohesive? For ILLUSTRATION_ONLY, score how strongly the art embodies the source concept without text; for TEXT_ONLY, score the internal lettering hierarchy.
 - contrast: will major forms separate on the requested garment?
 - printability: are shapes, line weights, separations, and detail density suitable for apparel?
 - visualOriginality: is this a distinct concept rather than stock clip art or a familiar formula?
 - sloganReinforcement: does the visual make this exact slogan stronger?
+- modeCompliance: does the final concept obey resolvedDesignMode, including visible-text and subject-count constraints?
+
+Mode violations include: a human or major illustration in TEXT_ONLY; visible slogan text in ILLUSTRATION_ONLY; no central human in CHARACTER; no central stylized mascot in CARTOON; or typography/illustration failing to share emphasis in HYBRID.
 
 Any score below 65 (or printability below 70) is a failed gate. First revise the meaning-bearing concept and composition so it passes; then score the FINAL revised version honestly.
 Respect each supplied complexity budget. Do not solve weakness by adding more objects or detail.
@@ -794,10 +1110,13 @@ Return this exact JSON shape:
       "meaning": { "literalSubject": "", "impliedMeaning": "", "behavioralTruth": "", "emotionalPayoff": "", "visualizableAction": "", "strongestContrast": "" },
       "concept": {
         "coreMessage": "", "emotionalTone": [], "behavioralMoment": [], "visualMetaphors": [], "relevantObjects": [], "environmentalCues": [], "typographyPersonality": [], "compositionIntent": "", "focalHierarchy": [], "supportingGraphics": [], "avoidElements": [],
-        "printStrategy": { "silhouetteStrength": "", "detailDensity": "", "contrastNeed": "", "viewingDistance": "" }
+        "printStrategy": { "silhouetteStrength": "", "detailDensity": "", "contrastNeed": "", "viewingDistance": "" },
+        "recommendedDesignMode": { "mode": "TEXT_ONLY|HYBRID|CHARACTER|CARTOON|ILLUSTRATION_ONLY", "confidence": 0, "rationale": "" },
+        "modeSignals": { "typographyStrength": 0, "humanActionStrength": 0, "mascotPotential": 0, "standaloneIllustrationStrength": 0 }
       },
-      "composition": { "primaryFocus": "typography|illustration|hybrid", "hierarchy": [{ "element": "", "importance": 0 }], "textTreatment": "", "illustrationRelationship": "", "negativeSpaceStrategy": "", "silhouette": "", "balance": "" },
+      "composition": { "primaryFocus": "typography|illustration|hybrid", "hierarchy": [{ "element": "", "importance": 0 }], "textTreatment": "", "illustrationRelationship": "", "negativeSpaceStrategy": "", "silhouette": "", "balance": "", "visibleTextRequired": true, "maxPrimarySubjects": 1 },
       "quality": { "thumbnailLegibility": 0, "focalClarity": 0, "silhouetteStrength": 0, "textGraphicIntegration": 0, "contrast": 0, "printability": 0, "visualOriginality": 0, "sloganReinforcement": 0 },
+      "modeCompliance": { "modeComplianceScore": 0, "violations": [] },
       "fingerprint": { "primarySubject": "", "compositionType": "", "metaphorType": "", "typographyRole": "", "graphicRelationship": "" }
     }
   ]
@@ -823,11 +1142,16 @@ Return this exact JSON shape:
     const raw = revision && typeof revision === "object" ? revision as Record<string, unknown> : {};
     const meaning = normalizeMeaning(raw.meaning, strategy.meaning);
     const concept = normalizeConcept(raw.concept, strategy.concept);
-    const composition = normalizeComposition(raw.composition, strategy.composition);
-    const revised = { ...strategy, meaning, concept, composition, complexity: deriveVisualComplexityBudget(strategy.slogan, concept) };
+    const composition = buildCompositionPlanForMode(
+      normalizeComposition(raw.composition, strategy.composition),
+      strategy.slogan,
+      strategy.resolvedDesignMode,
+    );
+    const revised = { ...strategy, meaning, concept, composition, complexity: deriveVisualComplexityBudget(strategy.slogan, concept, strategy.resolvedDesignMode) };
     return {
       ...revised,
       quality: normalizeQuality(raw.quality),
+      modeCompliance: normalizeModeCompliance(raw.modeCompliance, strategy.requestedDesignMode, strategy.resolvedDesignMode),
       fingerprint: normalizeFingerprint(raw.fingerprint, fallbackFingerprint(revised)),
     };
   });
@@ -855,6 +1179,7 @@ async function repairCollapsedStrategies(
       concept: strategy.concept,
       composition: strategy.composition,
       complexity: strategy.complexity,
+      resolvedDesignMode: strategy.resolvedDesignMode,
     }))
     .filter((strategy) => repairSet.has(strategy.index));
   const response = await chatCompletionSafe({
@@ -887,6 +1212,7 @@ The repaired FULL batch must satisfy:
 - no combined fingerprint should substantially duplicate an earlier strategy
 
 These are diversity constraints, not a request to assign canned layouts. Derive each new composition from its slogan's meaning, rhythm, contrast, and visualizable action. Change the underlying relationship, silhouette, reading path, and typography function—not merely the fingerprint wording. Respect the existing complexity budget and do not add detail to manufacture novelty.
+The repaired strategy must continue to obey its resolvedDesignMode. Never trade mode compliance for batch diversity.
 
 Return ONLY the repaired targets:
 {
@@ -924,12 +1250,16 @@ Return ONLY the repaired targets:
     if (!revision || typeof revision !== "object") return strategy;
     const raw = revision as Record<string, unknown>;
     const concept = normalizeConcept(raw.concept, strategy.concept);
-    const composition = normalizeComposition(raw.composition, strategy.composition);
+    const composition = buildCompositionPlanForMode(
+      normalizeComposition(raw.composition, strategy.composition),
+      strategy.slogan,
+      strategy.resolvedDesignMode,
+    );
     const revised = {
       ...strategy,
       concept,
       composition,
-      complexity: deriveVisualComplexityBudget(strategy.slogan, concept),
+      complexity: deriveVisualComplexityBudget(strategy.slogan, concept, strategy.resolvedDesignMode),
     };
     return {
       ...revised,
@@ -1030,6 +1360,14 @@ function marketplaceInstruction(marketplace: DynamicDesignInput["marketplace"]):
   return "Make the design versatile for a general commercial POD listing thumbnail.";
 }
 
+function designModeInstruction(mode: ResolvedDesignMode): string {
+  if (mode === "TEXT_ONLY") return "Typography-only apparel graphic. Do not include humans, characters, mascots, scenes, or major illustrations. Make lettering shape, scale, rhythm, spacing, and texture carry the concept; use only small non-figurative supporting marks when necessary.";
+  if (mode === "CHARACTER") return "Character-led apparel illustration. Use one primary human figure performing the implied behavior as the visual anchor. Typography supports the action and there are no unnecessary secondary characters.";
+  if (mode === "CARTOON") return "Expressive cartoon or mascot-led apparel graphic. Use one stylized character with an exaggerated pose or expression that communicates the humor immediately; avoid realism unless the rendering style requires it.";
+  if (mode === "ILLUSTRATION_ONLY") return "Illustration-only apparel artwork. Do not render the slogan or any other visible text. Communicate the source concept entirely through one strong focal illustration with a clean silhouette and thumbnail recognition.";
+  return "Hybrid apparel graphic. Typography and one meaning-bearing illustration share the visual hierarchy and interact as equal parts of the idea.";
+}
+
 export function buildDynamicImagePrompt(
   input: DynamicDesignInput,
   meaning: SloganVisualMeaning,
@@ -1037,14 +1375,46 @@ export function buildDynamicImagePrompt(
   composition: CompositionPlan,
   complexity = deriveVisualComplexityBudget(input.slogan, concept),
 ): string {
+  const resolvedDesignMode = input.resolvedDesignMode ?? resolveDesignMode(
+    input.requestedDesignMode ?? "AUTO",
+    input.slogan,
+    concept,
+  ).mode;
   const hierarchy = composition.hierarchy.map((item) => `${item.element} (${item.importance})`).join(", ");
-  const supporting = concept.supportingGraphics.length > 0 ? concept.supportingGraphics.join(", ") : "none beyond the meaning-bearing focal relationship";
+  const supporting = resolvedDesignMode === "TEXT_ONLY"
+    ? "small non-figurative marks only when they strengthen the lettering hierarchy"
+    : concept.supportingGraphics.length > 0
+      ? concept.supportingGraphics.join(", ")
+      : "none beyond the meaning-bearing focal relationship";
   const avoid = [...concept.avoidElements, "generic clip-art composition", "random decorative objects", "unrelated filler graphics", "visual clutter", "tiny unreadable text", "generic stock-vector appearance", "brands, logos, copyrighted characters, or trademarks"];
+  if (resolvedDesignMode === "TEXT_ONLY") avoid.push("humans", "characters", "mascots", "scenes", "major illustrations");
+  if (resolvedDesignMode === "ILLUSTRATION_ONLY") avoid.push("visible text", "lettering", "captions", "signatures");
+
+  const textDirection = resolvedDesignMode === "ILLUSTRATION_ONLY"
+    ? `SOURCE CONCEPT:\n"${input.slogan.replace(/"/g, '\\"')}"\nDo not display this phrase as text. Use it only to understand the artwork.`
+    : `EXACT VISIBLE TEXT:\n"${input.slogan.replace(/"/g, '\\"')}"`;
+  const textRequirement = resolvedDesignMode === "ILLUSTRATION_ONLY"
+    ? "- do not include visible words, letters, slogan typography, signatures, or captions"
+    : "- reproduce the exact slogan once, correctly spelled and fully legible";
+  const integrationRequirement = resolvedDesignMode === "TEXT_ONLY"
+    ? "- typography itself is the complete focal artwork"
+    : resolvedDesignMode === "ILLUSTRATION_ONLY"
+      ? "- the illustration alone must communicate the source concept"
+      : "- typography integrated with the illustration";
+  const visualStory = resolvedDesignMode === "TEXT_ONLY"
+    ? "Express the behavioral truth through the exact lettering's cadence, emphasis, spacing, and texture; do not depict the literal action."
+    : meaning.visualizableAction;
+  const typographyDirection = resolvedDesignMode === "ILLUSTRATION_ONLY"
+    ? "Visible typography: none."
+    : `Typography personality: ${concept.typographyPersonality.join(", ")}`;
 
   return `Create an original commercial POD t-shirt graphic.
 
-EXACT TEXT:
-"${input.slogan.replace(/"/g, '\\"')}"
+${textDirection}
+
+DESIGN MODE:
+${resolvedDesignMode}
+${designModeInstruction(resolvedDesignMode)}
 
 NICHE CONTEXT:
 ${input.niche}
@@ -1056,7 +1426,7 @@ BEHAVIORAL TRUTH:
 ${meaning.behavioralTruth}
 
 VISUAL STORY:
-${meaning.visualizableAction}
+${visualStory}
 
 EMOTIONAL PAYOFF:
 ${meaning.emotionalPayoff}
@@ -1065,7 +1435,7 @@ ART DIRECTION:
 ${input.style}
 Use this only as the rendering language; preserve the concept and hierarchy above.
 Emotional tone: ${concept.emotionalTone.join(", ")}
-Typography personality: ${concept.typographyPersonality.join(", ")}
+${typographyDirection}
 
 COMPOSITION:
 Primary focus: ${composition.primaryFocus}
@@ -1092,11 +1462,11 @@ T-SHIRT REQUIREMENTS:
 - recognizable isolated silhouette
 - high contrast for a ${input.garmentBackground} garment background
 - clean separation of major shapes and limited unnecessary micro-detail
-- typography integrated with the illustration
+- ${integrationRequirement.replace(/^- /, "")}
 - visually compelling at approximately 150–250 px
 - isolated apparel artwork, not a rectangular poster or background scene
 - no mockup, model, shirt, hanger, frame, or product photography
-- reproduce the exact slogan once, correctly spelled and fully legible
+- ${textRequirement.replace(/^- /, "")}
 - ${marketplaceInstruction(input.marketplace)}
 
 AVOID:
@@ -1115,7 +1485,7 @@ Commercial-friendly original artwork. Deliver the highest-resolution print-ready
  */
 export function buildDynamicStyleVariants(
   input: Omit<DynamicDesignInput, "slogan" | "style">,
-  strategy: Pick<DynamicDesignStrategy, "slogan" | "meaning" | "concept" | "composition" | "complexity" | "fingerprint">,
+  strategy: Pick<DynamicDesignStrategy, "slogan" | "meaning" | "concept" | "composition" | "complexity" | "fingerprint" | "requestedDesignMode" | "resolvedDesignMode">,
   styles: string[],
 ): DynamicStyleVariant[] {
   const semanticSignature = JSON.stringify({
@@ -1125,6 +1495,8 @@ export function buildDynamicStyleVariants(
     composition: strategy.composition,
     complexity: strategy.complexity,
     fingerprint: strategy.fingerprint,
+    requestedDesignMode: strategy.requestedDesignMode,
+    resolvedDesignMode: strategy.resolvedDesignMode,
   });
   const uniqueStyles = [...new Set(styles.map((style) => style.trim()).filter(Boolean))];
 
@@ -1132,7 +1504,13 @@ export function buildDynamicStyleVariants(
     style,
     semanticSignature,
     prompt: buildDynamicImagePrompt(
-      { ...input, slogan: strategy.slogan, style },
+      {
+        ...input,
+        slogan: strategy.slogan,
+        style,
+        requestedDesignMode: strategy.requestedDesignMode,
+        resolvedDesignMode: strategy.resolvedDesignMode,
+      },
       strategy.meaning,
       strategy.concept,
       strategy.composition,
@@ -1148,6 +1526,7 @@ export function isValidVisualStrategy(strategy: unknown): strategy is DynamicDes
   const concept = candidate.concept;
   const fingerprint = candidate.fingerprint;
   const quality = candidate.quality;
+  const modeCompliance = candidate.modeCompliance;
   const focusIsValid = composition?.primaryFocus === "typography" ||
     composition?.primaryFocus === "illustration" ||
     composition?.primaryFocus === "hybrid";
@@ -1164,6 +1543,11 @@ export function isValidVisualStrategy(strategy: unknown): strategy is DynamicDes
 
   return Boolean(
     cleanString(candidate.slogan) &&
+    normalizeDesignMode(candidate.requestedDesignMode) === candidate.requestedDesignMode &&
+    normalizeResolvedDesignMode(candidate.resolvedDesignMode, "HYBRID") === candidate.resolvedDesignMode &&
+    candidate.designModeDecision?.mode === candidate.resolvedDesignMode &&
+    typeof modeCompliance?.modeComplianceScore === "number" &&
+    Array.isArray(modeCompliance?.violations) &&
     focusIsValid &&
     cleanString(composition?.textTreatment) &&
     cleanString(composition?.illustrationRelationship) &&
@@ -1204,17 +1588,20 @@ export function analyzeDynamicDesignBatch(candidates: readonly unknown[]): Desig
   const originality = averageDefined(strategies.map((strategy) => strategy.quality.visualOriginality));
   const focalClarity = averageDefined(strategies.map((strategy) => strategy.quality.focalClarity));
   const integration = averageDefined(strategies.map((strategy) => strategy.quality.textGraphicIntegration));
-  if ([thumbnail, printability, reinforcement, originality, focalClarity, integration].some((value) => value === null)) {
+  const modeCompliance = averageDefined(strategies.map((strategy) => strategy.modeCompliance.modeComplianceScore));
+  if ([thumbnail, printability, reinforcement, originality, focalClarity, integration, modeCompliance].some((value) => value === null)) {
     return null;
   }
   const pairCount = pairSimilarities.length;
   const collisions = pairSimilarities.filter((similarity) => similarity >= 0.65).length;
   const primaryFocusCount = new Set(strategies.map((strategy) => strategy.composition.primaryFocus)).size;
+  const forcedMode = strategies.every((strategy) => strategy.requestedDesignMode !== "AUTO") &&
+    new Set(strategies.map((strategy) => strategy.requestedDesignMode)).size === 1;
 
   return {
     sampleSize: count,
     designCount: count,
-    primaryFocusDiversity: roundedRatio(primaryFocusCount / Math.min(3, count)),
+    primaryFocusDiversity: forcedMode ? 1 : roundedRatio(primaryFocusCount / Math.min(3, count)),
     compositionFamilyDiversity: roundedRatio(semanticClusterCount(strategies.map(compositionDescriptor)) / count),
     visualMetaphorDiversity: roundedRatio(semanticClusterCount(strategies.map((strategy) => strategy.fingerprint.metaphorType)) / count),
     supportingObjectOverlap: roundedRatio(averageDefined(objectOverlaps) ?? 0),
@@ -1226,6 +1613,7 @@ export function analyzeDynamicDesignBatch(candidates: readonly unknown[]): Desig
     averageSloganReinforcement: Math.round(reinforcement!),
     averageVisualOriginality: Math.round(originality!),
     averageVisualImpact: Math.round(averageDefined(strategies.map((strategy) => strategy.visualImpact))!),
+    averageModeCompliance: Math.round(modeCompliance!),
     // Simplicity is not penalized. The three strongest commercial constraints
     // receive 75% of the score; novelty is deliberately capped at 5%.
     commercialQualityScore: Math.round(
@@ -1276,6 +1664,7 @@ export function evaluateVisualReleaseGate(
   addMinimumWarning("visualMetaphorDiversity");
   addMinimumWarning("typographyRoleDiversity");
   addMinimumWarning("commercialQualityScore");
+  addMinimumWarning("averageModeCompliance");
   if (metrics.supportingObjectOverlap > VISUAL_RELEASE_THRESHOLDS.supportingObjectOverlap) {
     warnings.push({
       metric: "supportingObjectOverlap",
@@ -1341,6 +1730,7 @@ export async function generateDynamicDesignBatch(input: DynamicDesignBatchInput)
     garmentBackground: input.garmentBackground ?? "either",
     printBackground: input.printBackground ?? "transparent",
     marketplace: input.marketplace ?? "general",
+    designMode: normalizeDesignMode(input.designMode ?? "AUTO"),
   };
   const unscored = await generateUnscoredStrategies(normalizedInput);
   let evaluated = await evaluateAndReviseStrategies(normalizedInput, unscored);
@@ -1380,6 +1770,8 @@ export async function generateDynamicDesignBatch(input: DynamicDesignBatchInput)
       garmentBackground: normalizedInput.garmentBackground!,
       printBackground: normalizedInput.printBackground!,
       marketplace: normalizedInput.marketplace,
+      requestedDesignMode: strategy.requestedDesignMode,
+      resolvedDesignMode: strategy.resolvedDesignMode,
     };
 
     return {
@@ -1387,7 +1779,7 @@ export async function generateDynamicDesignBatch(input: DynamicDesignBatchInput)
       quality,
       visualImpact: visualImpact(quality),
       diversityPenalty,
-      qualityGatePassed: passesQualityGate(quality),
+      qualityGatePassed: passesQualityGate(quality, strategy.modeCompliance),
       batchRepairAttempts,
       prompt: buildDynamicImagePrompt(designInput, strategy.meaning, strategy.concept, strategy.composition, strategy.complexity),
     };

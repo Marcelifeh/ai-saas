@@ -9,6 +9,7 @@ const SloganRouteSchema = z.object({
     platform: z.string().optional(),
     audience: z.string().optional(),
     style: z.string().optional(),
+    designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]).optional(),
     excludeSlogans: z.array(z.string()).max(20).optional(),
 });
 
@@ -31,8 +32,8 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             return NextResponse.json({ success: false, error: guard.reason, plan: guard.plan }, { status: 429 });
         }
 
-        const { prompt, platform, audience, style, excludeSlogans } = parsed.data;
-        const data = await regenerateSlogansOnly(prompt, platform, audience, style, userId, excludeSlogans);
+        const { prompt, platform, audience, style, designMode, excludeSlogans } = parsed.data;
+        const data = await regenerateSlogansOnly(prompt, platform, audience, style, userId, excludeSlogans, designMode);
 
         return NextResponse.json({ success: true, data });
     } catch (err: unknown) {

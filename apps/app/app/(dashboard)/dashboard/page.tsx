@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useFactory } from "../../../hooks/useFactory";
+import { useFactory, type DesignMode } from "../../../hooks/useFactory";
 import { Copy, Sparkles, Wand2, Target, Tags, ShoppingCart, BarChart2 } from "lucide-react";
 import { InsightPanel } from "../../../components/dashboard/InsightPanel";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
@@ -19,7 +19,16 @@ const PRESET_STYLES = [
     "Y2K",
 ];
 
-const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+const DESIGN_MODES: Array<{ value: DesignMode; label: string }> = [
+    { value: "AUTO", label: "Auto" },
+    { value: "TEXT_ONLY", label: "Text" },
+    { value: "HYBRID", label: "Hybrid" },
+    { value: "CHARACTER", label: "Human" },
+    { value: "CARTOON", label: "Cartoon" },
+    { value: "ILLUSTRATION_ONLY", label: "Illustration" },
+];
+
+const VISUAL_ENGINE_VERSION = "dynamic-visual-v4";
 const LISTING_ENGINE_VERSION = "dynamic-listing-v3";
 const STORAGE_KEY = `tf_single_strategy_state_${VISUAL_ENGINE_VERSION}_${LISTING_ENGINE_VERSION}`;
 
@@ -80,6 +89,10 @@ type VisualStrategy = {
     visualImpact: number;
     qualityGatePassed: boolean;
     diversityPenalty: number;
+    requestedDesignMode: DesignMode;
+    resolvedDesignMode: Exclude<DesignMode, "AUTO">;
+    designModeDecision: { mode: Exclude<DesignMode, "AUTO">; confidence: number; rationale: string };
+    modeCompliance: { modeComplianceScore: number; violations: string[] };
     concept: { coreMessage: string };
     composition: { primaryFocus: "typography" | "illustration" | "hybrid" };
     complexity: { supportingDetailLevel: "minimal" | "controlled" | "moderate" };
@@ -185,6 +198,7 @@ const visualMetricLabels: Record<string, string> = {
     supportingObjectOverlap: "Supporting-object overlap",
     typographyRoleDiversity: "Typography-role diversity",
     commercialQualityScore: "Commercial quality",
+    averageModeCompliance: "Mode compliance",
 };
 
 function formatVisualMetric(value: number): string {
@@ -194,12 +208,13 @@ function formatVisualMetric(value: number): string {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 function SingleStrategyContent() {
-    const { generateSingleStrategy, regenerateSlogans, repackageListing, recordSalesFeedback, isLoading, isSloganRefreshing, isListingRefreshing, error } = useFactory();
+    const { generateSingleStrategy, regenerateSlogans, regenerateDesigns, repackageListing, recordSalesFeedback, isLoading, isSloganRefreshing, isDesignRefreshing, isListingRefreshing, error } = useFactory();
     const searchParams = useSearchParams();
     const [prompt, setPrompt] = useState("");
     const [platform, setPlatform] = useState("amazon");
     const [audience, setAudience] = useState("");
     const [style, setStyle] = useState("Vintage Distressed");
+    const [designMode, setDesignMode] = useState<DesignMode>("AUTO");
     const [result, setResult] = useState<any | null>(null);
     const [insights, setInsights] = useState<any[] | null>(null);
     const [trendsLoading, setTrendsLoading] = useState(false);
@@ -257,7 +272,7 @@ function SingleStrategyContent() {
     const handleGenerate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!prompt) return;
-        const data = await generateSingleStrategy(prompt, platform, audience, style);
+        const data = await generateSingleStrategy(prompt, platform, audience, style, designMode);
         if (data) {
             setResult(data);
             try {
@@ -266,6 +281,7 @@ function SingleStrategyContent() {
                     platform,
                     audience,
                     style,
+                    designMode,
                     result: data,
                 };
                 if (typeof window !== "undefined") {
@@ -306,6 +322,7 @@ function SingleStrategyContent() {
                     setStyle(saved.style);
                     setSelectedDesignStyle(saved.style || "Vintage Distressed");
                 }
+                if (DESIGN_MODES.some((mode) => mode.value === saved.designMode)) setDesignMode(saved.designMode);
                 if (saved.result) setResult(saved.result);
             }
         } catch (err) {
@@ -628,6 +645,7 @@ function SingleStrategyContent() {
                 platform: nextPlatform,
                 audience,
                 style,
+                designMode,
                 result: nextResult,
             }));
         } catch (err) {
@@ -643,7 +661,8 @@ function SingleStrategyContent() {
             platform,
             audience,
             style,
-            Array.isArray(result.shirtSlogans) ? result.shirtSlogans : rankedSlogans.map((entry) => entry.slogan)
+            Array.isArray(result.shirtSlogans) ? result.shirtSlogans : rankedSlogans.map((entry) => entry.slogan),
+            designMode,
         );
 
         if (!data || typeof data !== "object") return;
@@ -661,11 +680,32 @@ function SingleStrategyContent() {
                     platform,
                     audience,
                     style,
+                    designMode,
                     result: nextResult,
                 }));
             }
         } catch (err) {
             console.error("Failed to persist regenerated slogans", err);
+        }
+    };
+
+    const handleRegenerateDesigns = async () => {
+        if (!result?.dynamicProfile || designSlogans.length === 0) return;
+        const data = await regenerateDesigns({
+            niche: result.niche || prompt,
+            slogans: designSlogans,
+            profile: result.dynamicProfile,
+            style: selectedDesignStyle || style,
+            platform,
+            designMode,
+        }) as Record<string, unknown> | null;
+        if (!data) return;
+        const nextResult = { ...result, ...data };
+        setResult(nextResult);
+        try {
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ prompt, platform, audience, style, designMode, result: nextResult }));
+        } catch (err) {
+            console.error("Failed to persist regenerated designs", err);
         }
     };
 
@@ -775,6 +815,22 @@ function SingleStrategyContent() {
                                                 placeholder="e.g. Gen Z college students"
                                                 className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                             />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-400 mb-2">Design Mode</label>
+                                            <div className="flex flex-wrap gap-2">
+                                                {DESIGN_MODES.map((mode) => (
+                                                    <button
+                                                        key={mode.value}
+                                                        type="button"
+                                                        onClick={() => setDesignMode(mode.value)}
+                                                        className={`text-[10px] font-bold px-3 py-1.5 rounded-md border uppercase tracking-wide transition-all ${designMode === mode.value ? "bg-emerald-600 text-white border-emerald-600" : "bg-gray-950 text-gray-300 border-gray-700 hover:border-emerald-500/50"}`}
+                                                    >
+                                                        {mode.label}
+                                                    </button>
+                                                ))}
+                                            </div>
                                         </div>
 
                                         <div>
@@ -1327,6 +1383,40 @@ function SingleStrategyContent() {
                                     </div>
                                 )}
 
+                                <div className="mb-4 rounded-xl border border-gray-800 bg-gray-950/70 p-3">
+                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <div className="text-[10px] font-black uppercase tracking-widest text-gray-500">Design mode</div>
+                                            {designMode === "AUTO" && visualStrategies[0] && (
+                                                <div className="mt-1 text-[11px] text-indigo-200">
+                                                    Auto chooses per slogan · first result: <span className="font-black">{visualStrategies[0].resolvedDesignMode.replaceAll("_", " ")}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={handleRegenerateDesigns}
+                                            disabled={isDesignRefreshing}
+                                            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white hover:bg-indigo-500 disabled:opacity-50"
+                                        >
+                                            {isDesignRefreshing ? "Rebuilding…" : "Regenerate designs"}
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {DESIGN_MODES.map((mode) => (
+                                            <button
+                                                key={mode.value}
+                                                type="button"
+                                                onClick={() => setDesignMode(mode.value)}
+                                                title={mode.value === "AUTO" ? "Analyzes wording, action, metaphor, character potential, and thumbnail clarity." : undefined}
+                                                className={`text-[10px] font-bold px-3 py-1.5 rounded-md border uppercase tracking-wide transition-all ${designMode === mode.value ? "bg-indigo-600 text-white border-indigo-600" : "bg-indigo-50/10 text-indigo-200 border-indigo-500/20 hover:bg-indigo-500/20"}`}
+                                            >
+                                                {mode.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
                                 <div className="flex flex-wrap gap-2 mb-4">
                                     {PRESET_STYLES.map((styleName) => (
                                         <button
@@ -1392,7 +1482,7 @@ function SingleStrategyContent() {
                                                     <div className="flex items-center gap-2">
                                                         {visualStrategy && (
                                                             <span className="hidden sm:inline text-[9px] font-black text-indigo-300 uppercase tracking-widest">
-                                                                {visualStrategy.composition.primaryFocus} · impact {visualStrategy.visualImpact}
+                                                                {visualStrategy.resolvedDesignMode.replaceAll("_", " ")} · impact {visualStrategy.visualImpact}
                                                             </span>
                                                         )}
                                                         {sloganMeta && (
@@ -1433,7 +1523,8 @@ function SingleStrategyContent() {
                                                             <div className="mb-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
                                                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] uppercase tracking-widest">
                                                                     <div><span className="text-gray-500">Concept</span><div className="mt-0.5 text-indigo-200 font-bold normal-case tracking-normal">{visualStrategy.fingerprint.metaphorType || visualStrategy.concept.coreMessage}</div></div>
-                                                                    <div><span className="text-gray-500">Focus</span><div className="mt-0.5 text-white font-black">{visualStrategy.composition.primaryFocus}</div></div>
+                                                                    <div><span className="text-gray-500">Mode</span><div className="mt-0.5 text-white font-black">{visualStrategy.resolvedDesignMode.replaceAll("_", " ")}</div></div>
+                                                                    <div><span className="text-gray-500">Mode compliance</span><div className="mt-0.5 text-white font-black">{visualStrategy.modeCompliance.modeComplianceScore}</div></div>
                                                                     <div><span className="text-gray-500">Complexity</span><div className="mt-0.5 text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</div></div>
                                                                 </div>
                                                                 <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">

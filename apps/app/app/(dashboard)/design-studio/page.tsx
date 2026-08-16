@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useFactory } from "../../../hooks/useFactory";
+import { useFactory, type DesignMode } from "../../../hooks/useFactory";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
 import { Zap, Sparkles, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
 
-const VISUAL_ENGINE_VERSION = "dynamic-visual-v3";
+const VISUAL_ENGINE_VERSION = "dynamic-visual-v4";
 const STORAGE_KEY = `tf_slogan_intelligence_state_${VISUAL_ENGINE_VERSION}`;
 
 type RankedSlogan = {
@@ -33,6 +33,10 @@ type VisualStrategy = {
     slogan: string;
     visualImpact: number;
     qualityGatePassed: boolean;
+    requestedDesignMode: DesignMode;
+    resolvedDesignMode: Exclude<DesignMode, "AUTO">;
+    designModeDecision: { confidence: number; rationale: string };
+    modeCompliance: { modeComplianceScore: number; violations: string[] };
     concept: { coreMessage: string };
     composition: { primaryFocus: "typography" | "illustration" | "hybrid" };
     complexity: { supportingDetailLevel: "minimal" | "controlled" | "moderate" };
@@ -47,6 +51,14 @@ type VisualStrategy = {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 const PRESET_STYLES = ["Vintage Distressed", "Bold Graphic", "Minimalist Vector", "Hand-Drawn", "Retro Neon", "Y2K"];
+const DESIGN_MODES: Array<{ value: DesignMode; label: string }> = [
+    { value: "AUTO", label: "Auto" },
+    { value: "TEXT_ONLY", label: "Text" },
+    { value: "HYBRID", label: "Hybrid" },
+    { value: "CHARACTER", label: "Human" },
+    { value: "CARTOON", label: "Cartoon" },
+    { value: "ILLUSTRATION_ONLY", label: "Illustration" },
+];
 
 function getSloganBadges(entry: RankedSlogan) {
     const badges: { label: string; color: string }[] = [];
@@ -186,7 +198,7 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
                     {visualStrategy && (
                         <div className="mb-2 grid grid-cols-3 gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-[10px]">
                             <div><span className="text-gray-500 uppercase tracking-wider">Concept</span><div className="text-indigo-200 font-bold line-clamp-2">{visualStrategy.fingerprint.metaphorType || visualStrategy.concept.coreMessage}</div></div>
-                            <div><span className="text-gray-500 uppercase tracking-wider">Focus</span><div className="text-white font-black uppercase">{visualStrategy.composition.primaryFocus}</div></div>
+                            <div><span className="text-gray-500 uppercase tracking-wider">Mode</span><div className="text-white font-black uppercase">{visualStrategy.resolvedDesignMode.replaceAll("_", " ")}</div></div>
                             <div><span className="text-gray-500 uppercase tracking-wider">Impact</span><div className="text-emerald-300 font-black">{visualStrategy.visualImpact}</div></div>
                         </div>
                     )}
@@ -208,6 +220,7 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
                                     <div>Printability <span className="text-white font-black">{visualStrategy.quality.printability}</span></div>
                                     <div>Complexity <span className="text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</span></div>
                                     <div>Quality Gate <span className={visualStrategy.qualityGatePassed ? "text-emerald-300 font-black" : "text-amber-300 font-black"}>{visualStrategy.qualityGatePassed ? "Passed" : "Review"}</span></div>
+                                    <div>Mode compliance <span className="text-white font-black">{visualStrategy.modeCompliance.modeComplianceScore}</span></div>
                                 </div>
                             )}
                             <div className="font-mono whitespace-pre-wrap">{imagePrompt}</div>
@@ -229,10 +242,11 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
 }
 
 export default function DesignStudioPage() {
-    const { generateSingleStrategy, isLoading, error } = useFactory();
+    const { generateSingleStrategy, regenerateDesigns, isLoading, isDesignRefreshing, error } = useFactory();
     const [niche, setNiche] = useState("");
     const [audience, setAudience] = useState("");
     const [style, setStyle] = useState("Vintage Distressed");
+    const [designMode, setDesignMode] = useState<DesignMode>("AUTO");
     const [platform, setPlatform] = useState("amazon");
     const [result, setResult] = useState<any | null>(null);
 
@@ -250,6 +264,7 @@ export default function DesignStudioPage() {
                 if (saved.niche) setNiche(saved.niche);
                 if (saved.audience) setAudience(saved.audience);
                 if (saved.style) setStyle(saved.style);
+                if (DESIGN_MODES.some((mode) => mode.value === saved.designMode)) setDesignMode(saved.designMode);
                 if (saved.platform) setPlatform(saved.platform);
                 if (saved.result) setResult(saved.result);
             });
@@ -260,10 +275,10 @@ export default function DesignStudioPage() {
     useEffect(() => {
         try {
             if (typeof window !== "undefined") {
-                window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ niche, audience, style, platform, result }));
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ niche, audience, style, designMode, platform, result }));
             }
         } catch { /* ignore storage errors */ }
-    }, [niche, audience, style, platform, result]);
+    }, [niche, audience, style, designMode, platform, result]);
 
     const allSlogans = useMemo<RankedSlogan[]>(() => {
         if (!result) return [];
@@ -317,8 +332,21 @@ export default function DesignStudioPage() {
     const handleGenerate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!niche.trim()) return;
-        const data = await generateSingleStrategy(niche.trim(), platform, audience, style);
+        const data = await generateSingleStrategy(niche.trim(), platform, audience, style, designMode);
         if (data) setResult(data);
+    };
+
+    const handleRegenerateDesigns = async () => {
+        if (!result?.dynamicProfile || !Array.isArray(result.shirtSlogans)) return;
+        const data = await regenerateDesigns({
+            niche: result.niche || niche,
+            slogans: result.shirtSlogans,
+            profile: result.dynamicProfile,
+            style,
+            platform,
+            designMode,
+        }) as Record<string, unknown> | null;
+        if (data) setResult((current: any) => ({ ...current, ...data }));
     };
 
     return (
@@ -347,6 +375,40 @@ export default function DesignStudioPage() {
                         placeholder="e.g. Sarcastic introverted raccoons who love coffee…"
                         className="w-full bg-gray-950 border border-gray-800 rounded-xl p-4 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-pink-500/50 resize-none transition-all"
                     />
+                </div>
+
+                <div>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                        <label className="text-xs font-bold uppercase tracking-wider text-gray-500">Design mode</label>
+                        {result && (
+                            <button
+                                type="button"
+                                onClick={handleRegenerateDesigns}
+                                disabled={isDesignRefreshing}
+                                className="text-[10px] font-black uppercase tracking-widest text-pink-300 hover:text-pink-200 disabled:opacity-50"
+                            >
+                                {isDesignRefreshing ? "Rebuilding…" : "Regenerate designs only"}
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {DESIGN_MODES.map((mode) => (
+                            <button
+                                key={mode.value}
+                                type="button"
+                                onClick={() => setDesignMode(mode.value)}
+                                title={mode.value === "AUTO" ? "Analyzes wording, action, visual metaphor, character potential, and thumbnail clarity." : undefined}
+                                className={`text-xs font-bold py-1.5 px-3 rounded-full border transition-colors ${designMode === mode.value ? "bg-purple-500/20 border-purple-500/60 text-purple-200" : "bg-gray-100/5 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500"}`}
+                            >
+                                {mode.label}
+                            </button>
+                        ))}
+                    </div>
+                    {designMode === "AUTO" && Object.values(visualStrategyMap)[0] && (
+                        <p className="mt-2 text-[11px] text-purple-200">
+                            Auto chose <span className="font-black">{Object.values(visualStrategyMap)[0].resolvedDesignMode.replaceAll("_", " ")}</span> for the first concept · {Object.values(visualStrategyMap)[0].designModeDecision.rationale}
+                        </p>
+                    )}
                 </div>
 
                 {/* Style quick-picks */}

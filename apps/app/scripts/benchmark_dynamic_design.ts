@@ -110,6 +110,8 @@ const baseConcept: DynamicVisualConcept = {
     contrastNeed: "bright plant against dark garment",
     viewingDistance: "thumbnail first",
   },
+  recommendedDesignMode: { mode: "HYBRID", confidence: 0.9, rationale: "fixture" },
+  modeSignals: { typographyStrength: 0.85, humanActionStrength: 0.8, mascotPotential: 0.1, standaloneIllustrationStrength: 0.65 },
 };
 
 const baseComposition: CompositionPlan = {
@@ -123,6 +125,8 @@ const baseComposition: CompositionPlan = {
   negativeSpaceStrategy: "open space around boot and seedling",
   silhouette: "one diagonal boot-light-plant gesture",
   balance: "asymmetrical action balanced by text",
+  visibleTextRequired: true,
+  maxPrimarySubjects: 1,
 };
 
 function makeSyntheticStrategy(index: number): DynamicDesignStrategy {
@@ -175,6 +179,10 @@ function makeSyntheticStrategy(index: number): DynamicDesignStrategy {
       maxPrimarySubjects: index === 0 ? 1 : 2,
       supportingDetailLevel: index === 0 ? "minimal" : "controlled",
     },
+    requestedDesignMode: "AUTO",
+    resolvedDesignMode: "HYBRID",
+    designModeDecision: { mode: "HYBRID", confidence: 0.9, rationale: "fixture" },
+    modeCompliance: { requestedMode: "AUTO", resolvedMode: "HYBRID", modeComplianceScore: 95, violations: [] },
     quality,
     visualImpact: 90,
     fingerprint,
@@ -192,9 +200,15 @@ function canonicalizeRenderingStyle(prompt: string): string {
 async function runDeterministicBenchmark(): Promise<void> {
   const {
     analyzeDynamicDesignBatch,
+    analyzeAutoModeDistribution,
+    buildCompositionPlanForMode,
+    buildDynamicImagePrompt,
     buildDynamicStyleVariants,
+    buildVisualCacheKey,
     evaluateVisualBatchRelease,
     evaluateVisualReleaseGate,
+    inferDesignMode,
+    resolveDesignMode,
   } = await import("../lib/ai/dynamicDesignPrompt");
   const strategies = [0, 1, 2, 3].map(makeSyntheticStrategy);
   const variants = buildDynamicStyleVariants(
@@ -215,6 +229,70 @@ async function runDeterministicBenchmark(): Promise<void> {
   for (const variant of variants) {
     assert.ok(variant.prompt.includes(`ART DIRECTION:\n${variant.style}`), `Missing rendering style ${variant.style}`);
   }
+
+  const autoCases = [
+    { slogan: "NOPE NOT TODAY", signals: { typographyStrength: 0.92, humanActionStrength: 0.1, mascotPotential: 0.1, standaloneIllustrationStrength: 0.2 } },
+    { slogan: "STILL NOT SORRY", signals: { typographyStrength: 0.88, humanActionStrength: 0.2, mascotPotential: 0.15, standaloneIllustrationStrength: 0.25 } },
+    { slogan: "ONE MORE REP BEFORE SUNRISE", signals: { typographyStrength: 0.78, humanActionStrength: 0.82, mascotPotential: 0.1, standaloneIllustrationStrength: 0.45 } },
+    { slogan: "ROOTED BUT RESTLESS", signals: { typographyStrength: 0.8, humanActionStrength: 0.2, mascotPotential: 0.15, standaloneIllustrationStrength: 0.76 } },
+    { slogan: "FORM FIRST EGO LAST", signals: { typographyStrength: 0.42, humanActionStrength: 0.91, mascotPotential: 0.1, standaloneIllustrationStrength: 0.45 } },
+    { slogan: "THE LAST LAP IS PERSONAL", signals: { typographyStrength: 0.4, humanActionStrength: 0.87, mascotPotential: 0.12, standaloneIllustrationStrength: 0.5 } },
+    { slogan: "CHAOS HAS WHISKERS", signals: { typographyStrength: 0.35, humanActionStrength: 0.2, mascotPotential: 0.92, standaloneIllustrationStrength: 0.55 } },
+    { slogan: "TINY DRAGON BIG ATTITUDE", signals: { typographyStrength: 0.4, humanActionStrength: 0.15, mascotPotential: 0.88, standaloneIllustrationStrength: 0.52 } },
+    { slogan: "GRAVITY TAKES THE NIGHT OFF", signals: { typographyStrength: 0.3, humanActionStrength: 0.15, mascotPotential: 0.2, standaloneIllustrationStrength: 0.93 } },
+    { slogan: "THE MOON BORROWS MY SHADOW", signals: { typographyStrength: 0.28, humanActionStrength: 0.2, mascotPotential: 0.18, standaloneIllustrationStrength: 0.89 } },
+  ];
+  const autoStrategies = autoCases.map((testCase) => ({
+    requestedDesignMode: "AUTO" as const,
+    resolvedDesignMode: inferDesignMode(testCase.slogan, testCase.signals).mode,
+  }));
+  const autoDistribution = analyzeAutoModeDistribution(autoStrategies);
+  assert.equal(autoDistribution.collapsed, false, "AUTO fixture distribution collapsed into too few modes");
+  assert.equal(autoDistribution.distinctModes, 5);
+  assert.ok(autoDistribution.dominantShare <= 0.4);
+
+  const overrideMeaning = { ...baseMeaning, visualizableAction: "one human lifter performs a deep squat under a barbell" };
+  const overridePrompts = Object.fromEntries((["TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"] as const).map((mode) => {
+    const composition = buildCompositionPlanForMode(baseComposition, "ONE MORE LEAF", mode);
+    assert.equal(resolveDesignMode(mode, "ONE MORE LEAF", baseConcept).mode, mode, `${mode}: user override was not preserved`);
+    const prompt = buildDynamicImagePrompt({
+      niche: syntheticProfile.niche,
+      slogan: "ONE MORE LEAF",
+      profile: syntheticProfile,
+      style: "Bold Graphic",
+      garmentBackground: "dark",
+      printBackground: "transparent",
+      requestedDesignMode: mode,
+      resolvedDesignMode: mode,
+    }, overrideMeaning, baseConcept, composition);
+    return [mode, { composition, prompt }];
+  }));
+
+  const textOverride = overridePrompts.TEXT_ONLY;
+  assert.equal(textOverride.composition.primaryFocus, "typography");
+  assert.equal(textOverride.composition.maxPrimarySubjects, 0);
+  assert.ok(!textOverride.prompt.includes(overrideMeaning.visualizableAction), "TEXT_ONLY retained a figurative visual-story directive");
+  assert.ok(!textOverride.prompt.includes(baseComposition.silhouette), "TEXT_ONLY retained the illustration-led silhouette");
+  assert.ok(textOverride.prompt.includes("Typography is the complete artwork"));
+
+  const illustrationOverride = overridePrompts.ILLUSTRATION_ONLY;
+  assert.equal(illustrationOverride.composition.visibleTextRequired, false);
+  assert.ok(illustrationOverride.prompt.includes("SOURCE CONCEPT:"));
+  assert.ok(illustrationOverride.prompt.includes("Do not display this phrase as text"));
+  assert.ok(!illustrationOverride.prompt.includes("EXACT VISIBLE TEXT:"));
+  assert.ok(!illustrationOverride.prompt.includes("Typography personality:"));
+
+  assert.match(overridePrompts.CHARACTER.prompt, /one primary human figure/i);
+  assert.equal(overridePrompts.CHARACTER.composition.maxPrimarySubjects, 1);
+  assert.match(overridePrompts.CARTOON.prompt, /one stylized character/i);
+  assert.match(overridePrompts.CARTOON.composition.hierarchy[0].element, /stylized cartoon or mascot character/i);
+  assert.equal(overridePrompts.HYBRID.composition.primaryFocus, "hybrid");
+  assert.match(overridePrompts.HYBRID.prompt, /Typography and one meaning-bearing illustration share the visual hierarchy/i);
+  assert.notEqual(
+    buildVisualCacheKey("niche", "slogan", "TEXT_ONLY", "Bold Graphic"),
+    buildVisualCacheKey("niche", "slogan", "HYBRID", "Bold Graphic"),
+    "Resolved design mode must partition the visual cache key",
+  );
 
   const metrics = analyzeDynamicDesignBatch(strategies);
   assert.ok(metrics, "A valid four-strategy batch must produce metrics");
@@ -291,6 +369,12 @@ async function runDeterministicBenchmark(): Promise<void> {
   );
 
   console.log("Deterministic dynamic-design benchmark passed");
+  console.log("AUTO mode distribution");
+  console.table(Object.entries(autoDistribution.counts).map(([mode, count]) => ({
+    mode,
+    count,
+    percentage: `${autoDistribution.percentages[mode as keyof typeof autoDistribution.percentages]}%`,
+  })));
   console.table([metrics]);
 }
 
@@ -299,6 +383,8 @@ const liveCases = [
   { niche: "Families whose exotic pets interrupt household routines", audience: "parents and children caring for geckos or similar pets" },
   { niche: "Vintage sportswear thrift hunters", audience: "fans who care about rare faded jerseys more than final scores" },
   { niche: "Pre-work gym regulars before sunrise", audience: "consistent early-morning lifters" },
+  { niche: "Minimalist office humor built around short blunt phrases", audience: "office workers who prefer dry understated jokes" },
+  { niche: "Surreal astronomy metaphors designed to work without lettering", audience: "stargazers who collect symbolic graphic tees" },
 ];
 
 async function runLiveBenchmark(): Promise<void> {
@@ -315,6 +401,7 @@ async function runLiveBenchmark(): Promise<void> {
   const limit = Number.isFinite(requestedLimit) ? Math.max(1, requestedLimit) : liveCases.length;
   const cases = liveCases.slice(start, start + limit);
   const summaries: Array<Record<string, string | number>> = [];
+  const liveAutoStrategies: Array<Pick<DynamicDesignStrategy, "requestedDesignMode" | "resolvedDesignMode">> = [];
 
   for (const testCase of cases) {
     console.log(`\nGenerating live benchmark: ${testCase.niche}`);
@@ -337,10 +424,12 @@ async function runLiveBenchmark(): Promise<void> {
       marketplace: "general",
     });
     const release = design.evaluateVisualBatchRelease(strategies);
+    liveAutoStrategies.push(...strategies);
+    const nicheModeDistribution = design.analyzeAutoModeDistribution(strategies);
     const metrics = release.metrics;
     assert.ok(metrics, `${testCase.niche}: valid visual batch was not evaluated`);
     const releaseGate = release.releaseGate;
-    console.table([{ niche: testCase.niche, ...metrics, collapsedStrategyIndexes: metrics.collapsedStrategyIndexes.join(",") || "none" }]);
+    console.table([{ niche: testCase.niche, ...metrics, autoModeMix: Object.entries(nicheModeDistribution.counts).filter(([, count]) => count > 0).map(([mode, count]) => `${mode}:${count}`).join(" "), collapsedStrategyIndexes: metrics.collapsedStrategyIndexes.join(",") || "none" }]);
     assert.ok(metrics.primaryFocusDiversity >= 0.667, `${testCase.niche}: primary-focus diversity collapsed`);
     assert.ok(metrics.compositionFamilyDiversity >= 0.5, `${testCase.niche}: composition-family diversity collapsed`);
     assert.ok(metrics.visualMetaphorDiversity >= 0.5, `${testCase.niche}: visual-metaphor diversity collapsed`);
@@ -376,6 +465,16 @@ async function runLiveBenchmark(): Promise<void> {
   }
 
   console.log("\nLive dynamic-design benchmark passed");
+  const liveModeDistribution = design.analyzeAutoModeDistribution(liveAutoStrategies);
+  console.log("AUTO mode distribution across live niches");
+  console.table(Object.entries(liveModeDistribution.counts).map(([mode, count]) => ({
+    mode,
+    count,
+    percentage: `${liveModeDistribution.percentages[mode as keyof typeof liveModeDistribution.percentages]}%`,
+  })));
+  if (liveModeDistribution.sampleSize >= 20) {
+    assert.equal(liveModeDistribution.collapsed, false, `AUTO mode collapsed into ${liveModeDistribution.dominantMode} at ${Math.round(liveModeDistribution.dominantShare * 100)}%`);
+  }
   console.table(summaries);
 }
 

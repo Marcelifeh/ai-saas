@@ -39,6 +39,8 @@ type CoreSloganResponse = {
 
 type ChunkNiche = { niche: string };
 
+export type DesignMode = "AUTO" | "TEXT_ONLY" | "HYBRID" | "CHARACTER" | "CARTOON" | "ILLUSTRATION_ONLY";
+
 type ListingRepackageInput = {
     niche: string;
     slogan: string;
@@ -77,15 +79,16 @@ export function useFactory() {
     const [error, setError] = useState<string | null>(null);
     const [isSloganRefreshing, setIsSloganRefreshing] = useState(false);
     const [isListingRefreshing, setIsListingRefreshing] = useState(false);
+    const [isDesignRefreshing, setIsDesignRefreshing] = useState(false);
 
-    const generateSingleStrategy = async (prompt: string, platform?: string, audience?: string, style?: string) => {
+    const generateSingleStrategy = async (prompt: string, platform?: string, audience?: string, style?: string, designMode: DesignMode = "AUTO") => {
         setIsLoading(true);
         setError(null);
         try {
             const res = await fetch("/api/core", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "generateStrategy", prompt, platform, audience, style })
+                body: JSON.stringify({ action: "generateStrategy", prompt, platform, audience, style, designMode })
             });
             const json: unknown = await safeJson(res);
             const result = json as CoreStrategyResponse;
@@ -230,14 +233,14 @@ export function useFactory() {
         }
     };
 
-    const regenerateSlogans = async (prompt: string, platform?: string, audience?: string, style?: string, excludeSlogans?: string[]) => {
+    const regenerateSlogans = async (prompt: string, platform?: string, audience?: string, style?: string, excludeSlogans?: string[], designMode: DesignMode = "AUTO") => {
         setIsSloganRefreshing(true);
         setError(null);
         try {
             const res = await fetch("/api/factory/slogans", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt, platform, audience, style, excludeSlogans }),
+                body: JSON.stringify({ prompt, platform, audience, style, excludeSlogans, designMode }),
             });
             const json: unknown = await safeJson(res);
             const result = json as CoreSloganResponse;
@@ -271,6 +274,33 @@ export function useFactory() {
         }
     };
 
+    const regenerateDesigns = async (payload: {
+        niche: string;
+        slogans: string[];
+        profile: Record<string, unknown>;
+        style?: string;
+        platform?: string;
+        designMode: DesignMode;
+    }) => {
+        setIsDesignRefreshing(true);
+        setError(null);
+        try {
+            const res = await fetch("/api/factory/designs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const json = await safeJson<CoreStrategyResponse>(res);
+            if (!res.ok || !json.success) throw new Error(json.error || "Design regeneration failed");
+            return json.data;
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Design regeneration failed");
+            return null;
+        } finally {
+            setIsDesignRefreshing(false);
+        }
+    };
+
     const repackageListing = async (payload: ListingRepackageInput) => {
         setIsListingRefreshing(true);
         setError(null);
@@ -291,5 +321,5 @@ export function useFactory() {
         }
     };
 
-    return { generateSingleStrategy, bulkDiscover, generateChunk, recordSalesFeedback, regenerateSlogans, repackageListing, isLoading, isSloganRefreshing, isListingRefreshing, error };
+    return { generateSingleStrategy, bulkDiscover, generateChunk, recordSalesFeedback, regenerateSlogans, regenerateDesigns, repackageListing, isLoading, isSloganRefreshing, isDesignRefreshing, isListingRefreshing, error };
 }
