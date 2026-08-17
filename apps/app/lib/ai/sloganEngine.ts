@@ -1,4 +1,5 @@
 // ─── Market Intelligence Helpers ───────────────────────────────────────────
+import { getNicheEvidence } from "@/lib/services/marketEvidenceService";
 
 // Get top and low-performing patterns for a niche from DB
 async function getTopPatterns(niche: string) {
@@ -11,6 +12,7 @@ async function getTopPatterns(niche: string) {
     return patterns.filter((p) => p.score > 1.05);
   } catch { return []; }
 }
+
 async function getLowPerformingPatterns(niche: string) {
   try {
     const patterns = await prisma.sloganPattern.findMany({
@@ -22,16 +24,24 @@ async function getLowPerformingPatterns(niche: string) {
   } catch { return []; }
 }
 
-// Get trending keywords for a niche (stub: replace with real trend engine call)
+// Get trending keywords for a niche via shared MarketEvidenceService
 async function getTrendingKeywords(niche: string): Promise<string[]> {
-  // TODO: Integrate with trendEngine for live data
-  return [];
+  try {
+    const evidence = await getNicheEvidence(niche);
+    return evidence.trendSignals.map((s) => s.phrase);
+  } catch {
+    return [];
+  }
 }
 
-// Get buyer phrases for a niche (stub: replace with real mining)
+// Get buyer phrases for a niche via shared MarketEvidenceService
 async function getBuyerPhrases(niche: string): Promise<string[]> {
-  // TODO: Integrate with review/Q&A mining
-  return [];
+  try {
+    const evidence = await getNicheEvidence(niche);
+    return evidence.buyerLanguage.map((s) => s.phrase);
+  } catch {
+    return [];
+  }
 }
 
 // Pattern fingerprinting for hard anti-repetition

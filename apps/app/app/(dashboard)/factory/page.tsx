@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useFactory } from "../../../hooks/useFactory";
 import { Layers, Play, RotateCcw, CheckCircle2, ChevronRight, Zap, ArrowUpRight, TrendingUp } from "lucide-react";
 
@@ -42,12 +43,20 @@ type BulkResult = {
     projectedRevenue?: number;
 };
 
-export default function FactoryPage() {
+function FactoryContent() {
     const { bulkDiscover, generateChunk, isLoading, error } = useFactory();
+    const searchParams = useSearchParams();
     const [nichesText, setNichesText] = useState("");
     const [discoveredNiches, setDiscoveredNiches] = useState<DiscoveredNiche[]>([]);
     const [results, setResults] = useState<BulkResult[]>([]);
     const [step, setStep] = useState<1 | 2 | 3>(1);
+
+    useEffect(() => {
+        const nichesParam = searchParams.get("niches");
+        if (nichesParam) {
+            setNichesText(nichesParam);
+        }
+    }, [searchParams]);
 
     const publishQueue = results.filter((p) => p.decision === "PUBLISH");
     const testQueue = results.filter((p) => p.decision === "TEST");
@@ -615,6 +624,14 @@ export default function FactoryPage() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function FactoryPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-white">Loading Factory...</div>}>
+            <FactoryContent />
+        </Suspense>
     );
 }
 

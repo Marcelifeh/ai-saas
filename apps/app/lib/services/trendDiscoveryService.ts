@@ -1,4 +1,3 @@
-import "server-only";
 import { discoverTrends, TrendSignalSourceResult } from "../ai/trendEngine";
 import { createTrendSnapshot, generateMarketSignals, scoreWithMarketIntel, calculateRevenue, MarketIntel } from "../ai/marketMath";
 import { chatCompletionSafe } from "../ai/aiGateway";
@@ -12,6 +11,9 @@ export interface NicheSafety {
 }
 
 export interface EnrichedDiscoveryNiche {
+    opportunityId?: string;
+    evidenceSnapshotId?: string;
+    stage?: string;
     niche: string;
     audience: string;
     whyItSells: string;
@@ -31,6 +33,7 @@ export async function runDiscovery(userId?: string): Promise<{ opportunities: En
     // 1. Run V2 Trend Engine 
     const discoveryResult = await discoverTrends();
     const top5 = discoveryResult.niches.slice(0, 10);
+    const snapshotId = `snap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     // 2. Enrich the phrases with expected frontend metadata via a single fast LLM call
     const enrichment = await chatCompletionSafe({
@@ -68,7 +71,12 @@ export async function runDiscovery(userId?: string): Promise<{ opportunities: En
         const safetyResult = runSafetyEngine(n.niche);
         const safeName = safetyResult.modified ? safetyResult.sanitizedNiche : n.niche;
 
+        const opportunityId = `opp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
         const result: EnrichedDiscoveryNiche = {
+            opportunityId,
+            evidenceSnapshotId: snapshotId,
+            stage: "DISCOVERED",
             niche: safeName,
             audience: extra.targetAudience,
             whyItSells: extra.whyItSells,

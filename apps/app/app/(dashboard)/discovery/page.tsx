@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { TrendSignalSource, useDiscover } from "../../../hooks/useDiscover";
-import { Activity, DatabaseZap, Target, TrendingUp, Zap, Sparkles, ArrowUpRight } from "lucide-react";
+import { Activity, DatabaseZap, Target, TrendingUp, Zap, Sparkles, ArrowUpRight, Bookmark, Filter, Factory, CheckSquare, Square } from "lucide-react";
 
 function shortenNiche(name: string): string {
     const s = name
@@ -43,6 +43,60 @@ type DiscoveryOpportunity = {
 export default function DiscoveryPage() {
     const { discover, isLoading, error, data } = useDiscover();
     const signalSources = data?.signalSources ?? [];
+
+    const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
+    const [sortBy, setSortBy] = useState<"score" | "revenue" | "trend">("score");
+    const [filterDecision, setFilterDecision] = useState<"ALL" | "SELL" | "TEST" | "SKIP">("ALL");
+    const [selectedNiches, setSelectedNiches] = useState<Record<string, boolean>>({});
+    const [bookmarkedNiches, setBookmarkedNiches] = useState<Record<string, boolean>>({});
+
+    const toggleNicheSelection = (niche: string) => {
+        setSelectedNiches((prev) => ({ ...prev, [niche]: !prev[niche] }));
+    };
+
+    const toggleBookmark = (niche: string) => {
+        setBookmarkedNiches((prev) => ({ ...prev, [niche]: !prev[niche] }));
+    };
+
+    const filteredOpportunities = useMemo(() => {
+        if (!data?.opportunities) return [];
+        let list = [...data.opportunities];
+
+        if (selectedSignal) {
+            const term = selectedSignal.toLowerCase();
+            list = list.filter(
+                (o) =>
+                    o.niche.toLowerCase().includes(term) ||
+                    (o.audience && o.audience.toLowerCase().includes(term)) ||
+                    (o.whyItSells && o.whyItSells.toLowerCase().includes(term))
+            );
+        }
+
+        if (filterDecision !== "ALL") {
+            list = list.filter((o) => {
+                if (filterDecision === "SELL") return o.niche_score >= 75;
+                if (filterDecision === "SKIP") return o.niche_score < 50;
+                return o.niche_score >= 50 && o.niche_score < 75;
+            });
+        }
+
+        list.sort((a, b) => {
+            if (sortBy === "revenue") return (b.projectedRevenue || 0) - (a.projectedRevenue || 0);
+            if (sortBy === "trend") return (b.trend_score || 0) - (a.trend_score || 0);
+            return b.niche_score - a.niche_score;
+        });
+
+        return list;
+    }, [data, selectedSignal, filterDecision, sortBy]);
+
+    const selectedNichesList = useMemo(() => {
+        return Object.keys(selectedNiches).filter((n) => selectedNiches[n]);
+    }, [selectedNiches]);
+
+    const sendSelectedToFactoryUrl = useMemo(() => {
+        if (selectedNichesList.length === 0) return "/factory";
+        return `/factory?niches=${encodeURIComponent(selectedNichesList.join("\n"))}`;
+    }, [selectedNichesList]);
 
     const sourceCards = useMemo(() => {
         if (signalSources.length === 0) {

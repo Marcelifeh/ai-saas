@@ -1,4 +1,3 @@
-import "server-only";
 import { globalCache } from "../utils/cache";
 import { getServerEnv } from "@/lib/utils/serverEnv";
 import { safeJson } from "@/lib/utils/safeJson";
