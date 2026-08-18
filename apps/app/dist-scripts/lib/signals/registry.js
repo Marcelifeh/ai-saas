@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_SOURCES = void 0;
 exports.blendWithFreshnessDecay = blendWithFreshnessDecay;
 exports.fetchAndBlend = fetchAndBlend;
-// server-only removed for script runtime
+require("server-only");
 const trendEngine_1 = require("../../lib/ai/trendEngine");
 // ---------------------------------------------------------------------------
 // Freshness decay constants.

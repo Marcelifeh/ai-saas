@@ -190,6 +190,15 @@ function makeSyntheticStrategy(index: number): DynamicDesignStrategy {
     qualityGatePassed: true,
     batchRepairAttempts: 0,
     prompt: "fixture",
+    subjectStrategy: "OBJECT_LED",
+    subjectDecision: {
+      requirement: "NONE",
+      subjectType: "OBJECT",
+      strategy: "OBJECT_LED",
+      confidence: 0.9,
+      evidence: ["fixture"],
+      reason: "fixture object-led strategy",
+    },
   };
 }
 

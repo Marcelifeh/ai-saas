@@ -35,6 +35,15 @@ type VisualStrategy = {
     qualityGatePassed: boolean;
     requestedDesignMode: DesignMode;
     resolvedDesignMode: Exclude<DesignMode, "AUTO">;
+    subjectStrategy?: string;
+    subjectDecision?: {
+        requirement: string;
+        subjectType: string;
+        strategy: string;
+        confidence: number;
+        evidence: string[];
+        reason: string;
+    };
     designModeDecision: { confidence: number; rationale: string };
     modeCompliance: { modeComplianceScore: number; violations: string[] };
     concept: { coreMessage: string };
@@ -52,12 +61,17 @@ type VisualStrategy = {
 
 const PRESET_STYLES = ["Vintage Distressed", "Bold Graphic", "Minimalist Vector", "Hand-Drawn", "Retro Neon", "Y2K"];
 const DESIGN_MODES: Array<{ value: DesignMode; label: string }> = [
-    { value: "AUTO", label: "Auto" },
+    { value: "AUTO", label: "Auto Mode" },
     { value: "TEXT_ONLY", label: "Text" },
     { value: "HYBRID", label: "Hybrid" },
     { value: "CHARACTER", label: "Human" },
     { value: "CARTOON", label: "Cartoon" },
     { value: "ILLUSTRATION_ONLY", label: "Illustration" },
+];
+const SUBJECT_OVERRIDES: Array<{ value: "AUTO" | "NO_PERSON" | "INCLUDE_PERSON"; label: string }> = [
+    { value: "AUTO", label: "Auto Subject" },
+    { value: "NO_PERSON", label: "No Person" },
+    { value: "INCLUDE_PERSON", label: "Include Person" },
 ];
 
 function getSloganBadges(entry: RankedSlogan) {
@@ -198,7 +212,7 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
                     {visualStrategy && (
                         <div className="mb-2 grid grid-cols-3 gap-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-2.5 text-[10px]">
                             <div><span className="text-gray-500 uppercase tracking-wider">Concept</span><div className="text-indigo-200 font-bold line-clamp-2">{visualStrategy.fingerprint.metaphorType || visualStrategy.concept.coreMessage}</div></div>
-                            <div><span className="text-gray-500 uppercase tracking-wider">Mode</span><div className="text-white font-black uppercase">{visualStrategy.resolvedDesignMode.replaceAll("_", " ")}</div></div>
+                            <div><span className="text-gray-500 uppercase tracking-wider">Mode & Subject</span><div className="text-white font-black uppercase">{visualStrategy.resolvedDesignMode.replaceAll("_", " ")}{visualStrategy.subjectStrategy ? ` · ${visualStrategy.subjectStrategy.replaceAll("_", " ")}` : ""}</div></div>
                             <div><span className="text-gray-500 uppercase tracking-wider">Impact</span><div className="text-emerald-300 font-black">{visualStrategy.visualImpact}</div></div>
                         </div>
                     )}
@@ -211,17 +225,34 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
                         {promptOpen ? "Hide" : "Show"} Design Strategy
                     </button>
                     {promptOpen && (
-                        <div className="mt-2 bg-gray-950 border border-gray-800 rounded-xl p-3 text-[11px] text-gray-300 leading-relaxed relative">
+                        <div className="mt-2 bg-gray-950 border border-gray-800 rounded-xl p-3 text-[11px] text-gray-300 leading-relaxed relative space-y-3">
                             {visualStrategy && (
-                                <div className="mb-3 grid grid-cols-2 gap-2 border-b border-gray-800 pb-3 font-sans text-[10px] uppercase tracking-wider text-gray-500">
-                                    <div>Thumbnail <span className="text-white font-black">{visualStrategy.quality.thumbnailLegibility}</span></div>
-                                    <div>Reinforcement <span className="text-white font-black">{visualStrategy.quality.sloganReinforcement}</span></div>
-                                    <div>Originality <span className="text-white font-black">{visualStrategy.quality.visualOriginality}</span></div>
-                                    <div>Printability <span className="text-white font-black">{visualStrategy.quality.printability}</span></div>
-                                    <div>Complexity <span className="text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</span></div>
-                                    <div>Quality Gate <span className={visualStrategy.qualityGatePassed ? "text-emerald-300 font-black" : "text-amber-300 font-black"}>{visualStrategy.qualityGatePassed ? "Passed" : "Review"}</span></div>
-                                    <div>Mode compliance <span className="text-white font-black">{visualStrategy.modeCompliance.modeComplianceScore}</span></div>
-                                </div>
+                                <>
+                                    <div className="grid grid-cols-2 gap-2 border-b border-gray-800 pb-3 font-sans text-[10px] uppercase tracking-wider text-gray-500">
+                                        <div>Thumbnail <span className="text-white font-black">{visualStrategy.quality.thumbnailLegibility}</span></div>
+                                        <div>Reinforcement <span className="text-white font-black">{visualStrategy.quality.sloganReinforcement}</span></div>
+                                        <div>Originality <span className="text-white font-black">{visualStrategy.quality.visualOriginality}</span></div>
+                                        <div>Printability <span className="text-white font-black">{visualStrategy.quality.printability}</span></div>
+                                        <div>Complexity <span className="text-white font-black">{visualStrategy.complexity.supportingDetailLevel}</span></div>
+                                        <div>Quality Gate <span className={visualStrategy.qualityGatePassed ? "text-emerald-300 font-black" : "text-amber-300 font-black"}>{visualStrategy.qualityGatePassed ? "Passed" : "Review"}</span></div>
+                                        <div>Mode compliance <span className="text-white font-black">{visualStrategy.modeCompliance.modeComplianceScore}</span></div>
+                                    </div>
+                                    {visualStrategy.subjectDecision && (
+                                        <div className="border-b border-gray-800 pb-3 text-[10px]">
+                                            <div className="text-purple-300 font-bold uppercase tracking-wider mb-1">
+                                                Subject Strategy: {visualStrategy.subjectStrategy?.replaceAll("_", " ")} ({Math.round((visualStrategy.subjectDecision.confidence || 0) * 100)}% confidence)
+                                            </div>
+                                            <div className="text-gray-300 italic mb-1">{visualStrategy.subjectDecision.reason}</div>
+                                            {Array.isArray(visualStrategy.subjectDecision.evidence) && visualStrategy.subjectDecision.evidence.length > 0 && (
+                                                <div className="space-y-0.5 mt-1 text-gray-400">
+                                                    {visualStrategy.subjectDecision.evidence.map((ev, idx) => (
+                                                        <div key={idx}>• {ev}</div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </>
                             )}
                             <div className="font-mono whitespace-pre-wrap">{imagePrompt}</div>
                             <button
@@ -236,7 +267,6 @@ function SloganCard({ entry, imagePrompt, visualStrategy }: { entry: RankedSloga
                     )}
                 </div>
             )}
-
         </div>
     );
 }
@@ -247,6 +277,7 @@ export default function DesignStudioPage() {
     const [audience, setAudience] = useState("");
     const [style, setStyle] = useState("Vintage Distressed");
     const [designMode, setDesignMode] = useState<DesignMode>("AUTO");
+    const [subjectOverride, setSubjectOverride] = useState<"AUTO" | "NO_PERSON" | "INCLUDE_PERSON">("AUTO");
     const [platform, setPlatform] = useState("amazon");
     const [result, setResult] = useState<any | null>(null);
 
@@ -345,6 +376,7 @@ export default function DesignStudioPage() {
             style,
             platform,
             designMode,
+            subjectOverride,
         }) as Record<string, unknown> | null;
         if (data) setResult((current: any) => ({ ...current, ...data }));
     };
@@ -404,11 +436,22 @@ export default function DesignStudioPage() {
                             </button>
                         ))}
                     </div>
-                    {designMode === "AUTO" && Object.values(visualStrategyMap)[0] && (
-                        <p className="mt-2 text-[11px] text-purple-200">
-                            Auto chose <span className="font-black">{Object.values(visualStrategyMap)[0].resolvedDesignMode.replaceAll("_", " ")}</span> for the first concept · {Object.values(visualStrategyMap)[0].designModeDecision.rationale}
-                        </p>
-                    )}
+                </div>
+
+                <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Subject Preference</label>
+                    <div className="flex flex-wrap gap-2">
+                        {SUBJECT_OVERRIDES.map((sub) => (
+                            <button
+                                key={sub.value}
+                                type="button"
+                                onClick={() => setSubjectOverride(sub.value)}
+                                className={`text-xs font-bold py-1.5 px-3 rounded-full border transition-colors ${subjectOverride === sub.value ? "bg-pink-500/20 border-pink-500/60 text-pink-300" : "bg-gray-100/5 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500"}`}
+                            >
+                                {sub.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Style quick-picks */}

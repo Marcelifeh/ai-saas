@@ -43,7 +43,7 @@ export async function POST(req: Request): Promise<Response> {
                 const userId =
                     (session.metadata?.userId) ||
                     (session.client_reference_id);
-                const plan = session.metadata?.plan;
+                const plan = session.metadata?.planKey || session.metadata?.plan;
                 if (!plan) break;
 
                 if (!userId) break;
@@ -76,7 +76,7 @@ export async function POST(req: Request): Promise<Response> {
             case "customer.subscription.updated": {
                 const subscription = event.data.object;
                 const userId = (subscription.metadata?.userId) || undefined;
-                const plan = subscription.metadata?.plan || "pro";
+                const plan = subscription.metadata?.planKey || subscription.metadata?.plan || "pro";
 
                 if (!userId) break;
 

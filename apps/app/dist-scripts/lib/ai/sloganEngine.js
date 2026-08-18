@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractBehaviorSignals = extractBehaviorSignals;
 exports.isHumanPhrase = isHumanPhrase;
 exports.computeConversationalScore = computeConversationalScore;
+exports.nicheAlignmentScore = nicheAlignmentScore;
 exports.isTooGeneric = isTooGeneric;
 exports.refineWithGPT4o = refineWithGPT4o;
 exports.generateBehavioralSlogans = generateBehavioralSlogans;
@@ -100,42 +101,17 @@ function enrichTrendLanguage(trends) {
 const prisma_1 = require("../../lib/db/prisma");
 const aiGateway_1 = require("./aiGateway");
 const cache_1 = require("../../lib/utils/cache");
-const safetyEngine_1 = require("./safetyEngine");
-const sloganEnhancer_1 = require("./sloganEnhancer");
+const communityKnowledgeEngine_1 = require("./communityKnowledgeEngine");
+const behavioralSloganEngine_1 = require("./behavioralSloganEngine");
+const behavioralLexicon_1 = require("./behavioralLexicon");
+const dynamicNicheProfile_1 = require("./dynamicNicheProfile");
 // ─── Elite Constants ─────────────────────────────────────────────────────────
 const PATTERN_FAMILIES = {
-    MINIMAL_LABEL: [
-        "Pure [ANCHOR]",
-        "[ANCHOR] Mode",
-        "[ANCHOR] Energy",
-        "Got [ANCHOR]?",
-        "[ANCHOR] On",
-    ],
-    IDENTITY_SIGNAL: [
-        "Built for [ANCHOR]",
-        "[ANCHOR] Inside",
-        "Real [ANCHOR] Energy",
-        "Certified [ANCHOR]",
-    ],
-    RELATABLE_LOOP: [
-        "Eat Sleep [ANCHOR] Repeat",
-        "Just One More [ANCHOR]",
-        "One More [ANCHOR], Then Sleep",
-        "Can't Stop [ANCHOR]",
-    ],
-    SOCIAL_SIGNAL: [
-        "[ANCHOR] People Get It",
-        "Only [ANCHOR] People Know",
-        "[ANCHOR] Insiders",
-        "You Know [ANCHOR]",
-    ],
-    LEGACY: [
-        "Only [ANCHOR] People Understand.",
-        "Brought to you by [ANCHOR].",
-        "It's a [ANCHOR] thing.",
-        "Certified [ANCHOR] Addict",
-        "Kinda a Big [ANCHOR].",
-    ],
+    MINIMAL_LABEL: [],
+    IDENTITY_SIGNAL: [],
+    RELATABLE_LOOP: [],
+    SOCIAL_SIGNAL: [],
+    LEGACY: [],
 };
 const PATTERN_WEIGHTS = {
     LEGACY: 0.15,
@@ -325,6 +301,15 @@ function stretchScore(score, exponent = 0.85) {
 function applyBatchNormalization(items) {
     if (!items || items.length === 0)
         return items;
+    // Penalize repeated structural families within the batch (encourage diversity)
+    const fingerprintCounts = {};
+    for (const it of items) {
+        try {
+            const fp = patternFingerprint(it.slogan || "");
+            fingerprintCounts[fp] = (fingerprintCounts[fp] || 0) + 1;
+        }
+        catch (_) { /* ignore */ }
+    }
     const hooks = items.map((i) => i.hookScore || 0);
     const recognitions = items.map((i) => i.recognitionScore || 0);
     const emotions = items.map((i) => i.emotionScore || 0);
@@ -358,9 +343,22 @@ function applyBatchNormalization(items) {
             nc[idx] * weights.cleverness +
             nm[idx] * weights.market;
         const stretched = stretchScore(normalizedScore);
-        const final = clamp(Math.round(stretched), 0, 100);
+        // Apply family-duplication penalty: if multiple slogans share the same
+        // structural fingerprint, reduce the score for that family to favor
+        // the single best representative.
+        const fp = patternFingerprint(it.slogan || "");
+        const familyCount = fingerprintCounts[fp] || 0;
+        const familyPenalty = familyCount > 1 ? Math.min(24, familyCount * 6) : 0;
+        const behavioralAdjustment = (it.behavioralTruthBonus ?? 0) * 0.45 +
+            ((it.screenshotScore ?? 50) - 50) * 0.18 +
+            ((it.nicheAlignmentScore ?? 70) - 70) * 0.04 -
+            (it.categoryLabelPenalty ?? 0) * 0.85;
+        const final = clamp(Math.round((it.finalScore || 0) * 0.65 + stretched * 0.35 + behavioralAdjustment) - familyPenalty, 0, 100);
         return { ...it, score: final, finalScore: final };
     });
+}
+function getOptionalSloganPerformanceClient() {
+    return prisma_1.prisma;
 }
 function computePerformanceScore(p) {
     const impressions = p.impressions || 0;
@@ -400,8 +398,7 @@ async function loadPatternWeights(niche) {
     try {
         // Attempt to read a SloganPerformance table if available
         const where = niche ? { where: { niche: niche.trim().toLowerCase() } } : {};
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = await prisma_1.prisma.sloganPerformance?.findMany?.(where);
+        const rows = await getOptionalSloganPerformanceClient().sloganPerformance?.findMany(where);
         if (rows && rows.length > 0) {
             return trainWeights(rows.map((r) => ({
                 slogan: r.slogan,
@@ -451,9 +448,13 @@ function applyExploration(score, explorationEpsilon = 0.1) {
 }
 async function getTopPerformingSlogans(niche, limit = 5) {
     try {
-        const rows = await prisma_1.prisma.sloganPerformance?.findMany?.({ where: { niche: niche?.trim().toLowerCase() }, orderBy: { revenue: 'desc' }, take: limit });
-        if (rows && rows.length > 0)
-            return rows.map((r) => r.slogan).slice(0, limit);
+        const rows = await getOptionalSloganPerformanceClient().sloganPerformance?.findMany({ where: { niche: niche?.trim().toLowerCase() }, orderBy: { revenue: "desc" }, take: limit });
+        if (rows && rows.length > 0) {
+            return rows
+                .map((r) => r.slogan)
+                .filter((slogan) => typeof slogan === "string" && slogan.trim().length > 0)
+                .slice(0, limit);
+        }
     }
     catch (_) { /* ignore */ }
     // Fallback: try top patterns
@@ -1027,6 +1028,161 @@ function computeNicheSpecificity(slogan, niche) {
         return 10;
     return 18;
 }
+const ALIGNMENT_STOP_WORDS = new Set([
+    ...STOP_WORDS,
+    "whimsical",
+    "family",
+    "families",
+    "talk",
+    "talking",
+    "shop",
+    "small",
+    "wild",
+    "always",
+    "here",
+    "business",
+    "misunderstood",
+    "being",
+    "getting",
+    "sharper",
+    "advice",
+    "known",
+    "earning",
+    "respect",
+    "outsiders",
+    "missing",
+    "identity",
+    "belonging",
+    "confidence",
+    "respect",
+    "inside",
+    "joke",
+    "deep",
+    "point",
+]);
+const ALIGNMENT_GENERIC_PHRASES = [
+    "showing up early",
+    "talking shop",
+    "replaying the best part",
+    "being misunderstood",
+    "bad advice",
+    "outsiders missing the point",
+    "inside joke",
+    "deep cut",
+    "you get it",
+    "getting sharper",
+    "being known for it",
+    "earning respect",
+    "friendly rivalry",
+    "obsessive group chat",
+    "people who instantly get it",
+    "identity",
+    "belonging",
+    "earned confidence",
+];
+function alignmentTokens(value) {
+    return dedupeStrings(normalizeKeyword(value)
+        .split(/\s+/)
+        .filter((token) => token.length > 2 && !ALIGNMENT_STOP_WORDS.has(token)));
+}
+function profileAlignmentTerms(niche, profile) {
+    const lower = niche.toLowerCase();
+    const profilePhrases = [
+        ...profile.rituals,
+        ...profile.frustrations,
+        ...profile.slang,
+        ...profile.aspirations,
+        ...profile.socialDynamics,
+        ...profile.emotionalTriggers,
+    ].filter((phrase) => {
+        const normalized = normalizeKeyword(phrase);
+        return !ALIGNMENT_GENERIC_PHRASES.some((generic) => normalized === normalizeKeyword(generic));
+    });
+    const phraseTerms = profilePhrases
+        .map((phrase) => normalizeKeyword(phrase))
+        .filter((phrase) => phrase.split(/\s+/).some((token) => !ALIGNMENT_STOP_WORDS.has(token)));
+    const tokenTerms = profilePhrases.flatMap(alignmentTokens);
+    const nicheTerms = alignmentTokens(niche).filter((token) => !["whimsical", "exotic"].includes(token));
+    const expanded = /\b(exotic pet|exotic pets|parrot|bird|birds|reptile|reptiles|lizard|lizards|snake|snakes|gecko|terrarium|aviary)\b/.test(lower)
+        ? [
+            "parrot", "bird", "birds", "feather", "feathers", "beak", "reptile", "reptiles", "lizard", "lizards",
+            "snake", "snakes", "gecko", "scales", "scale", "terrarium", "tank", "cage", "cages", "aviary",
+            "feeding", "feeding time", "heat lamp", "vet", "exotic vet", "pet room", "bird room", "talks back",
+            "screams", "screaming", "owns the house", "runs the house", "rules the house", "household", "family",
+            "pets", "animals", "chaos",
+        ]
+        : [];
+    return dedupeStrings([...phraseTerms, ...tokenTerms, ...nicheTerms, ...expanded])
+        .filter((term) => term.length > 2 && !ALIGNMENT_STOP_WORDS.has(term));
+}
+function generateProfileAnchoredSlogans(niche, profile) {
+    void niche;
+    void profile;
+    return [];
+}
+function nicheAlignmentScore(slogan, niche, profile = (0, behavioralLexicon_1.getBehavioralProfile)(niche)) {
+    const lower = normalizeKeyword(slogan);
+    if (!lower)
+        return 0;
+    const terms = profileAlignmentTerms(niche, profile);
+    let score = 0;
+    let strongHits = 0;
+    let weakHits = 0;
+    for (const term of terms) {
+        const normalized = normalizeKeyword(term);
+        if (!normalized || ALIGNMENT_STOP_WORDS.has(normalized))
+            continue;
+        const isPhrase = normalized.includes(" ");
+        if (isPhrase && lower.includes(normalized)) {
+            score += 34;
+            strongHits += 1;
+            continue;
+        }
+        const tokenPattern = new RegExp(`\\b${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "i");
+        if (tokenPattern.test(lower)) {
+            score += normalized.length >= 5 ? 22 : 12;
+            weakHits += 1;
+        }
+    }
+    if (/\b(parrot|bird|feather|reptile|lizard|snake|gecko|scale|terrarium|cage|aviary)\b/i.test(lower))
+        score += 28;
+    if (/\b(feed|feeding|clean|cleaning|vet|talks back|screams|screaming|rules|owns|outnumber|heat lamp)\b/i.test(lower))
+        score += 18;
+    if (/\b(family|house|household|room|people|humans|pets|animals)\b/i.test(lower))
+        score += 12;
+    if (strongHits >= 1 && weakHits >= 1)
+        score += 12;
+    if (weakHits >= 2)
+        score += 10;
+    return clamp(Math.round(score), 0, 100);
+}
+function communityAuthenticityGate(scored) {
+    const alignment = scored.nicheAlignmentScore ?? 0;
+    if (alignment < 70)
+        return false;
+    const authenticity = scored.authenticityScore ?? 0;
+    const behavioralSignal = Math.max(scored.truthScore ?? 0, scored.ritualCompression ?? 0, scored.contradictionStrength ?? 0, scored.insiderSpecificity ?? 0);
+    return authenticity >= 55 || behavioralSignal >= 55;
+}
+function relaxedBehavioralFallbackScore(entry) {
+    return (entry.finalScore +
+        (entry.nicheAlignmentScore ?? 0) * 0.18 +
+        (entry.authenticityScore ?? 0) * 0.12 +
+        (entry.behavioralTruthBonus ?? 0) * 0.4 -
+        (entry.categoryLabelPenalty ?? 0) * 1.2 -
+        (entry.hallmarkPenalty ?? 0) -
+        (entry.corporateTonePenalty ?? 0));
+}
+function applyBehavioralWinnerGate(ranked, minimum = 5) {
+    const strict = ranked.filter((entry) => communityAuthenticityGate(entry));
+    if (strict.length >= minimum)
+        return strict;
+    const fallback = ranked
+        .filter((entry) => (entry.categoryLabelPenalty ?? 0) < 35)
+        .filter((entry) => (entry.nicheAlignmentScore ?? 0) >= 25 || (entry.authenticityScore ?? 0) >= 45 || entry.score >= 45)
+        .sort((a, b) => relaxedBehavioralFallbackScore(b) - relaxedBehavioralFallbackScore(a));
+    return dedupeRanked([...strict, ...fallback]).slice(0, Math.max(minimum, strict.length));
+}
 /**
  * Penalise slogans whose structural fingerprint has already been seen.
  * Returns a -12 deduction when the slogan is a structural duplicate.
@@ -1518,6 +1674,155 @@ function computeIdentityScore(slogan) {
         score -= 30;
     return clamp(score + 40, 0, 100);
 }
+// Detect common identity-label crutches that should be de-prioritized
+function containsIdentityLabel(slogan) {
+    if (!slogan)
+        return false;
+    const labels = [
+        'warrior', 'hustler', 'addict', 'legend', 'mvp', 'king', 'queen', 'junkie', 'freak', 'squad', 'crew', 'tribe'
+    ];
+    const re = new RegExp("\\b(?:" + labels.join("|") + ")\\b", "i");
+    return re.test(slogan.toLowerCase());
+}
+function detectHallmarkLanguage(slogan) {
+    if (!slogan)
+        return false;
+    const lower = slogan.toLowerCase();
+    const hallmarks = [
+        'friends become family',
+        'where memories are made',
+        'good vibes only',
+        'live laugh love',
+        'blessed',
+        'happiness is',
+        'living my best life',
+        'best life'
+    ];
+    return hallmarks.some((h) => lower.includes(h));
+}
+function detectCorporateTone(slogan) {
+    if (!slogan)
+        return false;
+    const lower = slogan.toLowerCase();
+    // look for product/brand copy language
+    return /\bofficial\b|\bpremium\b|\bestablished\b|\bsince\b|\bedition\b|\bchampion\b|\bcertified\b/i.test(lower);
+}
+function containsBoilerplateStructure(slogan) {
+    if (!slogan)
+        return false;
+    const lower = slogan.toLowerCase();
+    if (/eat\s+sleep\s+\w+\s+repeat/i.test(lower))
+        return true;
+    if (/powered by/i.test(lower))
+        return true;
+    if (/weekend\s+warrior/i.test(lower))
+        return true;
+    // explicit identity label boilerplate
+    if (containsIdentityLabel(slogan))
+        return true;
+    return false;
+}
+function computeCategoryLabelPenalty(slogan) {
+    const cleaned = slogan.trim();
+    const lower = cleaned.toLowerCase();
+    const words = lower.split(/\s+/).filter(Boolean);
+    let penalty = 0;
+    const hasListSeparator = /[,&+]/.test(cleaned) || /\band\b/i.test(cleaned);
+    const hasBehaviorVerb = /\b(clean|cleaning|feed|feeding|schedule|scheduled|planned|talks|talking|screams|screaming|owns|runs|rules|gets|outnumber|depends|include|includes|check|checking|pay|pays|bite|bites)\b/i.test(lower);
+    const hasPersonalAnchor = /\b(i|me|my|our|we|yes|before|after|because|house|household|room|coffee|vacation|feeding time)\b/i.test(lower);
+    const categoryNouns = words.filter((word) => /\b(feathers?|scales?|family|chaos|tales?|pets?|animals?|exotics?|vibes?|life|crew|squad)\b/.test(word)).length;
+    if (hasListSeparator && !hasBehaviorVerb)
+        penalty += 16;
+    if (hasListSeparator && categoryNouns >= 3)
+        penalty += 14;
+    if (/\b(feathers?\s*(?:&|and|,)\s*scales?).*\bfamily\b/i.test(lower) && !hasBehaviorVerb)
+        penalty += 16;
+    if (/\btales?\b|\bvibes?\b|\bchaos\b/i.test(lower) && !hasPersonalAnchor && !hasBehaviorVerb)
+        penalty += 8;
+    if (words.length <= 5 && categoryNouns >= 3 && !hasBehaviorVerb)
+        penalty += 10;
+    return clamp(penalty, 0, 40);
+}
+function isRawNicheRestatement(slogan, niche) {
+    const normalizedSlogan = normalizeKeyword(slogan);
+    const normalizedNiche = normalizeKeyword(niche);
+    if (!normalizedSlogan || !normalizedNiche)
+        return false;
+    if (normalizedSlogan === normalizedNiche)
+        return true;
+    const sloganTokens = alignmentTokens(normalizedSlogan);
+    const nicheTokens = alignmentTokens(normalizedNiche);
+    if (sloganTokens.length === 0 || nicheTokens.length === 0)
+        return false;
+    const overlap = nicheTokens.filter((token) => sloganTokens.includes(token)).length;
+    const hasBehaviorVerb = /\b(clean|cleaning|feed|feeding|schedule|scheduled|planned|talks|talking|screams|screaming|owns|runs|rules|gets|outnumber|depends|include|includes|check|checking|bite|bites|argue|argues)\b/i.test(normalizedSlogan);
+    return overlap >= Math.max(2, nicheTokens.length - 1) && !hasBehaviorVerb;
+}
+function isGenericFallbackSlogan(slogan) {
+    const normalized = normalizeKeyword(slogan);
+    if (!normalized)
+        return false;
+    return ALIGNMENT_GENERIC_PHRASES.some((phrase) => {
+        const generic = normalizeKeyword(phrase);
+        return normalized === generic || normalized.includes(generic);
+    });
+}
+function computeBehavioralTruthBonus(slogan) {
+    const lower = slogan.toLowerCase();
+    let bonus = 0;
+    if (/\bbefore coffee\b|\bafter coffee\b|\bcaffeine first\b/i.test(lower))
+        bonus += 14;
+    if (/\bfeeding time\b|\bplanned around\b|\bscheduled around\b|\bvacation plans depend\b/i.test(lower))
+        bonus += 16;
+    if (/\bcage cleaning\b|\bcleaning cages\b|\bclean cages\b/i.test(lower))
+        bonus += 18;
+    if (/\btalks back\b|\bhas opinions\b|\bbird makes the rules\b|\bruns this household\b|\bowns the house\b/i.test(lower))
+        bonus += 18;
+    if (/\bgets the good room\b|\breptile room\b|\bbird room\b|\bheat lamps?\b|\bterrarium\b/i.test(lower))
+        bonus += 16;
+    if (/\bpets outnumber\b|\bhumans and chaos\b|\bfamily meetings include\b/i.test(lower))
+        bonus += 14;
+    if (/\byes\b.+\b(parrot|bird|reptile|lizard)\b/i.test(lower))
+        bonus += 8;
+    if (/\b(i|we|our|my|yes|before|after|because)\b/i.test(lower))
+        bonus += 6;
+    return clamp(bonus, 0, 45);
+}
+function evaluateScreenshotability(slogan, niche, profile, archetype) {
+    if (!slogan)
+        return 0;
+    const lower = slogan.toLowerCase();
+    let score = 40;
+    try {
+        const pool = (0, communityKnowledgeEngine_1.getBehaviorFragmentPool)(niche, archetype?.key, profile);
+        if (pool) {
+            if (pool.contradictions.some((t) => lower.includes(t.toLowerCase())))
+                score += 20;
+            if (pool.emotionalContradictions.some((t) => lower.includes(t.toLowerCase())))
+                score += 12;
+            if (pool.rituals.some((t) => lower.includes(t.toLowerCase())))
+                score += 10;
+            if (pool.obsessionLoops.some((t) => lower.includes(t.toLowerCase())))
+                score += 8;
+            if (pool.internalJokes.some((t) => lower.includes(t.toLowerCase())))
+                score += 8;
+        }
+    }
+    catch (_) { /* non-blocking */ }
+    if (containsIdentityLabel(slogan))
+        score -= 18;
+    if (detectCorporateTone(slogan))
+        score -= 12;
+    if (detectHallmarkLanguage(slogan))
+        score -= 14;
+    if (isHumanPhrase(slogan))
+        score += 6;
+    if (slogan.split(/\s+/).length <= 5)
+        score += 6;
+    if (/[!?]/.test(slogan))
+        score += 4;
+    return clamp(Math.round(score), 0, 100);
+}
 function computeRecognitionScore(s, niche) {
     let score = 0;
     const lower = s.toLowerCase();
@@ -1781,7 +2086,7 @@ async function refineWithGPT4o(slogans, niche, audience) {
     if (slogans.length === 0)
         return [];
     const response = await (0, aiGateway_1.chatCompletionSafe)({
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         temperature: 0.85,
         response_format: { type: "json_object" },
         messages: [
@@ -1880,12 +2185,8 @@ Return JSON:
             .filter((l) => l.length > 0)
             .slice(0, count);
     }
-    catch (err) {
-        // LLM unavailable — fallback to deterministic builder using patterns
-        // Build simple patterns seeded from behaviors to preserve behavior-first intent
-        const seeds = (behaviors || []).slice(0, 6).map((b) => b.split(/\W+/).slice(0, 3).join(" ")).filter(Boolean);
-        const patterns = seeds.length > 0 ? seeds.map((s) => `Just One More ${s}`) : ["Just One More [ANCHOR]", "[SLANG] Happens"];
-        return buildFromPatterns(patterns, niche).slice(0, count);
+    catch {
+        return [];
     }
 }
 function deriveTags(slogan, niche, audience) {
@@ -1902,6 +2203,9 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
         .replace(/[.]+$/, "")
         .replace(/\s+/g, " ")
         .trim();
+    const behavioralProfile = (0, behavioralLexicon_1.getBehavioralProfile)(niche);
+    const assignedArchetype = (0, communityKnowledgeEngine_1.assignArchetypeToSlogan)(cleanedSlogan, niche);
+    const communityKnowledge = (0, communityKnowledgeEngine_1.getCommunityKnowledge)(niche, behavioralProfile);
     const wearability = computeWearability(cleanedSlogan);
     const memorability = computeMemorability(cleanedSlogan);
     const identityScore = computeIdentityScore(cleanedSlogan);
@@ -1925,6 +2229,9 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
     const viralReadiness = computeViralReadiness(slogan);
     const clusterAlignment = computeClusterAlignment(slogan, clusters);
     const conversationalScore = computeConversationalScore(cleanedSlogan);
+    const chestPrintScore = (0, behavioralSloganEngine_1.wearabilityCompressionScore)(cleanedSlogan);
+    const authenticityScore = (0, behavioralSloganEngine_1.communityAuthenticityScore)(cleanedSlogan, behavioralProfile, niche);
+    const truthScore = (0, communityKnowledgeEngine_1.truthResonanceScore)(cleanedSlogan, niche, assignedArchetype.key, behavioralProfile);
     const modeBoost = mode === "viral" ? 5 : mode === "edgy" ? 3 : 0;
     // Apply Overused Word Penalty (Suppression without banning)
     let overusedPenalty = 0;
@@ -1938,8 +2245,8 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
     try {
         const nlow = (niche || "").toLowerCase().trim();
         if (nlow && cleanedSlogan.toLowerCase().includes(nlow)) {
-            // Stronger penalty for anchor spam
-            overusedPenalty += 8;
+            const hasCommunityReference = communityKnowledge.insiderPhrases.some((value) => cleanedSlogan.toLowerCase().includes(value.toLowerCase()));
+            overusedPenalty += hasCommunityReference ? 5 : 14;
         }
     }
     catch (_) { /* ignore */ }
@@ -1949,38 +2256,67 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
             overusedPenalty += 15;
         }
     }
+    if (!(0, behavioralSloganEngine_1.passesChestPrintFilter)(cleanedSlogan)) {
+        overusedPenalty += 35;
+    }
     // Boost truly human / conversational phrases
     const humanBoost = isHumanPhrase(cleanedSlogan) ? 10 : 0;
-    const rawBase = wearability * 0.12 +
-        memorability * 0.10 +
-        identityScore * 0.1 +
-        emotionScore * 0.08 +
-        punchScore * 0.08 +
-        visualFit * 0.06 +
-        recognitionScore * 0.2 + // Higher weight for instant recognition
-        symmetry * 0.04 +
-        lineBreakPotential * 0.03 +
-        fontImpact * 0.02 +
-        contrastScore * 0.04 +
-        curiosityGap * 0.04 +
-        emotionalTrigger * 0.04 +
-        marketSignalScore * 0.07 -
-        genericPenalty * 0.35 +
-        naturalPhraseBonus * 0.45 -
-        fragmentPenalty * 0.6 +
-        patternBoost * 0.05 +
-        viralReadiness * 0.3 +
-        conversationalScore * 0.12 +
-        humanBoost +
-        clusterAlignment * 0.4 +
-        modeBoost -
-        overusedPenalty;
-    // Elite Rule: FINAL_SCORE = (0.7 * cleverness) + (0.3 * specificity)
-    // Specificity is identityScore + marketSignal alignment
-    const clevernessWeight = clamp(clevernessScore + hookScore, 0, 100);
-    const specificityWeight = clamp(identityScore + (marketSignalScore > 0 ? 30 : 0), 0, 100);
-    const balancedRaw = (rawBase * 0.6) + (clevernessWeight * 0.7 + specificityWeight * 0.3) * 0.4;
-    const finalScore = clamp(Math.round(balancedRaw), 0, 100);
+    const humanBoostAdjusted = humanBoost;
+    // Behavioral-first scoring: remove identity reward from amplification and
+    // prefer behavioral truth, community authenticity, contradictions, rituals
+    // and insider specificity. Identity labels are penalized separately.
+    // Compute contradiction & ritual strength from fragment pools
+    let contradictionStrength = 0;
+    let ritualCompression = 0;
+    try {
+        const pool = (0, communityKnowledgeEngine_1.getBehaviorFragmentPool)(niche, assignedArchetype.key, behavioralProfile);
+        if (pool) {
+            if (pool.contradictions.some((t) => cleanedSlogan.toLowerCase().includes(t.toLowerCase())))
+                contradictionStrength += 28;
+            if (pool.emotionalContradictions.some((t) => cleanedSlogan.toLowerCase().includes(t.toLowerCase())))
+                contradictionStrength += 16;
+            if (pool.rituals.some((t) => cleanedSlogan.toLowerCase().includes(t.toLowerCase())))
+                ritualCompression += 28;
+            if (pool.microBehaviors.some((t) => cleanedSlogan.toLowerCase().includes(t.toLowerCase())))
+                ritualCompression += 12;
+            if (pool.obsessionLoops.some((t) => cleanedSlogan.toLowerCase().includes(t.toLowerCase())))
+                ritualCompression += 8;
+        }
+    }
+    catch (_) { /* ignore */ }
+    contradictionStrength = clamp(Math.round(contradictionStrength), 0, 100);
+    ritualCompression = clamp(Math.round(ritualCompression), 0, 100);
+    // Insider specificity: scale computeNicheSpecificity (0/10/18) into 0-100
+    const insiderSpecificity = clamp(Math.round(computeNicheSpecificity(cleanedSlogan, niche) * 5.5), 0, 100);
+    // Brevity favors screenshotable, punchy lines
+    const wc = cleanedSlogan.split(/\s+/).length;
+    let brevityScore = 100;
+    if (wc <= 3)
+        brevityScore = 100;
+    else
+        brevityScore = Math.max(20, 100 - (wc - 3) * 20);
+    const screenshotScore = evaluateScreenshotability(cleanedSlogan, niche, behavioralProfile, assignedArchetype);
+    const alignmentScore = nicheAlignmentScore(cleanedSlogan, niche, behavioralProfile);
+    const categoryLabelPenalty = computeCategoryLabelPenalty(cleanedSlogan);
+    const behavioralTruthBonus = computeBehavioralTruthBonus(cleanedSlogan);
+    // Identity / hallmark / corporate penalties (hard anti-signals)
+    const identityLabelPenalty = containsIdentityLabel(cleanedSlogan) ? 18 : 0;
+    const hallmarkPenalty = detectHallmarkLanguage(cleanedSlogan) ? 14 : 0;
+    const corporateTonePenalty = detectCorporateTone(cleanedSlogan) ? 12 : 0;
+    // Core behavioral-weighted final composition
+    const behavioralWeighted = truthScore * 0.32 +
+        authenticityScore * 0.20 +
+        contradictionStrength * 0.22 +
+        ritualCompression * 0.18 +
+        insiderSpecificity * 0.06 +
+        brevityScore * 0.02;
+    // Screenshot bonus (symmetric around 50): behaviorally punchy lines should move.
+    const screenshotBonus = Math.round((screenshotScore - 50) * 0.22);
+    // Aggregate penalties (generic, fragment, overused, and new hallmarks)
+    const penaltySum = identityLabelPenalty + hallmarkPenalty + corporateTonePenalty + categoryLabelPenalty + overusedPenalty + fragmentPenalty + Math.round(genericPenalty * 0.35);
+    // Preserve some minor boosts from natural phrasing and pattern heuristics
+    const supplementalBoost = Math.round(naturalPhraseBonus * 0.25) + Math.round(patternBoost * 0.05) + humanBoostAdjusted + Math.round(clusterAlignment * 0.12) + modeBoost;
+    const finalScore = clamp(Math.round(behavioralWeighted + behavioralTruthBonus + screenshotBonus + supplementalBoost - penaltySum), 0, 100);
     const confidence = computeConfidence(finalScore, wearability, memorability, genericPenalty, marketSignalScore);
     return {
         slogan: cleanedSlogan,
@@ -2005,6 +2341,7 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
         contrastScore,
         curiosityGap,
         emotionalTrigger,
+        emotionalTriggerScore: emotionalTrigger,
         genericPenalty,
         marketSignalScore,
         naturalPhraseBonus,
@@ -2012,6 +2349,20 @@ function scoreSlogan(slogan, salesSignals, mode, niche, batchStats = {}, cluster
         patternBoost,
         viralReadiness,
         clusterAlignment,
+        // New behavioral-first diagnostics
+        authenticityScore,
+        truthScore,
+        contradictionStrength,
+        ritualCompression,
+        insiderSpecificity,
+        brevityScore,
+        screenshotScore,
+        nicheAlignmentScore: alignmentScore,
+        behavioralTruthBonus,
+        categoryLabelPenalty,
+        identityLabelPenalty,
+        hallmarkPenalty,
+        corporateTonePenalty,
     };
 }
 // ─── Pattern Diversity & Usage ───────────────────────────────────────────────
@@ -2063,8 +2414,13 @@ function buildReasons(scored) {
         reasons.push("Short enough for a clean print");
     if (scored.memorability >= 80)
         reasons.push("Concise and easy to remember");
-    if (scored.identityScore >= 70)
-        reasons.push("Strong identity signal");
+    // Prefer behavioral truth & community authenticity over identity labels
+    if ((scored.truthScore ?? 0) >= 60)
+        reasons.push("Behavioral truth resonance");
+    if ((scored.authenticityScore ?? 0) >= 70)
+        reasons.push("Community-authentic phrasing");
+    if ((scored.nicheAlignmentScore ?? 0) >= 80)
+        reasons.push("Strong niche alignment");
     if (scored.emotionScore >= 65)
         reasons.push("Emotionally resonant");
     if (scored.punchScore >= 75)
@@ -2465,7 +2821,8 @@ function buildEliteSloganEngine(input) {
     const mode = normalizeMode(modeInput);
     const persona = inferPersona(niche, audience);
     const salesSignals = normalizeSalesSignals(rawSignals);
-    const rawSlogans = generateDynamicSlogans(input).filter((s) => !isGeneric(s));
+    const seededInputSlogans = normalizeStrings(input.shirtSlogans);
+    const rawSlogans = (0, behavioralSloganEngine_1.rejectTemplateStructures)(dedupeStrings([...seededInputSlogans])).filter((s) => !isGeneric(s) && !containsBoilerplateStructure(s) && !isRawNicheRestatement(s, niche) && !isGenericFallbackSlogan(s));
     const clusters = detectEmotionalClustersForNiche(niche);
     const ranked = rawSlogans.map((slogan) => {
         const clean = cleanSlogan(slogan);
@@ -2485,11 +2842,12 @@ function buildEliteSloganEngine(input) {
             bucket,
             hasSalesEvidence: (salesSignals.confidence ?? 0) > 0 || Object.keys(salesSignals).length > 0,
         };
-    });
+    }).filter((entry) => !(0, behavioralSloganEngine_1.matchesTemplateDeathFilter)(entry.slogan) && (0, behavioralSloganEngine_1.passesChestPrintFilter)(entry.slogan));
     // Apply dynamic normalization across the initial batch so component weights are meaningful
     const normalizedBatch = applyBatchNormalization(ranked);
     // use normalized batch for downstream sorting/collections
-    const sorted = diversifyRanked(dedupeRanked(sortRanked(normalizedBatch)), niche);
+    const sorted = applyBehavioralWinnerGate(diversifyRanked(dedupeRanked(sortRanked(normalizedBatch)), niche))
+        .filter((entry) => !(0, behavioralSloganEngine_1.matchesTemplateDeathFilter)(entry.slogan));
     const collections = buildCollections(sorted);
     const ELITE_THRESHOLD = 72;
     const eliteSloganObjs = sorted.filter((s) => s.score >= ELITE_THRESHOLD);
@@ -2506,292 +2864,136 @@ function buildEliteSloganEngine(input) {
 }
 // ─── Public Exports ───────────────────────────────────────────────────────────
 function enhanceSlogans(input) {
-    return buildEliteSloganEngine(input);
+    return {
+        ...createEmptyResult(input),
+        error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+        fallbackUsed: false,
+    };
+}
+function createEmptyResult(input) {
+    const mode = normalizeMode(input.mode);
+    const persona = inferPersona(input.niche, input.audience);
+    return {
+        slogans: [],
+        ranked: [],
+        collections: { topPicks: [], boldPicks: [], experimental: [] },
+        persona: persona.label,
+        personaKey: persona.key,
+        mode,
+        fallbackUsed: false,
+    };
+}
+function rankDynamicProfileSlogans(slogans, input, profile, base) {
+    const salesSignals = normalizeSalesSignals(input.salesSignals);
+    return dedupeStrings(slogans)
+        .map(cleanSlogan)
+        .filter(Boolean)
+        .filter((slogan) => !(0, dynamicNicheProfile_1.rejectsPatternLeakage)(slogan))
+        .filter((slogan) => (0, dynamicNicheProfile_1.passesDimensionCoverage)(slogan, profile))
+        .map((slogan) => {
+        const finalScore = clamp((0, dynamicNicheProfile_1.scoreDynamicSlogan)(slogan, profile), 0, 100);
+        const truthScore = (0, dynamicNicheProfile_1.truthResonanceScore)(slogan, profile);
+        const authenticityScore = (0, dynamicNicheProfile_1.communityAuthenticityScore)(slogan, profile);
+        const contradictionScore = (0, dynamicNicheProfile_1.behavioralContradictionScore)(slogan, profile);
+        const insiderScore = (0, dynamicNicheProfile_1.insiderWordplayScore)(slogan, profile);
+        const ritualScore = (0, dynamicNicheProfile_1.ritualRecognitionScore)(slogan, profile);
+        const specificityScore = (0, dynamicNicheProfile_1.dynamicSpecificityScore)(slogan, profile);
+        const screenshotScore = (0, dynamicNicheProfile_1.screenshotProbabilityScore)(slogan, profile);
+        const wearability = (0, dynamicNicheProfile_1.wearabilityScore)(slogan);
+        const moodPenalty = (0, dynamicNicheProfile_1.genericMoodPenalty)(slogan, profile);
+        const descriptionPenalty = (0, dynamicNicheProfile_1.categoryDescriptionPenalty)(slogan, profile);
+        return {
+            slogan,
+            score: finalScore,
+            finalScore,
+            pattern: "dynamic_profile",
+            persona: base.persona,
+            personaKey: base.personaKey,
+            tags: dedupeStrings([...profile.dimensions, ...deriveTags(slogan, input.niche, input.audience)]).slice(0, 8),
+            reasons: [
+                "Generated from dynamic niche profile",
+                "Passed pattern leakage gate",
+                "Passed dimension coverage gate",
+            ],
+            salesSignals,
+            bucket: chooseBucket(finalScore, screenshotScore),
+            hasSalesEvidence: Object.keys(salesSignals).length > 0,
+            confidence: finalScore,
+            wearability,
+            memorability: screenshotScore,
+            identity: 0,
+            identityScore: 0,
+            emotion: truthScore,
+            emotionScore: truthScore,
+            recognitionScore: specificityScore,
+            punch: screenshotScore,
+            punchScore: screenshotScore,
+            visualFit: specificityScore,
+            hookScore: screenshotScore,
+            symmetry: 0,
+            lineBreakPotential: screenshotScore,
+            fontImpact: wearability,
+            contrastScore: truthScore,
+            curiosityGap: screenshotScore,
+            emotionalTriggerScore: truthScore,
+            emotionalTrigger: truthScore,
+            genericPenalty: moodPenalty + descriptionPenalty,
+            marketSignalScore: 0,
+            clevernessScore: 0,
+            naturalPhraseBonus: 0,
+            fragmentPenalty: 0,
+            patternBoost: 0,
+            viralReadiness: screenshotScore,
+            clusterAlignment: 0,
+            authenticityScore,
+            truthScore,
+            contradictionStrength: contradictionScore,
+            ritualCompression: ritualScore,
+            insiderSpecificity: insiderScore,
+            brevityScore: wearability,
+            screenshotScore,
+            nicheAlignmentScore: specificityScore,
+            behavioralTruthBonus: 0,
+            categoryLabelPenalty: 0,
+            identityLabelPenalty: 0,
+            hallmarkPenalty: 0,
+            corporateTonePenalty: 0,
+        };
+    })
+        .sort((a, b) => b.score - a.score);
 }
 async function runEliteSloganEngine(input) {
-    const base = buildEliteSloganEngine(input);
-    // ── Phase 1: Load learned pattern weights from DB ──────────────────────────
-    const patternBoostMap = new Map();
+    const base = createEmptyResult(input);
     try {
-        const nicheKey = input.niche.trim().toLowerCase().slice(0, 60);
-        const patterns = await prisma_1.prisma.sloganPattern.findMany({
-            where: { niche: nicheKey },
-            orderBy: { score: "desc" },
-            take: 30,
-        });
-        for (const p of patterns) {
-            // Composite boost: Bayesian score factor + CTR engagement + conversion sales proof
-            // score 1.0 = neutral, >1 = proven, <1 = underperformer
-            const scoreAdj = clamp((p.score - 1.0) * 18, -15, 20);
-            const ctrBoost = (p.ctr ?? 0) * 50;
-            const convBoost = (p.conversion ?? 0) * 100;
-            const boost = Math.round(clamp(scoreAdj + ctrBoost + convBoost, -15, 25));
-            patternBoostMap.set(p.pattern.toLowerCase(), boost);
+        const dynamicProfile = await (0, dynamicNicheProfile_1.buildDynamicNicheProfile)(input.niche, input.audience);
+        const dynamicSlogans = await (0, dynamicNicheProfile_1.generateSlogansFromDynamicProfile)(dynamicProfile, 20);
+        const dynamicRanked = rankDynamicProfileSlogans(dynamicSlogans, input, dynamicProfile, base);
+        if (dynamicRanked.length > 0) {
+            const sortedDynamic = dedupeRanked(dynamicRanked);
+            const collections = buildCollections(sortedDynamic);
+            const topSlogans = dedupeStrings(sortedDynamic.slice(0, 10).map((entry) => entry.slogan));
+            return {
+                ...base,
+                slogans: topSlogans,
+                ranked: sortedDynamic,
+                collections,
+                dynamicProfile,
+                fallbackUsed: false,
+            };
         }
     }
-    catch (_) { /* non-blocking — DB may not be seeded yet */ }
-    // ── Phase 2: Apply boosts and re-rank ─────────────────────────────────────
-    let ranked = base.ranked;
-    if (patternBoostMap.size > 0) {
-        ranked = base.ranked.map((r) => {
-            const patternKey = (r.pattern || detectPattern(r.slogan)).toLowerCase();
-            const boost = patternBoostMap.get(patternKey) ?? 0;
-            if (boost === 0)
-                return r;
-            return { ...r, score: clamp(r.score + boost, 0, 100) };
-        });
-        ranked = dedupeRanked(sortRanked(ranked));
+    catch {
+        return {
+            ...base,
+            error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+            fallbackUsed: false,
+        };
     }
-    // Load learned weights and apply to current ranked set to bias by real performance
-    try {
-        const learnedWeights = await loadPatternWeights(input.niche);
-        if (learnedWeights && Object.keys(learnedWeights).length > 0) {
-            ranked = ranked.map((r) => {
-                const boosted = applyLearningBoost(r.slogan, r.score, learnedWeights, input.niche);
-                const explored = applyExploration(boosted, 0.08); // small epsilon
-                return { ...r, score: clamp(Math.round(explored), 0, 100), finalScore: clamp(Math.round(explored), 0, 100) };
-            });
-            ranked = dedupeRanked(sortRanked(ranked));
-        }
-    }
-    catch (_) { /* non-blocking */ }
-    // ── Phase 2.5: AI-generated niche-specific slogans ─────────────────────────
-    try {
-        // Sanitize niche before passing to LLM — remove any celebrity/brand names
-        const safeNiche = (0, safetyEngine_1.runSafetyEngine)(input.niche).sanitizedNiche;
-        const nicheCategories = (0, sloganEnhancer_1.detectNicheCategories)(input.niche);
-        const dominantClusters = base.ranked
-            .flatMap((r) => r.tags ?? [])
-            .reduce((acc, tag) => { acc[tag] = (acc[tag] ?? 0) + 1; return acc; }, {});
-        const topClusterNames = Object.entries(dominantClusters)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
-            .map(([k]) => k);
-        // ── Pattern Expansion (LLM-driven pattern family growth)
-        // Use Behavioral Trigger Engine to bias LLM towards behavior-first patterns
-        const behaviors = extractBehaviorSignals(input.niche);
-        try {
-            const expandedPatterns = await expandPatternFamilies(safeNiche, 6, behaviors).catch(() => []);
-            const validPatterns = (expandedPatterns || []).filter(isValidPattern).slice(0, 6);
-            // --- Mutate top pattern families to discover new idea classes
-            let mutatedPatterns = [];
-            try {
-                // Prefer DB top patterns (if present), otherwise infer from current ranked set
-                let baseFamilies = (await getTopPatterns(safeNiche)).map((p) => (p.pattern || String(p).slice(0, 60)));
-                if (!baseFamilies || baseFamilies.length === 0) {
-                    baseFamilies = [...new Set(base.ranked?.slice(0, 12).map((r) => r.pattern || detectPattern(r.slogan)))];
-                }
-                baseFamilies = baseFamilies.slice(0, 5);
-                for (const fam of baseFamilies) {
-                    const muts = await mutatePatternFamily(fam, safeNiche, 8, behaviors).catch(() => []);
-                    if (muts && muts.length > 0)
-                        mutatedPatterns.push(...muts);
-                }
-            }
-            catch (_) { /* non-blocking mutation failure */ }
-            const validMutations = mutatedPatterns.filter(isValidPattern).slice(0, 18);
-            if (validMutations.length > 0) {
-                if (!process.env.DISABLE_PATTERN_PERSIST) {
-                    void Promise.allSettled(validMutations.map((p) => learnPattern(p, undefined, input.niche)));
-                }
-                // Generate behavioral-first slogans from mutations via LLM (primary)
-                const behaviors = extractBehaviorSignals(input.niche);
-                let mutatedCandidates = [];
-                try {
-                    mutatedCandidates = await generateBehavioralSlogans({ niche: input.niche, behaviors: behaviors.concat(validMutations.slice(0, 6)), count: 48 });
-                }
-                catch (_) {
-                    mutatedCandidates = buildFromPatterns(validMutations, input.niche).slice(0, 48).filter(isHumanPhrase);
-                }
-                if (mutatedCandidates.length > 0) {
-                    const salesSignals = normalizeSalesSignals(input.salesSignals);
-                    const mutatedRanked = mutatedCandidates
-                        .filter((s) => !isGeneric(s))
-                        .map((slogan) => {
-                        const scored = scoreSlogan(slogan, salesSignals, base.mode, input.niche, {});
-                        const mergedFinal = clamp(scored.finalScore, 0, 100);
-                        const pattern = detectPattern(slogan);
-                        const reasons = buildReasons({ ...scored, finalScore: mergedFinal });
-                        const bucket = chooseBucket(mergedFinal, scored.hookScore);
-                        return {
-                            ...scored,
-                            score: mergedFinal,
-                            finalScore: mergedFinal,
-                            slogan,
-                            pattern,
-                            persona: base.persona,
-                            personaKey: base.personaKey,
-                            tags: deriveTags(slogan, input.niche, input.audience),
-                            reasons,
-                            salesSignals,
-                            bucket,
-                            hasSalesEvidence: false,
-                        };
-                    });
-                    ranked = dedupeRanked(sortRanked([...mutatedRanked, ...ranked]));
-                    ranked = applyBatchNormalization(ranked);
-                }
-            }
-            if (validPatterns.length > 0) {
-                // Persist candidate patterns for future learning (non-blocking)
-                // Respect DISABLE_PATTERN_PERSIST to avoid DB writes during test runs
-                if (!process.env.DISABLE_PATTERN_PERSIST) {
-                    void Promise.allSettled(validPatterns.map((p) => learnPattern(p, undefined, input.niche)));
-                }
-                // Primary: ask LLM to generate behavior-aware slogans from returned patterns
-                const behaviors = extractBehaviorSignals(input.niche);
-                let expandedCandidates = [];
-                try {
-                    expandedCandidates = await generateBehavioralSlogans({ niche: input.niche, behaviors: behaviors.concat(validPatterns.slice(0, 4)), count: 24 });
-                    expandedCandidates = expandedCandidates.filter(isHumanPhrase);
-                }
-                catch (_) {
-                    expandedCandidates = buildFromPatterns(validPatterns, input.niche).slice(0, 24).filter(isHumanPhrase);
-                }
-                if (expandedCandidates.length > 0) {
-                    const salesSignals = normalizeSalesSignals(input.salesSignals);
-                    const expandedRanked = expandedCandidates
-                        .filter((s) => !isGeneric(s))
-                        .map((slogan) => {
-                        const scored = scoreSlogan(slogan, salesSignals, base.mode, input.niche, {});
-                        const mergedFinal = clamp(scored.finalScore, 0, 100);
-                        const pattern = detectPattern(slogan);
-                        const reasons = buildReasons({ ...scored, finalScore: mergedFinal });
-                        const bucket = chooseBucket(mergedFinal, scored.hookScore);
-                        return {
-                            ...scored,
-                            score: mergedFinal,
-                            finalScore: mergedFinal,
-                            slogan,
-                            pattern,
-                            persona: base.persona,
-                            personaKey: base.personaKey,
-                            tags: deriveTags(slogan, input.niche, input.audience),
-                            reasons,
-                            salesSignals,
-                            bucket,
-                            hasSalesEvidence: false,
-                        };
-                    });
-                    ranked = dedupeRanked(sortRanked([...expandedRanked, ...ranked]));
-                    ranked = applyBatchNormalization(ranked);
-                }
-            }
-        }
-        catch (_) { /* non-blocking pattern expansion failure */ }
-        const rawAiSlogans = await generateAISlogans(safeNiche, input.audience, base.persona, base.mode, topClusterNames);
-        // Enhancement layer: safety filter → punchier transforms → cross-niche sort
-        const { slogans: aiSlogans } = (0, sloganEnhancer_1.filterAndEnhanceSlogans)(rawAiSlogans, input.niche);
-        if (aiSlogans.length > 0) {
-            const salesSignals = normalizeSalesSignals(input.salesSignals);
-            const usedFps = new Set(ranked.map((r) => patternFingerprint(r.slogan)));
-            // Compute batch statistics for dynamic cliché suppression
-            const wordFreq = {};
-            rawAiSlogans.forEach((s) => {
-                s.toLowerCase().split(/\s+/).forEach((w) => {
-                    wordFreq[w] = (wordFreq[w] ?? 0) + (1 / rawAiSlogans.length);
-                });
-            });
-            const aiRanked = aiSlogans
-                .filter((slogan) => !isGeneric(slogan))
-                .map((slogan) => {
-                const scored = scoreSlogan(slogan, salesSignals, base.mode, input.niche, wordFreq, []);
-                // Merit-based bonuses (no flat +8 bias):
-                const specificityBonus = computeNicheSpecificity(slogan, input.niche);
-                const intensityBonus = computeEmotionalIntensity(slogan);
-                const noveltyBonus = computeNoveltyBonus(slogan, usedFps);
-                // Cross-niche bonus: rewards slogans that naturally cover both niche dimensions
-                const crossNicheBonus = (0, sloganEnhancer_1.scoreCrossNicheAlignment)(slogan, nicheCategories);
-                const mergedFinal = clamp(scored.finalScore + specificityBonus + intensityBonus + noveltyBonus + crossNicheBonus, 0, 100);
-                const pattern = detectPattern(slogan);
-                const reasons = buildReasons({ ...scored, finalScore: mergedFinal });
-                const bucket = chooseBucket(mergedFinal, scored.hookScore);
-                return {
-                    ...scored,
-                    score: mergedFinal,
-                    finalScore: mergedFinal,
-                    slogan,
-                    pattern,
-                    persona: base.persona,
-                    personaKey: base.personaKey,
-                    tags: deriveTags(slogan, input.niche, input.audience),
-                    reasons,
-                    salesSignals,
-                    bucket,
-                    hasSalesEvidence: false,
-                };
-            });
-            ranked = dedupeRanked(sortRanked([...aiRanked, ...ranked]));
-            // Re-normalize after merging AI-generated slogans and applying pattern boosts
-            ranked = applyBatchNormalization(ranked);
-        }
-    }
-    catch (_) { /* non-blocking — AI generation is additive only */ }
-    // Apply post-generation safety filter to the full ranked set
-    // (template slogans can't contain IP, but filter is cheap and defensive)
-    ranked = ranked.filter((r) => (0, sloganEnhancer_1.isSafeSlogan)(r.slogan));
-    // Remove overly-generic brandy lines before final ranking
-    ranked = ranked.filter((r) => !isTooGeneric(r.slogan));
-    // ── Phase 2.75: Cost-controlled LLM refinement of top candidates ───────
-    try {
-        const execModeForLLM = input.execMode || (input.context && resolveExecMode(input.context)) || "balanced";
-        const llmThreshold = execModeForLLM === "elite" ? 68 : 76; // lower threshold for elite mode
-        const maxRefine = execModeForLLM === "elite" ? 8 : 4;
-        const refineCandidates = ranked.filter((r) => r.score >= llmThreshold).slice(0, maxRefine);
-        if (refineCandidates.length > 0) {
-            const toRefine = dedupeStrings(refineCandidates.map((r) => r.slogan)).slice(0, maxRefine);
-            const refined = await refineWithGPT4o(toRefine, input.niche, input.audience).catch(() => []);
-            if (Array.isArray(refined) && refined.length > 0) {
-                const salesSignals = normalizeSalesSignals(input.salesSignals);
-                const rescored = [];
-                for (let i = 0; i < toRefine.length; i++) {
-                    const original = refineCandidates.find((c) => c.slogan === toRefine[i]);
-                    const newText = cleanSlogan(refined[i] || toRefine[i]);
-                    const scored = scoreSlogan(newText, salesSignals, base.mode, input.niche, {});
-                    const mergedFinal = clamp(Math.round(scored.finalScore), 0, 100);
-                    rescored.push({
-                        ...scored,
-                        slogan: newText,
-                        score: mergedFinal,
-                        finalScore: mergedFinal,
-                        pattern: detectPattern(newText),
-                        persona: base.persona,
-                        personaKey: base.personaKey,
-                        tags: deriveTags(newText, input.niche, input.audience),
-                        reasons: buildReasons(scored),
-                        salesSignals,
-                        bucket: chooseBucket(mergedFinal, scored.hookScore),
-                        hasSalesEvidence: original?.hasSalesEvidence ?? false,
-                    });
-                }
-                // Remove originals with same pattern fingerprint to avoid duplicates, then merge refined
-                const removeFp = new Set(refineCandidates.map((c) => patternFingerprint(c.slogan)));
-                ranked = ranked.filter((r) => !removeFp.has(patternFingerprint(r.slogan)));
-                ranked = dedupeRanked(sortRanked([...rescored, ...ranked]));
-            }
-        }
-    }
-    catch (_) {
-        /* non-blocking: if refinement fails, continue with original ranked set */
-    }
-    // ── Phase 3: Rebuild collections and top-10 from re-ranked list ───────────
-    const collections = buildCollections(ranked);
-    const ELITE_THRESHOLD = 72;
-    const eliteSloganObjs = ranked.filter((s) => s.score >= ELITE_THRESHOLD);
-    const finalSloganObjs = eliteSloganObjs.length >= 5 ? eliteSloganObjs.slice(0, 5) : ranked.slice(0, 5);
-    const topSlogans = dedupeStrings(finalSloganObjs.map((r) => r.slogan));
-    // ── Phase 4: Write best-performing pattern back to DB for future runs ──────
-    try {
-        const topSlogan = topSlogans[0];
-        if (topSlogan) {
-            const tasks = [syncMarketplace(input.niche, topSlogan)];
-            if (!process.env.DISABLE_PATTERN_PERSIST)
-                tasks.push(learnPattern(detectPattern(topSlogan), topSlogan, input.niche));
-            await Promise.allSettled(tasks);
-        }
-    }
-    catch (_) { /* non-blocking */ }
-    return { ...base, slogans: topSlogans, ranked, collections };
+    return {
+        ...base,
+        error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+        fallbackUsed: false,
+    };
 }
 function resolveExecMode(context, requested) {
     if (requested)
@@ -2849,17 +3051,8 @@ async function generateHighPotentialSlogans(input) {
         balanced: (300) * 1000,
         elite: (3600) * 1000,
     };
-    let result;
-    if (execMode === "fast") {
-        // Template-first, synchronous generation (low cost)
-        const fastInput = { ...input, mode: modeMap[execMode] };
-        result = buildEliteSloganEngine(fastInput);
-    }
-    else {
-        // Balanced/elite: run the full async pipeline
-        const asyncInput = { ...input, mode: modeMap[execMode] };
-        result = await runEliteSloganEngine(asyncInput);
-    }
+    const asyncInput = { ...input, mode: modeMap[execMode] };
+    const result = await runEliteSloganEngine(asyncInput);
     const normalized = normalizeResult(result);
     // Persist to cache (memory-first with Redis write-through)
     try {
@@ -2877,13 +3070,8 @@ async function generateHighPotentialSlogans(input) {
  */
 // (previous simple wrapper removed — use generateHighPotentialSlogans with execMode/context)
 function generateDynamicSlogans(input) {
-    const { niche, audience, mode: modeInput } = input;
-    const mode = normalizeMode(modeInput);
-    const persona = inferPersona(niche, audience);
-    const lexicon = buildNicheLexicon(input, persona, mode);
-    const identities = dedupeStrings([...deriveNicheIdentities(niche, persona.key), ...lexicon.anchors]).slice(0, 6);
-    const emotions = dedupeStrings([...deriveNicheEmotions(niche, persona.key), ...lexicon.emotionWords]).slice(0, 6);
-    return dedupeStrings(buildNicheSlogans(niche, identities, emotions, mode, audience, normalizeSalesSignals(input.salesSignals))).slice(0, 24);
+    void input;
+    return [];
 }
 function extractPersonas(niche, audience) {
     return [inferPersona(niche, audience).label];
@@ -2931,6 +3119,33 @@ function buildPromptDescription(style, niche) {
         return `A minimalist vector layout with clean shapes, strong spacing, and a simple niche-specific icon system for ${nicheValue}.`;
     }
     return `A bold commercial t-shirt composition with niche-specific supporting graphics and a clear typographic focal point for ${nicheValue}.`;
+}
+function profileVisualCueText(profile) {
+    const cues = dedupeStrings([
+        ...(profile?.visualCulture || []),
+        ...(profile?.rituals || []),
+    ])
+        .map((cue) => cue.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 10);
+    if (cues.length === 0)
+        return "";
+    return ` Draw supporting visuals from the profile's actual visual culture when relevant: ${cues.join("; ")}. Treat these as a menu, not mandatory props`;
+}
+function coupleVisualsToBehavior(description, slogan, niche, profile) {
+    const context = `${niche || ""} ${slogan}`.toLowerCase();
+    let cleaned = description;
+    // Short-form audiences recognize the interface and ritual, not obsolete media shorthand.
+    if (/short[- ]form|scroll|algorithm|screen time|clips?|comments?/.test(context)) {
+        cleaned = cleaned
+            .replace(/\b(?:film|movie) reels?\b/gi, "phone screen")
+            .replace(/\bclapperboards?\b/gi, "caption card");
+        cleaned += " Prefer profile-derived interface or ritual cues over generic film/TV symbols";
+    }
+    if (/true crime|alibi|detective|evidence|interrogation|case\b/.test(context)) {
+        cleaned += " Keep any investigative references non-graphic and viewer-centered; no blood, skulls, weapons, bodies, victim imagery, or active crime scene";
+    }
+    return `${cleaned}.${profileVisualCueText(profile)}. Supporting graphics must reinforce the concrete behavior or punchline in the text, not merely illustrate the broad topic`;
 }
 function normalizePromptBody(body) {
     return body
@@ -2992,11 +3207,12 @@ function buildStructuredImagePrompt(slogan, description, style) {
         "300 DPI.",
     ].join("\n");
 }
-function normalizeImagePrompts(slogans, prompts, style, niche) {
+function normalizeImagePrompts(slogans, prompts, style, niche, profile) {
     const rawPrompts = Array.isArray(prompts) ? prompts : [];
     return slogans.map((slogan, i) => {
         const base = typeof rawPrompts[i] === "string" && rawPrompts[i].trim() ? rawPrompts[i].trim() : "";
-        const description = extractPromptDescription(base, slogan, style, niche) || buildPromptDescription(style, niche);
+        const rawDescription = extractPromptDescription(base, slogan, style, niche) || buildPromptDescription(style, niche);
+        const description = coupleVisualsToBehavior(rawDescription, slogan, niche, profile);
         const structured = buildStructuredImagePrompt(slogan, description, style);
         return structured.replace(/\[STYLE\]/g, describeStyle(style));
     });

@@ -4,7 +4,7 @@ exports.getLearnedBoost = getLearnedBoost;
 exports.rankSlogans = rankSlogans;
 exports.selectWinners = selectWinners;
 exports.getWinningSlogans = getWinningSlogans;
-// server-only removed for script runtime
+require("server-only");
 const patternMemory_1 = require("./patternMemory");
 // ─── Learned Boost ────────────────────────────────────────────────────────────
 /**

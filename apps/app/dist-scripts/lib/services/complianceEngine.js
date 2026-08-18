@@ -4,7 +4,7 @@ exports.checkCompliance = checkCompliance;
 exports.checkSlogan = checkSlogan;
 exports.checkText = checkText;
 exports.filterSafeSlogans = filterSafeSlogans;
-// server-only removed for script runtime
+require("server-only");
 // Build a word-boundary regex from an exact phrase (handles multi-word phrases too)
 function phrase(p) {
     const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -13,6 +13,54 @@ function phrase(p) {
         return new RegExp(`(?<![\\w])${escaped}(?![\\w])`, "i");
     }
     return new RegExp(`\\b${escaped}\\b`, "i");
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// v1.1 SAFETY ENGINE UTILITIES
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Layer 0: Aggressive Normalization
+ * Strips symbols, accents, extra whitespace for internal comparison.
+ */
+function normalizeText(text) {
+    return text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // Remove accents
+        .replace(/[^a-z0-9\s]/g, "") // Remove symbols
+        .replace(/\s+/g, " ") // Single spaces
+        .trim();
+}
+/**
+ * Layer 2: Fuzzy & Regex Detection
+ * Catches spacing/symbol evasion tactics: "n i k e", "n.i.k.e", "n-i-k-e".
+ * Uses a narrow separator class so it does NOT match subsequences spread
+ * across unrelated words (e.g. "apple" must not match "ADHD Pickleball Players").
+ */
+function fuzzyMatch(text, term) {
+    if (term.length < 4)
+        return false; // Avoid false positives on short words
+    // Only allow single space, dot, dash, underscore or nothing between each char.
+    // This catches "n i k e", "n.i.k.e", "n-i-k-e", "n_i_k_e" but NOT cross-word subsequences.
+    const sep = "[ .\\-_]?";
+    const regexSource = term.split("").join(sep);
+    const regex = new RegExp(`(?<![\\w])${regexSource}(?![\\w])`, "i");
+    return regex.test(text);
+}
+/**
+ * Layer 3: Derivative & Contextual Detection
+ */
+const DERIVATIVE_PATTERNS = [
+    /in the style of/i,
+    /inspired by/i,
+    /like .* (movie|game|show|character)/i,
+    /marvel[-\s]?style/i,
+    /disney[-\s]?vibes/i,
+    /nintend[o0]-?like/i,
+    /-style\b/i,
+    /\bvibe(s)?\b.*\b(disney|marvel|minecraft|nintendo|pokemon|stardew)\b/i,
+];
+function isDerivative(text) {
+    return DERIVATIVE_PATTERNS.some(p => p.test(text));
 }
 // ── TRADEMARKS ───────────────────────────────────────────────────────────────
 const TRADEMARK_RULES = [
@@ -38,6 +86,19 @@ const TRADEMARK_RULES = [
         pattern: phrase(t),
         category: "TRADEMARK",
         reason: `"${t}" is a registered trademark. Using it on a design violates IP policy on all POD platforms.`,
+        platforms: ["all"],
+        blocks: true,
+    })),
+    // Retail & grocery chains
+    ...[
+        "costco", "walmart", "target", "trader joe's", "trader joes",
+        "whole foods", "kroger", "safeway", "sams club", "sam's club",
+        "home depot", "lowes", "best buy", "dollar tree", "dollar general",
+        "walgreens", "cvs", "aldi", "publix", "meijer", "wegmans",
+    ].map((t) => ({
+        pattern: phrase(t),
+        category: "TRADEMARK",
+        reason: `"${t}" is a registered retail trademark. Using it on a POD design will result in immediate listing removal.`,
         platforms: ["all"],
         blocks: true,
     })),
@@ -498,10 +559,34 @@ function checkCompliance(product) {
         ...(Array.isArray(product.amazonListing?.keywords) ? product.amazonListing.keywords : []),
     ];
     const combined = fields.join(" ");
+    // v1.1 SAFETY ENGINE: 3-LAYER CHECK
+    const normalized = normalizeText(combined);
+    // 1. Exact/Hard Block (Existing violations via scanText)
     const violations = scanText(combined);
     const riskLevel = computeRiskLevel(violations);
+    const blocks = violations.filter((v) => v.blocks);
+    let safetyReason = undefined;
+    if (blocks.length > 0)
+        safetyReason = "trademark_exact";
+    // 2. Fuzzy Match (If not already blocked)
+    if (!safetyReason) {
+        // Extract all blocked terms from TRADEMARK and COPYRIGHT rules for fuzzy checking
+        const blockedTerms = [...TRADEMARK_RULES, ...COPYRIGHT_RULES]
+            .map(r => r.pattern.source.replace(/\\b/g, "").replace(/\(\?<!\[\\w\]\)/g, "").replace(/\(\?!\[\\w\]\)/g, "").toLowerCase());
+        for (const term of blockedTerms) {
+            if (term.length > 3 && fuzzyMatch(normalized, term)) {
+                safetyReason = "trademark_fuzzy";
+                break;
+            }
+        }
+    }
+    // 3. Derivative check
+    if (!safetyReason && isDerivative(combined)) {
+        safetyReason = "derivative_content";
+    }
     return {
-        safe: violations.filter((v) => v.blocks).length === 0,
+        safe: violations.filter((v) => v.blocks).length === 0 && !safetyReason,
+        safetyReason,
         riskLevel,
         violations,
         platforms: {

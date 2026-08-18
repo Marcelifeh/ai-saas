@@ -50,6 +50,7 @@ export default function AutopilotPage() {
     const runtimeSeconds = typedResult?.runtimeSeconds ?? null;
     const active = products[selectedIndex] || products[0] || null;
     const signalSources = typedResult?.signalSources ?? [];
+    const isQueued = typedResult?.status === "queued";
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -96,7 +97,7 @@ export default function AutopilotPage() {
                             </div>
                             <div className="flex justify-between items-center text-sm border-t border-gray-800 pt-3">
                                 <span className="text-gray-400">Execution Mode</span>
-                                <span className="text-purple-400 font-medium">Synchronous (Phase 2)</span>
+                                <span className="text-purple-400 font-medium">Queue-aware</span>
                             </div>
                         </div>
                     </div>
@@ -147,17 +148,35 @@ export default function AutopilotPage() {
                         <div className="w-full flex-1 flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <h3 className="text-xl font-bold text-white">Production Run Complete</h3>
+                                    <h3 className="text-xl font-bold text-white">
+                                        {isQueued ? "Production Run Queued" : "Production Run Complete"}
+                                    </h3>
                                     {runtimeSeconds && (
                                         <p className="text-xs text-gray-500 mt-1">Runtime: {runtimeSeconds}s</p>
                                     )}
+                                    {isQueued && typedResult?.jobId && (
+                                        <p className="text-xs text-gray-500 mt-1">Job ID: {typedResult.jobId}</p>
+                                    )}
                                 </div>
-                                <span className="px-4 py-1 rounded-full text-xs font-bold tracking-wide bg-emerald-500/10 text-emerald-400 border border-emerald-500/40">
-                                    {typedResult.productsGenerated ?? total} Generated Listings
+                                <span className={`px-4 py-1 rounded-full text-xs font-bold tracking-wide border ${
+                                    isQueued
+                                        ? "bg-purple-500/10 text-purple-300 border-purple-500/40"
+                                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/40"
+                                }`}>
+                                    {isQueued ? "Queued" : `${typedResult.productsGenerated ?? total} Generated Listings`}
                                 </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                            {isQueued && (
+                                <div className="p-5 rounded-2xl bg-purple-500/10 border border-purple-500/30">
+                                    <h4 className="text-sm font-bold text-purple-200 mb-2">Background Processing</h4>
+                                    <p className="text-sm text-purple-100/80">
+                                        The job has been accepted by the queue. The autopilot worker will pick it up, process it, and update the job status.
+                                    </p>
+                                </div>
+                            )}
+
+                            {!isQueued && <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                                 <div className="p-4 rounded-xl bg-gray-950 border border-gray-800">
                                     <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-1">Total Products</div>
                                     <div className="text-2xl font-black text-white">{total}</div>
@@ -174,9 +193,9 @@ export default function AutopilotPage() {
                                     <div className="text-[10px] font-bold uppercase tracking-widest text-red-300 mb-1">Skipped</div>
                                     <div className="text-2xl font-black text-red-300">{skipCount}</div>
                                 </div>
-                            </div>
+                            </div>}
 
-                            {signalSources.length > 0 && (
+                            {!isQueued && signalSources.length > 0 && (
                                 <div className="p-5 rounded-2xl bg-gray-950 border border-gray-800">
                                     <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                                         <h4 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
@@ -248,7 +267,7 @@ export default function AutopilotPage() {
                                 </div>
                             )}
 
-                            <div className="mt-2">
+                            {!isQueued && <div className="mt-2">
                                 <h4 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
                                     <TrendingUp className="w-4 h-4 text-emerald-400" />
                                     Opportunity Heatmap
@@ -296,9 +315,9 @@ export default function AutopilotPage() {
                                         );
                                     })}
                                 </div>
-                            </div>
+                            </div>}
 
-                            {active && (
+                            {!isQueued && active && (
                                 <div className="mt-6 p-5 rounded-2xl bg-gray-950 border border-gray-800">
                                     <div className="flex flex-wrap justify-between gap-3 mb-3">
                                         <div>

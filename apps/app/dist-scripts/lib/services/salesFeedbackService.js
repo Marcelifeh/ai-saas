@@ -3,8 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.recordMerchOutcomeFeedback = recordMerchOutcomeFeedback;
 exports.getPersistedSalesSignalsForRankedSlogans = getPersistedSalesSignalsForRankedSlogans;
 exports.mergeSalesSignalsInputs = mergeSalesSignalsInputs;
-// server-only removed for script runtime
+require("server-only");
 const prisma_1 = require("../../lib/db/prisma");
+const logger_1 = require("../../lib/utils/logger");
 const FEEDBACK_LOOKBACK_DAYS = 180;
 const EXACT_MATCH_WEIGHT = 0.58;
 const PATTERN_WEIGHT = 0.22;
@@ -224,6 +225,41 @@ function isMissingFeedbackTableError(err) {
         return false;
     return typeof candidate.message === "string" ? candidate.message.includes("MerchOutcomeFeedback") : true;
 }
+function getErrorMessage(err) {
+    if (err instanceof Error)
+        return err.message;
+    if (err && typeof err === "object" && "message" in err) {
+        const message = err.message;
+        if (typeof message === "string")
+            return message;
+    }
+    return String(err);
+}
+function isFeedbackDatabaseUnavailableError(err) {
+    if (!err || typeof err !== "object")
+        return false;
+    const candidate = err;
+    const message = getErrorMessage(err).toLowerCase();
+    if (candidate.code === "P1001" || candidate.code === "P1002" || candidate.code === "P1017")
+        return true;
+    if (candidate.name === "PrismaClientInitializationError" || candidate.name === "PrismaClientKnownRequestError") {
+        return (message.includes("enotfound") ||
+            message.includes("tenant/user") ||
+            message.includes("error querying the database") ||
+            message.includes("can't reach database server") ||
+            message.includes("connection") ||
+            message.includes("timeout"));
+    }
+    return (message.includes("enotfound") ||
+        message.includes("tenant/user") ||
+        message.includes("fatal:") && message.includes("not found"));
+}
+function logFeedbackDatabaseUnavailable(context, err) {
+    const message = getErrorMessage(err)
+        .replace(/postgres(?:ql)?:\/\/[^@\s]+@/gi, "postgres://[redacted]@")
+        .replace(/postgres\.[a-z0-9_-]+/gi, "postgres.[redacted]");
+    (0, logger_1.logError)(context, message);
+}
 /**
  * Fire-and-forget: updates SloganPattern.score for the observed pattern after
  * real sales data arrives. CTR / conversion vs. benchmarks adjusts the score
@@ -289,7 +325,7 @@ async function updatePatternScoreFromFeedback(niche, slogan, pattern, impression
             });
         }
     }
-    catch (_) {
+    catch {
         // Non-blocking — pattern scoring is best-effort
     }
 }
@@ -330,6 +366,10 @@ async function recordMerchOutcomeFeedback(input) {
     catch (err) {
         if (isMissingFeedbackTableError(err)) {
             throw new Error("Sales feedback tables are not available yet. Apply the Prisma schema changes before recording outcomes.");
+        }
+        if (isFeedbackDatabaseUnavailableError(err)) {
+            logFeedbackDatabaseUnavailable("Sales feedback database unavailable while recording outcome", err);
+            throw new Error("Sales feedback database is temporarily unavailable. Please retry shortly.");
         }
         throw err;
     }
@@ -404,7 +444,7 @@ async function getPersistedSalesSignalsForRankedSlogans(params) {
                 for (const row of rows) {
                     if (row.nicheKey !== nicheKey)
                         continue;
-                    if (!row.tags.some((tag) => target.tags.includes(tag)))
+                    if (!row.tags.some((tag) => typeof tag === "string" && target.tags.includes(tag)))
                         continue;
                     appendRow(tagBucket, row);
                 }
@@ -427,7 +467,8 @@ async function getPersistedSalesSignalsForRankedSlogans(params) {
         if (isMissingFeedbackTableError(err)) {
             return {};
         }
-        throw err;
+        logFeedbackDatabaseUnavailable("Sales feedback read skipped; using no learned signals", err);
+        return {};
     }
 }
 function mergeSalesSignalsInputs(existing, learned) {

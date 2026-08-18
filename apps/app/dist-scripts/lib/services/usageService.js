@@ -1,11 +1,10 @@
 "use strict";
-"use server";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.recordAIUsage = recordAIUsage;
 exports.getAIUsageSummaryForUser = getAIUsageSummaryForUser;
 exports.getUserPlanAndLimits = getUserPlanAndLimits;
 exports.ensureUsageAllowed = ensureUsageAllowed;
-// server-only removed for script runtime
+require("server-only");
 const prisma_1 = require("../../lib/db/prisma");
 let usageMetricTableAvailable = true;
 let usageMetricRetryAfter = 0;
@@ -151,6 +150,9 @@ async function handleUsageMetricFailure(err) {
     return true;
 }
 const PLAN_LIMITS = {
+    admin: {
+        totalTokens24h: Number.MAX_SAFE_INTEGER,
+    },
     free: {
         totalTokens24h: 50000,
         perFeature24h: {
@@ -236,6 +238,15 @@ async function getAIUsageSummaryForUser(userId) {
     }
 }
 async function getUserPlan(userId) {
+    // Admin exemption: bypass all limits
+    if (process.env.DISABLE_USAGE_LIMITS === "true")
+        return "admin";
+    const adminIds = (process.env.ADMIN_USER_IDS || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+    if (adminIds.includes(userId))
+        return "admin";
     try {
         const activeSub = await prisma_1.prisma.subscription.findFirst({
             where: { userId, status: "active" },

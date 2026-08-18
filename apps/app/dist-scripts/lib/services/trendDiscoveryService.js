@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runDiscovery = runDiscovery;
-// server-only removed for script runtime
+require("server-only");
 const trendEngine_1 = require("../ai/trendEngine");
 const marketMath_1 = require("../ai/marketMath");
 const aiGateway_1 = require("../ai/aiGateway");

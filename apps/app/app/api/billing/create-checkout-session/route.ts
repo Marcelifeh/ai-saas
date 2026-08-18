@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { withWorkspaceAuth } from "@/lib/api/routeWrappers";
+import { requireWorkspaceMembership, withWorkspaceAuth } from "@/lib/api/routeWrappers";
 import { prisma } from "@/lib/db/prisma";
 import Stripe from "stripe";
+import { randomUUID } from "node:crypto";
 
 function isMissingSubscriptionTableError(err: unknown): boolean {
     if (!err || typeof err !== "object") return false;
@@ -65,7 +66,7 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             body = {};
         }
 
-        const { plan } = (body as { plan?: string }) || {};
+        const { plan, workspaceId: requestedWorkspaceId } = (body as { plan?: string; workspaceId?: string }) || {};
         const planKey = (plan || "pro").toLowerCase();
         if (planKey !== "pro" && planKey !== "pro_yearly") {
             return NextResponse.json(
@@ -78,6 +79,10 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             planKey === "pro_yearly" && proYearlyPriceId
                 ? proYearlyPriceId
                 : proPriceId!;
+        const workspaceId = requestedWorkspaceId || `ws_${userId}`;
+        const membershipError = await requireWorkspaceMembership(userId, workspaceId);
+        if (membershipError) return membershipError;
+        const checkoutAttemptId = randomUUID();
 
         // Try to reuse an existing Stripe customer if we have one
         let existingSub = null;
@@ -128,10 +133,20 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
                 client_reference_id: userId,
                 metadata: {
                     userId,
+                    workspaceId,
                     plan: planKey,
+                    planKey,
+                    checkoutAttemptId,
+                },
+                subscription_data: {
+                    metadata: {
+                        userId,
+                        workspaceId,
+                        planKey,
+                    },
                 },
             },
-            { idempotencyKey: `checkout-${userId}-${planKey}` }
+            { idempotencyKey: `checkout-${userId}-${planKey}-${checkoutAttemptId}` }
         );
 
         // Record or update a pending subscription shell so we can attach metadata later

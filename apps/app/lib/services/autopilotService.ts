@@ -1,6 +1,23 @@
 import "server-only";
 import { bulkDiscover, generateChunk } from "./factoryService";
 import { getWinningSlogans } from "@/lib/engines/learnedScoring";
+import { prisma } from "@/lib/db/prisma";
+
+export type AutopilotRunResult = Awaited<ReturnType<typeof runAutopilotSync>>;
+
+export interface AutopilotQueuedResult {
+    success: true;
+    status: "queued";
+    message: string;
+    jobId: string;
+    workspaceId: string;
+}
+
+type AutopilotNicheCandidate = {
+    executionConfidence?: string;
+    finalScore?: number;
+    opportunityScore?: number;
+};
 
 export async function runAutopilotSync(userId: string | undefined, workspaceId: string) {
     console.log(`[Autopilot Sync] Starting job for workspace: ${workspaceId}`);
@@ -11,15 +28,15 @@ export async function runAutopilotSync(userId: string | undefined, workspaceId: 
 
     // 2. Process synchronously (Phase 2 MVP)
     // Only pass MEDIUM/HIGH executionConfidence niches to generateChunk; cap at 5 to control cost
-    let topNiches = discovery.niches
-        .filter((n: any) => n.executionConfidence !== "LOW")
+    let topNiches: AutopilotNicheCandidate[] = discovery.niches
+        .filter((n: AutopilotNicheCandidate) => n.executionConfidence !== "LOW")
         .slice(0, 5);
 
     // Safety net: if every niche was LOW confidence, use the top-scored niches anyway
     if (topNiches.length === 0 && discovery.niches.length > 0) {
         console.log(`[Autopilot Sync] All niches LOW confidence — falling back to top 3 by score.`);
         topNiches = [...discovery.niches]
-            .sort((a: any, b: any) => (b.finalScore ?? b.opportunityScore ?? 0) - (a.finalScore ?? a.opportunityScore ?? 0))
+            .sort((a: AutopilotNicheCandidate, b: AutopilotNicheCandidate) => (b.finalScore ?? b.opportunityScore ?? 0) - (a.finalScore ?? a.opportunityScore ?? 0))
             .slice(0, 3);
     }
 
@@ -69,15 +86,48 @@ export async function runAutopilotSync(userId: string | undefined, workspaceId: 
     };
 }
 
-export async function enqueueAutopilot(userId: string | undefined, workspaceId: string) {
-    console.log(`[Autopilot Async] Queue mode requested for workspace: ${workspaceId} — running synchronously (BullMQ Phase 3 pending)`);
+export async function enqueueAutopilot(userId: string | undefined, workspaceId: string): Promise<AutopilotQueuedResult> {
+    console.log(`[Autopilot Async] Queueing job for workspace: ${workspaceId}`);
 
-    // Phase 3: wire BullMQ here when workers/autopilot-worker is deployed.
-    // For now, fall through to the sync path so the caller always gets real results.
-    return runAutopilotSync(userId, workspaceId);
+    const { queues } = await import("@trendforge/queue");
+    const job = await queues.autopilot.add(
+        "autopilot-run",
+        { workspaceId, userId },
+        {
+            attempts: 3,
+            backoff: {
+                type: "exponential",
+                delay: 30_000,
+            },
+            removeOnComplete: 100,
+            removeOnFail: 100,
+        },
+    );
+
+    const jobId = String(job.id);
+    await prisma.autopilotJob.upsert({
+        where: { id: jobId },
+        update: {
+            status: "queued",
+            workspaceId,
+        },
+        create: {
+            id: jobId,
+            workspaceId,
+            status: "queued",
+        },
+    });
+
+    return {
+        success: true,
+        status: "queued",
+        message: "Autopilot job queued",
+        jobId,
+        workspaceId,
+    };
 }
 
-export async function runAutopilot(userId: string | undefined, workspaceId: string) {
+export async function runAutopilot(userId: string | undefined, workspaceId: string): Promise<AutopilotRunResult | AutopilotQueuedResult> {
     if (process.env.USE_QUEUE === "true") {
         return enqueueAutopilot(userId, workspaceId);
     }

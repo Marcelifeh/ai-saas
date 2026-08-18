@@ -41,6 +41,12 @@ const { saveOpportunityToWatchlist, updateOpportunityStage } = require("../lib/s
 const { createFactoryRun, retryFactoryJob, refreshFactoryJob } = require("../lib/services/factoryJobService");
 const { computeSloganDeltas } = require("../lib/ai/sloganExplainability");
 const { createDesignCandidate } = require("../lib/ai/designLineage");
+const {
+  evaluateSubjectNecessity,
+  resolveSubjectStrategy,
+  generateCompetingCompositions,
+  SUBJECT_NECESSITY_CALIBRATION,
+} = require("../lib/ai/dynamicDesignPrompt");
 const { createProvenanceSnapshot } = require("../lib/ai/provenance");
 
 async function runEvidenceArchitectureSuite() {
@@ -208,6 +214,144 @@ async function runEvidenceArchitectureSuite() {
   const loadedEvidence = await getNicheEvidence("pickleball");
   const isEndToEndValid = verifyEvidenceIntegrity(loadedEvidence);
   assert(isEndToEndValid, "Full backward lineage verification to ME snapshot PASSES integrity check");
+
+  console.log("\n--- Suite 8: Subject Necessity Engine (Two-Axis Visual Intelligence) ---");
+
+  // Fixture 1: behavior requires visible actor → living subject favored
+  const actorMeaning = {
+    literalSubject: "Not Ghosting My Workout This Year",
+    impliedMeaning: "Athlete maintaining workout consistency",
+    behavioralTruth: "Personal accountability to fitness routine",
+    emotionalPayoff: "Pride in consistency",
+    visualizableAction: "athlete performing heavy workout in gym",
+  };
+  const actorConcept = {
+    coreMessage: "Workout consistency",
+    emotionalTone: ["motivated"],
+    behavioralMoment: ["lifting weights"],
+    visualMetaphors: [],
+    relevantObjects: ["barbell"],
+    environmentalCues: ["gym"],
+    typographyPersonality: ["bold"],
+    compositionIntent: "Focus on athlete action",
+    focalHierarchy: ["athlete lifting weights", "slogan text"],
+    supportingGraphics: [],
+    avoidElements: [],
+    printStrategy: { silhouetteStrength: "strong", detailDensity: "moderate", contrastNeed: "high", viewingDistance: "far" },
+    recommendedDesignMode: { mode: "HYBRID", confidence: 0.8, rationale: "Athlete action + slogan" },
+    modeSignals: { typographyStrength: 0.7, humanActionStrength: 0.85, mascotPotential: 0.1, standaloneIllustrationStrength: 0.4 },
+  };
+  const actorDecision = resolveSubjectStrategy(actorMeaning, actorConcept, "HYBRID");
+  assert(
+    actorDecision.strategy === "HUMAN_REQUIRED" || actorDecision.strategy === "HUMAN_OPTIONAL",
+    `Behavior requires visible actor → human strategy resolved (got ${actorDecision.strategy})`
+  );
+
+  // Fixture 2: object collection carries entire meaning → object-led favored
+  const gothicMeaning = {
+    literalSubject: "Collecting Gothic Novels Like Artifacts",
+    impliedMeaning: "Rare book collection as personal treasure",
+    behavioralTruth: "Gothic novel collection ritual",
+    emotionalPayoff: "Insider aesthetic identity",
+    visualizableAction: "curated shelf of vintage gothic books and artifacts",
+  };
+  const gothicConcept = {
+    coreMessage: "Gothic novel collection",
+    emotionalTone: ["mysterious", "gothic"],
+    behavioralMoment: ["curating bookshelf"],
+    visualMetaphors: ["reliquary display"],
+    relevantObjects: ["gothic book", "skull", "gargoyle", "quill", "rare novel", "archway"],
+    environmentalCues: ["library"],
+    typographyPersonality: ["gothic blackletter"],
+    compositionIntent: "Curated gothic bookshelf display",
+    focalHierarchy: ["gothic bookshelf display", "gothic headline"],
+    supportingGraphics: ["skull", "gargoyle"],
+    avoidElements: [],
+    printStrategy: { silhouetteStrength: "strong isolated arches", detailDensity: "high", contrastNeed: "high", viewingDistance: "medium" },
+    recommendedDesignMode: { mode: "HYBRID", confidence: 0.75, rationale: "Gothic library display" },
+    modeSignals: { typographyStrength: 0.7, humanActionStrength: 0.3, mascotPotential: 0.1, standaloneIllustrationStrength: 0.75 },
+  };
+  const gothicDecision = resolveSubjectStrategy(gothicMeaning, gothicConcept, "HYBRID");
+  assert(
+    gothicDecision.strategy === "OBJECT_LED" || gothicDecision.strategy === "NO_LIVING_SUBJECT",
+    `Object collection carries entire meaning → object-led resolved (got ${gothicDecision.strategy})`
+  );
+
+  // Fixture 3: emotion depends on facial reaction → human/character favored
+  const reactionMeaning = {
+    literalSubject: "My Face When Code Compiles On First Try",
+    impliedMeaning: "Shock and disbelief at instant success",
+    behavioralTruth: "Rare developer triumph",
+    emotionalPayoff: "shocked face reaction",
+    visualizableAction: "developer face expression of pure disbelief",
+  };
+  const reactionConcept = {
+    coreMessage: "Developer reaction",
+    emotionalTone: ["shocked"],
+    behavioralMoment: ["staring at screen"],
+    visualMetaphors: [],
+    relevantObjects: ["laptop"],
+    environmentalCues: [],
+    typographyPersonality: ["sans-serif"],
+    compositionIntent: "Facial reaction focus",
+    focalHierarchy: ["shocked face expression"],
+    supportingGraphics: [],
+    avoidElements: [],
+    printStrategy: { silhouetteStrength: "medium", detailDensity: "low", contrastNeed: "high", viewingDistance: "close" },
+    recommendedDesignMode: { mode: "HYBRID", confidence: 0.8, rationale: "Face reaction" },
+    modeSignals: { typographyStrength: 0.6, humanActionStrength: 0.8, mascotPotential: 0.2, standaloneIllustrationStrength: 0.3 },
+  };
+  const reactionDecision = resolveSubjectStrategy(reactionMeaning, reactionConcept, "HYBRID");
+  assert(
+    reactionDecision.strategy === "HUMAN_REQUIRED" || reactionDecision.strategy === "HUMAN_OPTIONAL",
+    `Emotion depends on facial reaction → human strategy resolved (got ${reactionDecision.strategy})`
+  );
+
+  // Fixture 4: animal is grammatical/semantic actor → creature favored
+  const catMeaning = {
+    literalSubject: "My Cat Judges Every Rep",
+    impliedMeaning: "Pet silently judging owner workout",
+    behavioralTruth: "Domestic pet judgment behavior",
+    emotionalPayoff: "humorous pet connection",
+    visualizableAction: "judgmental cat watching owner exercise",
+  };
+  const catConcept = {
+    coreMessage: "Judging cat",
+    emotionalTone: ["humorous"],
+    behavioralMoment: ["cat staring silently"],
+    visualMetaphors: [],
+    relevantObjects: ["cat", "dumbbell"],
+    environmentalCues: [],
+    typographyPersonality: ["playful"],
+    compositionIntent: "Cat visual anchor",
+    focalHierarchy: ["judgmental cat figure"],
+    supportingGraphics: [],
+    avoidElements: [],
+    printStrategy: { silhouetteStrength: "strong", detailDensity: "low", contrastNeed: "high", viewingDistance: "far" },
+    recommendedDesignMode: { mode: "CARTOON", confidence: 0.85, rationale: "Mascot cat" },
+    modeSignals: { typographyStrength: 0.5, humanActionStrength: 0.3, mascotPotential: 0.85, standaloneIllustrationStrength: 0.4 },
+  };
+  const catDecision = resolveSubjectStrategy(catMeaning, catConcept, "CARTOON");
+  assert(
+    catDecision.strategy === "CREATURE_REQUIRED" || catDecision.strategy === "CREATURE_OPTIONAL",
+    `Animal is grammatical actor → creature strategy resolved (got ${catDecision.strategy})`
+  );
+
+  // Fixture 5: presentation mode changes → subject decision remains semantically stable
+  const hybridGothic = resolveSubjectStrategy(gothicMeaning, gothicConcept, "HYBRID");
+  const illustrationGothic = resolveSubjectStrategy(gothicMeaning, gothicConcept, "ILLUSTRATION_ONLY");
+  assert(
+    (hybridGothic.strategy === "OBJECT_LED" || hybridGothic.strategy === "NO_LIVING_SUBJECT") &&
+    (illustrationGothic.strategy === "OBJECT_LED" || illustrationGothic.strategy === "NO_LIVING_SUBJECT"),
+    "Subject decision remains semantically stable across HYBRID and ILLUSTRATION_ONLY presentation modes"
+  );
+
+  // Fixture 6: user override NO_PERSON
+  const overrideDecision = resolveSubjectStrategy(actorMeaning, actorConcept, "HYBRID", "NO_PERSON");
+  assert(
+    overrideDecision.strategy === "OBJECT_LED" || overrideDecision.strategy === "NO_LIVING_SUBJECT",
+    "User override NO_PERSON successfully overrides AUTO decision"
+  );
 
   console.log("\n=================================================");
   console.log(`  RESULTS: ${passed} PASSED, ${failed} FAILED`);

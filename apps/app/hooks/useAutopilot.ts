@@ -20,6 +20,11 @@ export type AutopilotProduct = {
 
 export type AutopilotRunResult = {
     success?: boolean;
+    status?: "queued";
+    jobId?: string;
+    workspaceId?: string;
+    message?: string;
+    details?: string;
     error?: string;
     plan?: string;
     usedTokens24h?: number;
@@ -80,11 +85,13 @@ export function useAutopilot() {
             }
 
             if (!res.ok || !parsed.success) {
-                throw new Error((parsed as any).details || parsed.error || "Autopilot failed to start");
+                throw new Error(parsed.details || parsed.error || "Autopilot failed to start");
             }
             const enriched = {
                 ...parsed,
-                runtimeSeconds: parsed.runtimeSeconds ?? Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+                runtimeSeconds: parsed.status === "queued"
+                    ? parsed.runtimeSeconds
+                    : parsed.runtimeSeconds ?? Math.max(1, Math.round((Date.now() - startedAt) / 1000))
             };
 
             setResult(enriched);

@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.logError = logError;
 exports.logInfo = logInfo;
-// server-only removed for script runtime
+require("server-only");
 function logError(context, error) {
     console.error(`[ERROR - ${context}]`, error?.message || error);
 }

@@ -21,6 +21,7 @@ exports.makeConversational = makeConversational;
 exports.scoreCrossNicheAlignment = scoreCrossNicheAlignment;
 exports.coversAtLeastOneCategory = coversAtLeastOneCategory;
 exports.filterAndEnhanceSlogans = filterAndEnhanceSlogans;
+const safetyEngine_1 = require("./safetyEngine");
 // ─── Niche Category Registry ─────────────────────────────────────────────────
 const NICHE_CATEGORY_KEYWORDS = {
     gardening: ["garden", "plant", "grow", "soil", "seed", "bloom", "roots", "herb", "harvest", "weed", "compost", "raised bed", "sprout"],
@@ -125,14 +126,11 @@ function isSafeSlogan(slogan) {
         return false;
     // Run entity detector for known brands/celebrities/movies
     try {
-        // Import runSafetyEngine lazily to avoid circular imports at module load
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { runSafetyEngine } = require("./safetyEngine");
-        const safety = runSafetyEngine(slogan || "");
+        const safety = (0, safetyEngine_1.runSafetyEngine)(slogan || "");
         if (safety && (safety.flaggedEntities || []).length > 0)
             return false;
     }
-    catch (_err) {
+    catch {
         // If safety engine not available, continue with existing checks
     }
     // Reject scaffold patterns with adjective-first objects (GPT ignores the ban sometimes)
@@ -211,7 +209,6 @@ function tidySlogan(s) {
     }
     // Normalize spacing and punctuation
     t = t.replace(/[.!,]+$/g, '').replace(/\s+/g, ' ').trim();
-    const lower = t.toLowerCase();
     // Remove terminal scaffold words that often leak from templates
     const suffixRemovals = ['identity', 'identity.', 'signal', 'clean', 'wearable', 'commercial', 'graphic'];
     const parts = t.split(/\s+/);
@@ -233,7 +230,7 @@ function tidySlogan(s) {
  */
 function makePunchier(slogan) {
     // First apply conversational layer
-    let tightened = makeConversational(slogan);
+    const tightened = makeConversational(slogan);
     return tightened
         // "X and Y" → "X & Y" (keeps brevity)
         .replace(/\b and \b/g, " & ")
@@ -293,7 +290,20 @@ function filterAndEnhanceSlogans(slogans, niche) {
     const categories = detectNicheCategories(niche);
     const isDualNiche = categories.length >= 2;
     // Step 1: safety filter and wearability check
-    const safe = slogans.filter(isSafeSlogan).filter(isWearable);
+    // Also hard-reject common merch boilerplate and identity-label crutches
+    const safe = slogans
+        .filter(isSafeSlogan)
+        .filter(isWearable)
+        .filter((s) => {
+        const lower = (s || "").toLowerCase();
+        if (/eat\s+sleep\s+\w+\s+repeat/i.test(lower))
+            return false;
+        if (/powered by/i.test(lower))
+            return false;
+        if (/\b(warrior|hustler|addict|mvp|legend|squad|crew|tribe)\b/i.test(lower))
+            return false;
+        return true;
+    });
     // Step 2: enhance + deduplicate
     const seen = new Set();
     const enhanced = [];

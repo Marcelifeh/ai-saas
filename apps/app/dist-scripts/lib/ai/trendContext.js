@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDynamicContext = getDynamicContext;
-// server-only removed for script runtime
+require("server-only");
 const SEASONS = {
     0: 'Winter', 1: 'Winter', 2: 'Spring',
     3: 'Spring', 4: 'Spring', 5: 'Summer',

@@ -5,7 +5,7 @@ exports.generateMarketSignals = generateMarketSignals;
 exports.scoreWithMarketIntel = scoreWithMarketIntel;
 exports.classifyNiche = classifyNiche;
 exports.calculateRevenue = calculateRevenue;
-// server-only removed for script runtime
+require("server-only");
 function createTrendSnapshot(seed = null, fallbackScore = 65) {
     const scoreCandidate = firstFiniteNumber(seed?.trend?.score, seed?.trend_score, seed?.trendMomentum, typeof seed?.viralScore === "number" ? seed.viralScore * 10 : undefined, seed?.finalScore, fallbackScore);
     const score = clamp(scoreCandidate);

@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.safeCompletion = safeCompletion;
-// server-only removed for script runtime
+require("server-only");
 const logger_1 = require("./logger");
 async function safeCompletion(fn, fallbackValue) {
     try {

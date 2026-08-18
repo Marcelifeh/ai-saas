@@ -8,7 +8,7 @@ exports.recordSourceFailure = recordSourceFailure;
 exports.persistSignalSnapshot = persistSignalSnapshot;
 exports.getPersistentSignalSnapshot = getPersistentSignalSnapshot;
 exports.getSignalReliabilityOverview = getSignalReliabilityOverview;
-// server-only removed for script runtime
+require("server-only");
 const prisma_1 = require("../../lib/db/prisma");
 const cache_1 = require("../../lib/utils/cache");
 const serverEnv_1 = require("../../lib/utils/serverEnv");

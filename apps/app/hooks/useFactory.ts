@@ -281,6 +281,7 @@ export function useFactory() {
         style?: string;
         platform?: string;
         designMode: DesignMode;
+        subjectOverride?: "AUTO" | "NO_PERSON" | "INCLUDE_PERSON";
     }) => {
         setIsDesignRefreshing(true);
         setError(null);

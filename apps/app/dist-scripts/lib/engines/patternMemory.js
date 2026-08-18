@@ -4,7 +4,7 @@ exports.extractPattern = extractPattern;
 exports.recordSloganPerformance = recordSloganPerformance;
 exports.getTopPatterns = getTopPatterns;
 exports.getGlobalTopPatterns = getGlobalTopPatterns;
-// server-only removed for script runtime
+require("server-only");
 const prisma_1 = require("../../lib/db/prisma");
 // ─── Pattern Extraction ───────────────────────────────────────────────────────
 /**

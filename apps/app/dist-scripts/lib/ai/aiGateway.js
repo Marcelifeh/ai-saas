@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.chatCompletionSafe = chatCompletionSafe;
 exports.createEmbeddingsSafe = createEmbeddingsSafe;
-// server-only removed for script runtime
+require("server-only");
 const openai_1 = __importDefault(require("openai"));
 const env_1 = require("../../env");
 const logger_1 = require("../utils/logger");

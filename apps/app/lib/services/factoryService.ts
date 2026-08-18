@@ -127,6 +127,7 @@ export async function regenerateVisualDesigns(input: {
     style?: string;
     platform?: string;
     designMode?: DesignMode;
+    subjectOverride?: "AUTO" | "NO_PERSON" | "INCLUDE_PERSON";
     userId?: string;
 }) {
     const visualStrategies = await generateDynamicDesignBatch({
@@ -138,6 +139,7 @@ export async function regenerateVisualDesigns(input: {
         printBackground: "transparent",
         marketplace: mapDesignMarketplace(input.platform),
         designMode: input.designMode ?? "AUTO",
+        subjectOverride: input.subjectOverride,
         userId: input.userId,
     });
     const visualBenchmark = evaluateVisualBatchRelease(visualStrategies);

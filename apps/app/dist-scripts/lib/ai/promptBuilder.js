@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PLATFORM_RULES = void 0;
 exports.detectPlatform = detectPlatform;
 exports.buildImagePrompt = buildImagePrompt;
-// server-only removed for script runtime
+require("server-only");
 function detectPlatform(platformInput) {
     if (!platformInput)
         return "amazon";

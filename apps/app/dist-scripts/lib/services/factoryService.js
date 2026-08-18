@@ -4,7 +4,7 @@ exports.regenerateSlogansOnly = regenerateSlogansOnly;
 exports.generateSingleStrategy = generateSingleStrategy;
 exports.bulkDiscover = bulkDiscover;
 exports.generateChunk = generateChunk;
-// server-only removed for script runtime
+require("server-only");
 const trendEngine_1 = require("../ai/trendEngine");
 const marketMath_1 = require("../ai/marketMath");
 const promptBuilder_1 = require("../ai/promptBuilder");
@@ -12,6 +12,11 @@ const aiGateway_1 = require("../ai/aiGateway");
 const sloganEngine_1 = require("../ai/sloganEngine");
 const salesFeedbackService_1 = require("./salesFeedbackService");
 const complianceEngine_1 = require("./complianceEngine");
+const prisma_1 = require("../db/prisma");
+const marketAggregator_1 = require("../market/marketAggregator");
+const opportunityEngine_1 = require("../market/opportunityEngine");
+const marketInsightEngine_1 = require("../ai/marketInsightEngine");
+const logger_1 = require("../utils/logger");
 function parseJsonPayload(text) {
     return JSON.parse(text.replace(/```json/g, "").replace(/```/g, "").trim());
 }
@@ -53,25 +58,18 @@ function alignImagePromptsToSlogans(targetSlogans, sourceSlogans, sourcePrompts)
 }
 async function buildMerchPayload(parsed, niche, audience, style, userId, platform) {
     const sloganMode = detectSloganMode(style);
-    // Fast sync pass — only used to get initial rankings for sales-signal lookup
-    const initialRanked = (0, sloganEngine_1.enhanceSlogans)({
-        niche,
-        audience,
-        style,
-        shirtSlogans: parsed?.shirtSlogans,
-        imagePrompts: parsed?.imagePrompts,
-        salesSignals: parsed?.salesSignals,
-        mode: sloganMode,
-    }).ranked;
     const learnedSalesSignals = await (0, salesFeedbackService_1.getPersistedSalesSignalsForRankedSlogans)({
         userId,
         niche,
         platform,
-        rankedSlogans: initialRanked,
+        rankedSlogans: [],
+    }).catch((err) => {
+        (0, logger_1.logError)("Learned sales signals skipped", err);
+        return {};
     });
     const mergedSalesSignals = (0, salesFeedbackService_1.mergeSalesSignalsInputs)(parsed?.salesSignals, learnedSalesSignals);
     // Full async engine: applies DB pattern-score boosts + merged sales signals
-    let sloganEngine = await (0, sloganEngine_1.runEliteSloganEngine)({
+    const sloganEngine = await (0, sloganEngine_1.runEliteSloganEngine)({
         niche,
         audience,
         style,
@@ -80,27 +78,11 @@ async function buildMerchPayload(parsed, niche, audience, style, userId, platfor
         salesSignals: mergedSalesSignals,
         mode: sloganMode,
     });
-    // Elite Refinement Pass (gpt-4o) for Top candidates
-    const topScored = sloganEngine.ranked.slice(0, 5).map(r => r.slogan);
-    if (topScored.length > 0) {
-        const refinedSlogans = await (0, sloganEngine_1.refineWithGPT4o)(topScored, niche, audience);
-        // Re-inject refined slogans into the engine result (requires a second ranking pass)
-        const refinedEngine = await (0, sloganEngine_1.runEliteSloganEngine)({
-            niche,
-            audience,
-            style,
-            shirtSlogans: [...refinedSlogans, ...sloganEngine.slogans],
-            imagePrompts: parsed?.imagePrompts,
-            salesSignals: mergedSalesSignals,
-            mode: sloganMode,
-        });
-        sloganEngine = refinedEngine;
-    }
     const alignedImagePrompts = alignImagePromptsToSlogans(sloganEngine.slogans, parsed?.shirtSlogans, parsed?.imagePrompts);
     // ── Compliance: filter slogans and attach report ──────────────────────
     const { safe: safeSlogans } = (0, complianceEngine_1.filterSafeSlogans)(sloganEngine.slogans);
     const finalSlogans = safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans;
-    const alignedPromptsFiltered = alignImagePromptsToSlogans(finalSlogans, sloganEngine.slogans, (0, sloganEngine_1.normalizeImagePrompts)(sloganEngine.slogans, alignedImagePrompts, style, niche));
+    const alignedPromptsFiltered = alignImagePromptsToSlogans(finalSlogans, sloganEngine.slogans, (0, sloganEngine_1.normalizeImagePrompts)(sloganEngine.slogans, alignedImagePrompts, style, niche, sloganEngine.dynamicProfile));
     const complianceReport = (0, complianceEngine_1.checkCompliance)({
         niche,
         shirtSlogans: finalSlogans,
@@ -344,17 +326,268 @@ IMPORTANT: The literal token [STYLE] MUST appear at the start of the Style line.
 }
 async function bulkDiscover() {
     const discoveryResult = await (0, trendEngine_1.discoverTrends)();
-    // Return top 15 niches with expected fallback fields for frontend chunking
-    return {
-        niches: discoveryResult.niches.slice(0, 15).map(n => ({
+    const startTime = Date.now();
+    console.log(`[BulkDiscover] Sniper v1.1: Validating ${discoveryResult.niches.length} niches...`);
+    // REVENUE INTELLIGENCE: Validate and Score every discovered niche
+    const analysisResults = await Promise.allSettled(discoveryResult.niches.map(async (n) => {
+        // v1.1 SAFETY ENGINE: Layer 1-3 Compliance Gate (FIRST STEP)
+        const compliance = (0, complianceEngine_1.checkCompliance)({ niche: n.niche });
+        if (!compliance.safe) {
+            return {
+                status: "DROP",
+                reason: "COMPLIANCE",
+                safetyReason: compliance.safetyReason ?? "trademark_exact",
+                niche: n.niche,
+                score: 0
+            };
+        }
+        const market = await (0, marketAggregator_1.getMarketData)(n.niche);
+        const opportunity = (0, opportunityEngine_1.computeOpportunity)(market, n.finalScore);
+        // v1.2 INSTITUTIONAL QUALITY GATES
+        const intent = (0, opportunityEngine_1.classifyNicheIntent)(n.niche);
+        const score = opportunity.finalOpportunityScore;
+        // 2. Kill Stage: Threshold check based on intent
+        if (opportunity.status === "DROP") {
+            return {
+                status: "DROP",
+                reason: "LOW_SCORE",
+                niche: n.niche,
+                score,
+                velocity: opportunity.velocityScore
+            };
+        }
+        const insights = await (0, marketInsightEngine_1.generateMarketInsights)(opportunity);
+        return {
+            status: opportunity.status,
             niche: n.niche,
             targetAudience: 'Broad Audience',
-            whyItSells: 'High cultural momentum',
-            safe: true,
-            finalScore: n.finalScore,
+            whyItSells: insights || 'High cultural momentum',
+            safe: compliance.safe,
+            finalScore: opportunity.finalOpportunityScore,
             profitScore: n.profitScore,
             viralScore: n.viralScore,
-        })),
+            // Marketplace Truth
+            amazonListings: market.amazon.listings,
+            etsyListings: market.etsy.listings,
+            avgPrice: (market.amazon.avgPrice + market.etsy.avgPrice) / 2,
+            opportunityScore: opportunity.finalOpportunityScore,
+            demandScore: opportunity.demandScore,
+            competitionScore: opportunity.competitionScore,
+            noveltyScore: opportunity.noveltyScore,
+            confidence: opportunity.confidence,
+            executionConfidence: opportunity.confidence === "real"
+                ? "HIGH"
+                : opportunity.finalOpportunityScore >= 30
+                    ? "MEDIUM"
+                    : "LOW",
+            insight: insights,
+            opportunityReasons: opportunity.opportunityReasons, // v1.3 Structured Reasons
+        };
+    }));
+    const processed = analysisResults
+        .filter((res) => res.status === 'fulfilled')
+        .map(res => res.value);
+    const winners = processed.filter(p => p.status === "PASS");
+    const watchlisted = processed.filter(p => p.status === "WATCHLIST");
+    const dropped = processed.filter(p => p.status === "DROP");
+    // Safety & Quality Telemetry breakdown
+    const complianceDrops = dropped.filter(d => d.reason === "COMPLIANCE");
+    const lowScoreDrops = dropped.filter(d => d.reason === "LOW_SCORE");
+    const lowConfidenceDrops = dropped.filter(d => d.reason === "LOW_CONFIDENCE");
+    const exactDrops = complianceDrops.filter(d => d.safetyReason === "trademark_exact").length;
+    const fuzzyDrops = complianceDrops.filter(d => d.safetyReason === "trademark_fuzzy").length;
+    const derivativeDrops = complianceDrops.filter(d => d.safetyReason === "derivative_content").length;
+    // v1.3 INSTITUTIONAL TELEMETRY
+    const topDrop = lowScoreDrops.length > 0 ? lowScoreDrops.sort((a, b) => b.score - a.score)[0] : null;
+    const realConfidenceCount = processed.filter(p => p.confidence === "real").length;
+    console.log(`\n--- Discovery Production Sniper v1.3 Telemetry ---`);
+    console.log(`- Pipeline Latency: ${Date.now() - startTime}ms`);
+    console.log(`- PASSED Quality Check: ${winners.length}`);
+    console.log(`- WATCHLIST (Borderline): ${watchlisted.length}`);
+    console.log(`- COMPLIANCE KILL: ${complianceDrops.length} (Exact: ${exactDrops}, Fuzzy: ${fuzzyDrops}, Derivative: ${derivativeDrops})`);
+    console.log(`- REVENUE SCORE KILL: ${lowScoreDrops.length}`);
+    console.log(`- CONFIDENCE GATE KILL: ${lowConfidenceDrops.length}`);
+    console.log(`- DATA FIDELITY: ${realConfidenceCount} Real-World / ${processed.length - realConfidenceCount} Simulated`);
+    const highExec = processed.filter(p => p.executionConfidence === "HIGH").length;
+    const medExec = processed.filter(p => p.executionConfidence === "MEDIUM").length;
+    const lowExec = processed.filter(p => p.executionConfidence === "LOW").length;
+    console.log(`- EXEC CONFIDENCE: HIGH=${highExec} / MEDIUM=${medExec} / LOW=${lowExec}`);
+    if (topDrop) {
+        console.log(`- Top Dropped (Non-Compliance): "${topDrop.niche}" (Score: ${topDrop.score})`);
+    }
+    console.log(`--------------------------------------------------\n`);
+    // Prioritize PASS winners, then fill with WATCHLIST if need be (up to 15)
+    const finalSelection = [...winners, ...watchlisted]
+        .sort((a, b) => (b.opportunityScore || b.score) - (a.opportunityScore || a.score))
+        .slice(0, 15);
+    // Fallback: if all quality gates produced nothing, take the top-scored non-compliance niches
+    // Enforce a minimum opportunityScore floor of 30 and cap at 5 to avoid garbage generation
+    if (finalSelection.length === 0) {
+        const fallback = processed
+            .filter(p => p.reason !== "COMPLIANCE" && (p.opportunityScore ?? p.score ?? 0) >= 30)
+            .sort((a, b) => (b.opportunityScore ?? b.score ?? 0) - (a.opportunityScore ?? a.score ?? 0))
+            .slice(0, 5);
+        finalSelection.push(...fallback);
+        if (fallback.length > 0) {
+            console.log(`[BulkDiscover] Empty selection — fallback to top ${fallback.length} scored niches (floor ≥30).`);
+        }
+    }
+    // --- Winner Lock & Auto-Listing (prototype) ---------------------------
+    // Classify items into WINNER / TEST / DISCARD and auto-generate listing
+    // payloads for WINNERs to speed up activation.
+    // Evaluate creative conversion strength for a niche by generating top slogans
+    async function evaluateConversionFor(niche, userId) {
+        try {
+            const engine = await (0, sloganEngine_1.runEliteSloganEngine)({ niche, audience: 'Broad' });
+            const top = engine.ranked && engine.ranked[0] ? engine.ranked[0] : null;
+            const sloganText = top?.slogan || (engine.slogans && engine.slogans[0]) || '';
+            const hookScore = typeof top?.hookScore === 'number' ? top.hookScore : (top?.score || 50);
+            const wordCount = sloganText ? sloganText.split(/\s+/).length : 0;
+            const brevityScore = wordCount <= 3 ? 100 : wordCount === 4 ? 80 : wordCount === 5 ? 60 : wordCount === 6 ? 40 : 20;
+            const wordplayScore = /\b(rhyme|play|punch|wordplay)\b/i.test(sloganText) ? 80 : 50;
+            const wearabilityScore = /\b(you|me|we|my)\b/i.test(sloganText) ? 80 : 55;
+            const conversionScore = Math.round((hookScore * 0.3) + (brevityScore * 0.2) + (wordplayScore * 0.3) + (wearabilityScore * 0.2));
+            return {
+                slogan: sloganText,
+                hookScore,
+                brevityScore,
+                wordplayScore,
+                wearabilityScore,
+                conversionScore,
+                topInsight: top || null,
+            };
+        }
+        catch (err) {
+            return null;
+        }
+    }
+    async function generateAdHooksFor(slogan) {
+        try {
+            const prompt = `Generate 3 short ad hooks (social/ad copy style) for the slogan: "${slogan}". Return a JSON array of 3 strings.`;
+            const ai = await (0, aiGateway_1.chatCompletionSafe)({
+                model: 'gpt-4o-mini',
+                temperature: 0.8,
+                max_tokens: 200,
+                response_format: { type: 'json_object' },
+                messages: [{ role: 'system', content: 'You are a punchy ad-copy writer. Return JSON array only.' }, { role: 'user', content: prompt }],
+            });
+            if (ai.error || !ai.data)
+                return [];
+            const text = ai.data.choices[0].message.content || '[]';
+            const parsed = parseJsonPayload(text);
+            if (Array.isArray(parsed))
+                return parsed.slice(0, 3);
+            return [];
+        }
+        catch (err) {
+            return [];
+        }
+    }
+    async function generateListingPayloadFor(nicheItem, winningSlogan) {
+        try {
+            const sloganPart = winningSlogan ? `Winning slogan: "${winningSlogan}"` : '';
+            const prompt = `You are a top Amazon/Etsy POD seller and product copywriter.\n\nINPUT:\n- Niche: ${nicheItem.niche}\n${sloganPart ? `- ${sloganPart}\n` : ''}\nGOAL:\nCreate a HIGH-CONVERTING product listing JSON for a POD shirt.\nRULES:\n- Title must read like a bestseller (not keyword stuffing).\n- Provide 2 short bullet points targeting buyer emotion (gift, identity, humor).\n- Provide 4-6 tags mixing long-tail and buyer-intent keywords.\n- Description: one short human-sounding paragraph.\n- mockupPrompt: concise image prompt for the slogan (mention style).\nOUTPUT: Return valid JSON exactly as: { "title":"", "bullets":["",""], "tags":[""], "description":"", "mockupPrompt":"" }`;
+            const ai = await (0, aiGateway_1.chatCompletionSafe)({
+                model: 'gpt-4o-mini',
+                temperature: 0.7,
+                max_tokens: 800,
+                response_format: { type: 'json_object' },
+                messages: [{ role: 'system', content: 'You are a concise listing writer that produces high-converting e-commerce titles and bullets.' }, { role: 'user', content: prompt }],
+            });
+            if (ai.error || !ai.data)
+                return null;
+            const text = ai.data.choices[0].message.content || '{}';
+            const parsed = parseJsonPayload(text);
+            return parsed;
+        }
+        catch (err) {
+            return null;
+        }
+    }
+    // Apply winner lock statuses and generate listings for winners asynchronously
+    const processedWithStatus = await Promise.all(finalSelection.map(async (item) => {
+        // Skip all LLM work for LOW execution confidence niches — mark as DISCARD immediately
+        if (item.executionConfidence === "LOW") {
+            item.status = 'DISCARD';
+            return item;
+        }
+        // Use marketMath niche_score if available (50–80 range); opportunityEngine score is market data quality
+        // score and sits much lower (~30–50). Winner/TEST thresholds reference the marketMath scale.
+        const trend = (0, marketMath_1.createTrendSnapshot)(item, item.finalScore ?? 65);
+        const market = (0, marketMath_1.generateMarketSignals)(item.niche, trend);
+        const marketScore = (0, marketMath_1.scoreWithMarketIntel)(item, market, trend);
+        const score = marketScore.niche_score;
+        item.niche_score = score;
+        item.publishPriority = marketScore.publishPriority;
+        // Run creative conversion eval for top candidates
+        let conversion = null;
+        if (score >= 60) {
+            conversion = await evaluateConversionFor(item.niche);
+            item.conversion = conversion;
+        }
+        const hasHighConversionSlogan = conversion && conversion.conversionScore >= 65 && (conversion.topInsight?.score ?? 0) >= 70;
+        if (score >= 75 && hasHighConversionSlogan) {
+            item.status = 'WINNER';
+            // generate listing payload tailored to the winning slogan
+            try {
+                const listing = await generateListingPayloadFor(item, conversion?.slogan);
+                if (listing)
+                    item.autoListing = listing;
+                // also generate ad hooks
+                const hooks = await generateAdHooksFor(conversion?.slogan || '');
+                if (hooks && hooks.length)
+                    item.adHooks = hooks;
+                // enqueue for launch pipeline
+                try {
+                    const learning = require('./learningService');
+                    learning.enqueueLaunch({ niche: item.niche, slogan: conversion?.slogan || '', listing: item.autoListing, adHooks: item.adHooks });
+                }
+                catch (e) {
+                    // ignore queue failures
+                }
+                // Persist to DB-backed queue when prisma is available
+                try {
+                    if (prisma_1.prisma && prisma_1.prisma.listingQueue && typeof prisma_1.prisma.listingQueue.create === 'function' && item.autoListing) {
+                        await prisma_1.prisma.listingQueue.create({
+                            data: {
+                                niche: item.niche,
+                                slogan: conversion?.slogan || '',
+                                title: (item.autoListing?.title || '').toString().slice(0, 220),
+                                bullets: Array.isArray(item.autoListing?.bullets) ? item.autoListing.bullets : [],
+                                tags: Array.isArray(item.autoListing?.tags) ? item.autoListing.tags : [],
+                                mockupPrompt: item.autoListing?.mockupPrompt || item.autoListing?.description || '',
+                                adHooks: Array.isArray(item.adHooks) ? item.adHooks : [],
+                                status: 'PENDING',
+                                platform: 'etsy',
+                            }
+                        });
+                        // Auto-trigger worker (best-effort, non-blocking)
+                        try {
+                            const worker = require('./listingWorker');
+                            // fire-and-forget
+                            setImmediate(() => { worker.runListingWorker().catch((e) => { console.warn('[factory] worker trigger failed', e && e.message); }); });
+                        }
+                        catch (e) {
+                            // ignore
+                        }
+                    }
+                }
+                catch (e) {
+                    // DB persistence is best-effort; ignore errors here
+                }
+            }
+            catch (e) { /* ignore */ }
+        }
+        else if (score >= 60) {
+            item.status = 'TEST';
+        }
+        else {
+            item.status = 'DISCARD';
+        }
+        return item;
+    }));
+    return {
+        niches: processedWithStatus,
         signalSources: discoveryResult.signalSources,
         signalConfidence: discoveryResult.signalConfidence,
     };

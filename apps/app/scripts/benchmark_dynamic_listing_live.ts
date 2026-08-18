@@ -213,6 +213,15 @@ function visualStrategy(item: BenchmarkCase): DynamicDesignStrategy {
     qualityGatePassed: true,
     batchRepairAttempts: 0,
     prompt: "benchmark strategy",
+    subjectStrategy: "OBJECT_LED",
+    subjectDecision: {
+      requirement: "NONE",
+      subjectType: "OBJECT",
+      strategy: "OBJECT_LED",
+      confidence: 0.9,
+      evidence: ["benchmark fixture"],
+      reason: "benchmark fixture object-led strategy",
+    },
   };
 }
 

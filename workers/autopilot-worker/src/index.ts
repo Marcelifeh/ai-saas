@@ -12,7 +12,7 @@ console.log(`   App base URL : ${APP_BASE_URL}`);
 console.log(`   Worker secret: ${WORKER_SECRET ? "set ✓" : "NOT SET — internal route will reject requests"}`);
 
 const worker = new Worker("autopilot-jobs", async (job) => {
-    const { workspaceId } = job.data;
+    const { workspaceId, userId } = job.data;
     const jobId = job.id as string;
     console.log(`[Job ${jobId}] Received generation request for workspace ${workspaceId}`);
 
@@ -42,7 +42,7 @@ const worker = new Worker("autopilot-jobs", async (job) => {
             "Content-Type": "application/json",
             "x-worker-secret": WORKER_SECRET,
         },
-        body: JSON.stringify({ workspaceId, jobId }),
+        body: JSON.stringify({ workspaceId, jobId, userId }),
     });
 
     if (!response.ok) {
@@ -51,6 +51,15 @@ const worker = new Worker("autopilot-jobs", async (job) => {
     }
 
     const result = await response.json();
+    try {
+        await prisma.autopilotJob.update({
+            where: { id: jobId },
+            data: { status: "completed" },
+        });
+    } catch (dbErr) {
+        console.warn(`[Job ${jobId}] DB completion update failed (non-fatal):`, dbErr);
+    }
+
     console.log(`[Job ${jobId}] Completed — ${result.productsGenerated ?? 0} products generated.`);
     return result;
 }, { connection: redisConnection as any });

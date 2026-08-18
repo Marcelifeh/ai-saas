@@ -13,6 +13,7 @@ export interface DesignCandidate {
   regenerationReason?: DesignRegenerationReason;
   requestedMode: DesignMode;
   resolvedMode: Exclude<DesignMode, "AUTO">;
+  subjectStrategy?: string;
   prompt: string;
   createdAt: string;
 }
@@ -23,7 +24,8 @@ export function createDesignCandidate(
   requestedMode: DesignMode,
   resolvedMode: Exclude<DesignMode, "AUTO">,
   parentDesignId?: string,
-  reason?: DesignRegenerationReason
+  reason?: DesignRegenerationReason,
+  subjectStrategy?: string
 ): DesignCandidate {
   const hexSuffix = Math.floor(Math.random() * 0xffff).toString(16).toUpperCase().padStart(4, "0");
   const id = `des_${Date.now()}_${hexSuffix}`;
@@ -40,6 +42,7 @@ export function createDesignCandidate(
     regenerationReason: reason || "USER_REFRESH",
     requestedMode,
     resolvedMode,
+    subjectStrategy,
     prompt,
     createdAt: new Date().toISOString(),
   };

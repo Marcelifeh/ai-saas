@@ -13,6 +13,7 @@ const DesignRouteSchema = z.object({
   style: z.string().trim().max(120).optional(),
   platform: z.string().trim().max(40).optional(),
   designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]),
+  subjectOverride: z.enum(["AUTO", "NO_PERSON", "INCLUDE_PERSON"]).optional(),
 });
 
 export const POST = withWorkspaceAuth(async ({ req, session }) => {
