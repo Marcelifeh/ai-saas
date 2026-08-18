@@ -31,9 +31,9 @@ process.env.NEXTAUTH_URL = process.env.NEXTAUTH_URL || "http://localhost:3000";
 // Mock server-only package when running scripts via Node/tsx
 const originalRequire = Module.prototype.require;
 // @ts-ignore
-Module.prototype.require = function (request: string) {
+Module.prototype.require = function (this: any, request: string) {
   if (request === "server-only") return {};
-  return originalRequire.apply(this, arguments);
+  return (originalRequire as Function).call(this, request);
 };
 
 const { getNicheEvidence, verifyEvidenceIntegrity } = require("../lib/services/marketEvidenceService");
@@ -91,7 +91,7 @@ async function runEvidenceArchitectureSuite() {
   const isOriginalValid = verifyEvidenceIntegrity(evidence);
   assert(isOriginalValid, "Original snapshot verification PASS", `Hash: ${evidence.contentHash.slice(0, 16)}...`);
 
-  const tamperedSnapshot: NicheMarketEvidence = {
+  const tamperedSnapshot: any = {
     ...evidence,
     niche: "tampered_niche",
   };
@@ -162,16 +162,16 @@ async function runEvidenceArchitectureSuite() {
 
   const deltas = computeSloganDeltas(prevSlogans, currSlogans);
 
-  const retainedOrRefinedExact = deltas.find((d) => d.slogan === "Reads Past Midnight");
+  const retainedOrRefinedExact = deltas.find((d: any) => d.slogan === "Reads Past Midnight");
   assert(
     retainedOrRefinedExact?.deltaType === "REFINED" || retainedOrRefinedExact?.deltaType === "RETAINED",
     "Exact slogan classified as RETAINED/REFINED"
   );
 
-  const newSlogan = deltas.find((d) => d.slogan === "Kitchen Rule Champion");
+  const newSlogan = deltas.find((d: any) => d.slogan === "Kitchen Rule Champion");
   assert(newSlogan?.deltaType === "NEW", "Novel slogan classified as NEW");
 
-  const droppedSlogan = deltas.find((d) => d.slogan === "Dink Responsibly");
+  const droppedSlogan = deltas.find((d: any) => d.slogan === "Dink Responsibly");
   assert(droppedSlogan?.deltaType === "DROPPED", "Omitted slogan classified as DROPPED");
 
   // Semantic variation test (Reads Past Midnight -> Still Reading After Midnight)
@@ -179,7 +179,7 @@ async function runEvidenceArchitectureSuite() {
     [{ slogan: "Reads Past Midnight", score: 82 }],
     [{ slogan: "Still Reading After Midnight", score: 88 }]
   );
-  const refinedSemantic = semanticRegenDeltas.find((d) => d.slogan === "Still Reading After Midnight");
+  const refinedSemantic = semanticRegenDeltas.find((d: any) => d.slogan === "Still Reading After Midnight");
   assert(
     refinedSemantic?.deltaType === "REFINED" && (refinedSemantic?.deltaConfidence ?? 0) >= 0.2,
     "Semantic variation (Reads Past Midnight -> Still Reading After Midnight) classified as REFINED"

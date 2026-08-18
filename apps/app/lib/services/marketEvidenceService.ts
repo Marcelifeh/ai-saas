@@ -87,23 +87,14 @@ function computeContentHash(payload: Omit<NicheMarketEvidence, "contentHash">): 
     culturalSignals: payload.culturalSignals,
     purchaseSignals: payload.purchaseSignals,
     freshness: payload.freshness,
+    rawSignals: payload.rawSignals,
   };
   const canonicalString = canonicalStringify(hashPayload);
   return createHash("sha256").update(canonicalString).digest("hex");
 }
 
 export function verifyEvidenceIntegrity(evidence: NicheMarketEvidence): boolean {
-  const hashPayload = {
-    id: evidence.id,
-    version: evidence.version,
-    niche: evidence.niche,
-    observedAt: evidence.observedAt,
-    trendSignals: evidence.trendSignals,
-    buyerLanguage: evidence.buyerLanguage,
-    culturalSignals: evidence.culturalSignals,
-    purchaseSignals: evidence.purchaseSignals,
-    freshness: evidence.freshness,
-  };
+  const { contentHash, ...hashPayload } = evidence;
   const expectedHash = computeContentHash(hashPayload);
   return evidence.contentHash === expectedHash;
 }
