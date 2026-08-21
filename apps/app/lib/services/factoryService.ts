@@ -44,6 +44,10 @@ export interface SloganRegenerationResult {
     visualEngineVersion: string;
     winningSlogan: string;
     dynamicProfile: unknown;
+    evidenceSnapshotId?: string;
+    evidenceContentHash?: string;
+    creativeTerritories?: unknown[];
+    semanticEligibility?: unknown[];
     dynamicListing: DynamicListingResult;
     amazonListing: ReturnType<typeof toLegacyListingShape>;
     sloganInsights: any[];
@@ -152,7 +156,16 @@ export async function regenerateVisualDesigns(input: {
     };
 }
 
-async function buildMerchPayload(parsed: any, niche: string, audience?: string, style?: string, userId?: string, platform?: string, designMode: DesignMode = "AUTO") {
+async function buildMerchPayload(
+    parsed: any,
+    niche: string,
+    audience?: string,
+    style?: string,
+    userId?: string,
+    platform?: string,
+    designMode: DesignMode = "AUTO",
+    excludeSlogans: string[] = [],
+) {
     const sloganMode = detectSloganMode(style);
 
     const learnedSalesSignals = await getPersistedSalesSignalsForRankedSlogans({
@@ -176,6 +189,7 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         imagePrompts: parsed?.imagePrompts,
         salesSignals: mergedSalesSignals,
         mode: sloganMode,
+        excludeSlogans,
     });
 
     // ── Compliance: filter slogans and attach report ──────────────────────
@@ -233,6 +247,10 @@ async function buildMerchPayload(parsed: any, niche: string, audience?: string, 
         visualEngineVersion: VISUAL_ENGINE_VERSION,
         winningSlogan,
         dynamicProfile,
+        evidenceSnapshotId: sloganEngine.evidenceSnapshotId,
+        evidenceContentHash: sloganEngine.evidenceContentHash,
+        creativeTerritories: sloganEngine.creativeTerritories,
+        semanticEligibility: sloganEngine.semanticEligibility,
         dynamicListing,
         amazonListing,
         sloganInsights: sloganEngine.ranked,
@@ -300,66 +318,22 @@ function buildBestSellerPredictor(result: any, market: MarketIntel, topSloganSco
 export async function regenerateSlogansOnly(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, excludeSlogans?: string[], designMode: DesignMode = "AUTO"): Promise<SloganRegenerationResult> {
     const detectedPlatform = detectPlatform(platform);
     const blockedSlogans = Array.isArray(excludeSlogans)
-        ? excludeSlogans.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 20)
+        ? excludeSlogans.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 30)
         : [];
 
-    const aiResponse = await chatCompletionSafe({
-        model: "gpt-4o-mini",
-        temperature: 0.85,
-        max_tokens: 1800,
-        response_format: { type: "json_object" },
-        messages: [
-            {
-                role: "system",
-                content: `You are a POD slogan specialist.
-Generate ONLY fresh t-shirt slogans for the supplied niche.
-
-RULES:
-    - Output valid JSON only.
-    - Return exactly 12 slogans.
-    - Use BEHAVIORAL HOOKS: Insider jokes, status signals, humility/bragging, relatable struggles.
-    - Wearability: Phrases humans actually say (e.g. "Just One More...", "Survivor", "Official Specialist").
-    - Avoid: "Built for X", "X state of mind", "Life is better with X".
-    - Tone: ${style || "Elite, conversion-focused"}
-
-JSON SHAPE:
-{
-  "shirtSlogans": ["slogan 1", "slogan 2", "...", "slogan 10"]
-}`,
-            },
-            {
-                role: "user",
-                content: [
-                    `Niche: ${prompt}`,
-                    platform ? `Platform: ${platform}` : "",
-                    audience ? `Audience: ${audience}` : "",
-                    style ? `Style/Tone: ${style}` : "",
-                    blockedSlogans.length > 0 ? `Avoid these slogans or near-duplicates:\n- ${blockedSlogans.join("\n- ")}` : "",
-                    "Return only JSON.",
-                ].filter(Boolean).join("\n\n"),
-            },
-        ],
-        usageContext: {
-            userId,
-            feature: "strategy.single",
-        },
-    });
-
-    if (aiResponse.error || !aiResponse.data) {
-        throw new Error("AI slogan regeneration service unavailable");
-    }
-
-    const text = aiResponse.data.choices[0].message.content || "{}";
-    let parsed: any;
-    try {
-        parsed = parseJsonPayload(text);
-    } catch {
-        throw new Error("AI did not return valid slogan JSON");
-    }
-
-    const merchPayload = await buildMerchPayload({
-        shirtSlogans: parsed?.shirtSlogans,
-    }, prompt, audience, style, userId, detectedPlatform, designMode);
+    // Regeneration now uses the same authoritative evidence-driven creative
+    // selection path as Strategy Factory, Design Studio, and Autopilot. There
+    // is deliberately no separate direct-LLM slogan prompt or template layer.
+    const merchPayload = await buildMerchPayload(
+        {},
+        prompt,
+        audience,
+        style,
+        userId,
+        detectedPlatform,
+        designMode,
+        blockedSlogans,
+    );
 
     return {
         shirtSlogans: merchPayload.shirtSlogans,
@@ -370,6 +344,10 @@ JSON SHAPE:
         visualEngineVersion: merchPayload.visualEngineVersion,
         winningSlogan: merchPayload.winningSlogan,
         dynamicProfile: merchPayload.dynamicProfile,
+        evidenceSnapshotId: merchPayload.evidenceSnapshotId,
+        evidenceContentHash: merchPayload.evidenceContentHash,
+        creativeTerritories: merchPayload.creativeTerritories,
+        semanticEligibility: merchPayload.semanticEligibility,
         dynamicListing: merchPayload.dynamicListing,
         amazonListing: merchPayload.amazonListing,
         sloganInsights: merchPayload.sloganInsights,
@@ -381,7 +359,7 @@ JSON SHAPE:
         detectedPlatform,
         platform: detectedPlatform,
         meta: {
-            apiCallsUsed: 1,
+            apiCallsUsed: 0,
             mode: "slogan-only",
         },
     };
@@ -400,15 +378,11 @@ export async function generateSingleStrategy(prompt: string, platform?: string, 
                     role: 'system',
                     content: `
 You are a cross-platform print-on-demand market strategist.
-Create a complete behavioral and market strategy for the idea below.
-SLOGAN SYSTEM (Elite Behavioral Design):
-- Generate slogans using COGNITIVE HOOKS: Recognition ("That's me"), Emotion ("That hits"), Social Signal ("Others get this").
-- Patterns: INSIDER_JOKE, STATUS_SIGNAL, HUMBLE_BRAG, RELATABLE_STRUGGLE.
-- Tone: Niche-authentic and wearable. Phrases should feel like spoken word, not ad copy.
-- No periods at the end of slogans. Max 8 words.
-- Commercially safe: no brand names or trademarks.
+Create market and audience context for the idea below.
 
-Score the niche based on: demand strength, competition pressure, emotional purchase power, design simplicity, platform fit (0-100).
+Do NOT generate slogans, slogan patterns, visual concepts, image prompts, or product listings. The authoritative evidence-driven creative selection engine runs after this strategy context is returned.
+
+Score the niche based on: demand strength, competition pressure, emotional purchase power, design simplicity, and platform fit (0-100).
 
 Output ONLY valid JSON:
 {
@@ -426,15 +400,12 @@ Output ONLY valid JSON:
   "estimatedCompetition": 0,
   "estimatedTrend": 0,
   "estimatedBuyerIntent": 0,
-  "shirtSlogans": ["slogan 1","slogan 2","...","slogan 10"],
   "salesSignals": {}
-}
-
-Do not generate image prompts, visual concepts, or product listings here. Separate winner-aware visual and listing engines run after behavioral ranking.`
+}`
                 },
                 {
                     role: 'user',
-                    content: `Idea: ${prompt}${platform ? `\nPlatform: ${platform}` : ''}${audience ? `\nTarget Audience: ${audience}` : ''}${style ? `\nStyle/Tone: ${style}` : ''}\n\nUse the user's details to populate the niches, audiences, and styles. Make slogans commercially strong, wearable, and varied enough to support ranking into top picks, bold picks, and experimental picks.`
+                    content: `Idea: ${prompt}${platform ? `\nPlatform: ${platform}` : ''}${audience ? `\nTarget Audience: ${audience}` : ''}${style ? `\nStyle/Tone: ${style}` : ''}\n\nUse the user's details to populate market context, audiences, and rendering-style context. Do not generate slogan copy.`
                 }
             ],
         usageContext: {
@@ -806,74 +777,66 @@ export async function generateChunk(niches: any[], isAutopilot: boolean = false,
     const settledResults = await Promise.allSettled(niches.map(async (nicheData) => {
         try {
             const trend = createTrendSnapshot(nicheData, 65);
-
-            const generation = await chatCompletionSafe({
-                model: 'gpt-4o-mini',
-                response_format: { type: 'json_object' },
-                messages: [
-                        {
-                            role: 'system',
-                            content: isAutopilot
-                                ? 'Generate one commercially safe POD slogan candidate. Return valid JSON exactly: { "slogan": "" }. Do not generate listing copy or artwork.'
-                                : `Generate POD slogan candidates. Always output valid JSON in exactly this structure:\n{\n    "shirtSlogans": ["", "", "", "", "", "", "", "", "", ""],\n    "designDirections": ["", ""]\n}\n\nSLOGAN RULES:\n- Use behavioral recognition, emotion, and social signaling.\n- Keep most slogans between 2 and 7 words.\n- Make them wearable, commercial, and emotionally sticky.\n- Include a mix of safe winners, bold lines, and experimental ideas.\n- Avoid generic motivational filler.\n\nDo not generate listing copy, image prompts, or visual concepts. Winner-aware engines run after slogan ranking.`
-                        },
-                        {
-                            role: 'user',
-                            content: isAutopilot
-                                ? `Create a slogan candidate for this POD niche: ${nicheData.niche}\nTarget Audience: ${nicheData.targetAudience || 'Broad'}\n\nOutput only JSON.`
-                                : `Create a POD shirt concept for:\n\nNiche: ${nicheData.niche}\nAudience: ${nicheData.targetAudience || 'Broad'}\n\nReturn valid JSON exactly as structured. The slogans should be varied enough to rank into top picks, bold picks, and experimental picks.`
-                        }
-                    ],
-                usageContext: {
-                    userId,
-                    feature: isAutopilot ? "factory.autopilotChunk" : "factory.bulkChunk",
-                },
-            });
-            if (generation.error || !generation.data) return null;
-
-            let gen;
-            try { gen = parseJsonPayload(generation.data.choices[0].message.content || "{}"); }
-            catch (err) { return null; }
-
             const market = generateMarketSignals(nicheData.niche, trend);
             const score = scoreWithMarketIntel(nicheData, market, trend);
+            const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
 
-            let product;
+            // Bulk Factory and Autopilot deliberately share the exact same
+            // evidence-driven creative path. No parallel slogan prompt exists here.
+            const merchPayload = await buildMerchPayload(
+                {},
+                nicheData.niche,
+                nicheData.targetAudience,
+                nicheData.style,
+                userId,
+                nicheData.platform || (isAutopilot ? "amazon" : undefined),
+            );
+            const topSlogan = merchPayload.winningSlogan;
+            const topSloganInsight = merchPayload.sloganInsights?.find((entry: any) => entry.slogan === topSlogan)
+                ?? merchPayload.sloganInsights?.[0]
+                ?? null;
+
             if (isAutopilot) {
-                const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
-                const merchPayload = await buildMerchPayload({
-                    shirtSlogans: gen.slogan ? [gen.slogan] : undefined,
-                }, nicheData.niche, nicheData.targetAudience, nicheData.style, userId, nicheData.platform || "amazon");
-                const topSlogan = merchPayload.winningSlogan;
-                const topSloganInsight = merchPayload.sloganInsights?.find((entry: any) => entry.slogan === topSlogan) ?? merchPayload.sloganInsights?.[0] ?? null;
-                product = {
-                    niche: nicheData.niche, slogan: topSlogan, sloganInsight: topSloganInsight,
+                return {
+                    niche: nicheData.niche,
+                    slogan: topSlogan,
+                    sloganInsight: topSloganInsight,
                     title: merchPayload.amazonListing.title,
                     bullet_point_1: merchPayload.amazonListing.bulletPoint1,
                     bullet_point_2: merchPayload.amazonListing.bulletPoint2,
                     description: merchPayload.amazonListing.description,
-                    trend, projectedRevenue, revenueCategory, ...market, ...merchPayload, ...score,
-                };
-            } else {
-                const { projectedRevenue, revenueCategory } = calculateRevenue(nicheData.niche, market.trendMomentum);
-                const merchPayload = await buildMerchPayload(gen, nicheData.niche, nicheData.targetAudience, nicheData.style, userId, nicheData.platform);
-                const topSloganScore = merchPayload.sloganInsights?.[0]?.score || 50;
-                product = {
-                    niche: nicheData.niche, audience: nicheData.targetAudience, whyItSells: nicheData.whyItSells,
-                    safe: nicheData.safe, trend, projectedRevenue, revenueCategory, ...market, ...merchPayload, ...score,
-                    bestSellerPredictor: buildBestSellerPredictor({ ...merchPayload, ...score, ...market }, market, topSloganScore),
-                    metricsSource: score.metricsSource || market.metricsSource || 'simulated'
+                    trend,
+                    projectedRevenue,
+                    revenueCategory,
+                    ...market,
+                    ...merchPayload,
+                    ...score,
                 };
             }
-            return product;
+
+            const topSloganScore = merchPayload.sloganInsights?.[0]?.score || 50;
+            return {
+                niche: nicheData.niche,
+                audience: nicheData.targetAudience,
+                whyItSells: nicheData.whyItSells,
+                safe: nicheData.safe,
+                trend,
+                projectedRevenue,
+                revenueCategory,
+                ...market,
+                ...merchPayload,
+                ...score,
+                bestSellerPredictor: buildBestSellerPredictor({ ...merchPayload, ...score, ...market }, market, topSloganScore),
+                metricsSource: score.metricsSource || market.metricsSource || "simulated",
+            };
         } catch (err) {
+            logError(`Chunk generation failed for ${nicheData?.niche || "unknown niche"}`, err);
             return null;
         }
     }));
 
-    const results = settledResults
-        .filter(r => r.status === 'fulfilled' && r.value)
-        .map(r => (r as PromiseFulfilledResult<any>).value);
-
-    return results.filter(Boolean);
+    return settledResults
+        .filter((result): result is PromiseFulfilledResult<any> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter(Boolean);
 }

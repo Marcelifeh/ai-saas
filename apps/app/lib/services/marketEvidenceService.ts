@@ -113,65 +113,138 @@ export async function getNicheEvidence(niche: string): Promise<NicheMarketEviden
   const id = `ME-${hexSuffix}`;
   const version = "v1.0";
 
-  // 1. Fetch live aggregate trend signals across Google, SerpAPI, Reddit, HN
+  // 1. Fetch aggregate trend signals. Evidence quality is derived from the
+  // actual contributing sources; no simulated velocity, source counts, or
+  // confidence values are injected here.
   let rawSignals: string[] = [];
+  let sources: Array<{
+    source: string;
+    data: string[];
+    confidence: number;
+    fetchedAt: string;
+    cachedAt?: string;
+  }> = [];
+  let aggregateConfidence = 0;
   try {
     const collected = await collectTrendSignals();
     rawSignals = collected.signals || [];
+    sources = (collected.sources || []).map((source) => ({
+      source: source.source,
+      data: source.data || [],
+      confidence: source.confidence || 0,
+      fetchedAt: source.fetchedAt,
+      cachedAt: source.cachedAt,
+    }));
+    aggregateConfidence = collected.signalConfidence || 0;
   } catch (err) {
     console.warn("marketEvidenceService: Failed to collect live trend signals", err);
   }
 
-  // Filter trends relevant to or matching niche keywords
-  const nicheTokens = cleanNiche.split(/\s+/).filter((t) => t.length > 2);
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const nicheTokens = cleanNiche.split(/\s+/).filter((token) => token.length > 2);
   const matchedSignals = rawSignals.filter((signal) => {
-    const lower = signal.toLowerCase();
+    const lower = normalize(signal);
     return nicheTokens.some((token) => lower.includes(token));
   });
+  const selectedSignals = matchedSignals.length > 0 ? matchedSignals : rawSignals.slice(0, 8);
 
-  const trendSignals: TrendSignal[] = (matchedSignals.length > 0 ? matchedSignals : rawSignals.slice(0, 8)).map((phrase) => ({
-    phrase,
-    confidence: matchedSignals.includes(phrase) ? 0.92 : 0.75,
-    sourceCount: 2,
-    velocity: 1.15,
-  }));
+  const trendSignals: TrendSignal[] = selectedSignals.map((phrase) => {
+    const normalizedPhrase = normalize(phrase);
+    const contributors = sources.filter((source) => (source.data || []).some((item) => normalize(item) === normalizedPhrase));
+    const confidence = contributors.length > 0
+      ? contributors.reduce((sum, source) => sum + source.confidence, 0) / contributors.length
+      : aggregateConfidence;
+    return {
+      phrase,
+      confidence: Math.round(Math.max(0, Math.min(1, confidence)) * 100) / 100,
+      sourceCount: contributors.length,
+    };
+  });
 
-  // 2. Extract community knowledge & buyer phrases
+  // 2. Community-language evidence is derived deterministically from the
+  // existing knowledge sources. Evidence counts reflect actual supporting
+  // collections, not random values.
   const profile = getBehavioralProfile(cleanNiche);
   const knowledge = getCommunityKnowledge(cleanNiche, profile);
   const pool = getBehaviorFragmentPool(cleanNiche, undefined, profile);
   const compressionTokens = getCommunityCompressionTokens(cleanNiche, profile);
 
-  const buyerPhrasesRaw = Array.from(new Set([
-    ...knowledge.insiderPhrases,
-    ...pool.repeatedThoughts,
-    ...pool.microBehaviors,
-    ...pool.internalJokes,
-    ...compressionTokens,
-  ])).filter(Boolean);
+  const buyerCollections = [
+    knowledge.insiderPhrases,
+    pool.repeatedThoughts,
+    pool.microBehaviors,
+    pool.internalJokes,
+    compressionTokens,
+  ].map((collection) => collection.filter(Boolean));
+  const buyerPhrasesRaw = Array.from(new Set(buyerCollections.flat())).filter(Boolean);
 
-  const buyerLanguage: BuyerPhrase[] = buyerPhrasesRaw.slice(0, 12).map((phrase) => ({
-    phrase,
-    confidence: 0.88,
-    evidenceCount: Math.floor(Math.random() * 20) + 5,
-  }));
+  const buyerLanguage: BuyerPhrase[] = buyerPhrasesRaw.slice(0, 12).map((phrase) => {
+    const evidenceCount = buyerCollections.filter((collection) => collection.includes(phrase)).length;
+    return {
+      phrase,
+      confidence: Math.round(Math.min(0.95, 0.55 + evidenceCount * 0.1) * 100) / 100,
+      evidenceCount,
+    };
+  });
 
-  const culturalSignals: CulturalSignal[] = Array.from(new Set([
-    ...knowledge.stereotypeHooks.map((phrase) => ({ phrase, category: "stereotype" as const })),
-    ...knowledge.environmentalAnchors.map((phrase) => ({ phrase, category: "anchor" as const })),
-    ...pool.identitySignals.map((phrase) => ({ phrase, category: "identity" as const })),
-  ])).slice(0, 8);
+  const culturalSignalEntries: Array<[string, CulturalSignal]> = [
+    ...knowledge.stereotypeHooks.map(
+      (phrase): [string, CulturalSignal] => [
+        phrase,
+        { phrase, category: "stereotype" },
+      ],
+    ),
+    ...knowledge.environmentalAnchors.map(
+      (phrase): [string, CulturalSignal] => [
+        phrase,
+        { phrase, category: "anchor" },
+      ],
+    ),
+    ...pool.identitySignals.map(
+      (phrase): [string, CulturalSignal] => [
+        phrase,
+        { phrase, category: "identity" },
+      ],
+    ),
+  ];
 
-  const purchaseSignals: PurchaseSignal[] = Array.from(new Set([
-    ...pool.obsessionArtifacts.map((phrase) => ({ phrase, category: "artifact" as const })),
-    ...pool.statusSignals.map((phrase) => ({ phrase, category: "status" as const })),
-    ...knowledge.communityTensions.map((phrase) => ({ phrase, category: "tension" as const })),
-  ])).slice(0, 8);
+  const culturalSignals: CulturalSignal[] = Array.from(
+    new Map<string, CulturalSignal>(culturalSignalEntries).values(),
+  ).slice(0, 8);
 
+  const purchaseSignalEntries: Array<[string, PurchaseSignal]> = [
+    ...pool.obsessionArtifacts.map(
+      (phrase): [string, PurchaseSignal] => [
+        phrase,
+        { phrase, category: "artifact" },
+      ],
+    ),
+    ...pool.statusSignals.map(
+      (phrase): [string, PurchaseSignal] => [
+        phrase,
+        { phrase, category: "status" },
+      ],
+    ),
+    ...knowledge.communityTensions.map(
+      (phrase): [string, PurchaseSignal] => [
+        phrase,
+        { phrase, category: "tension" },
+      ],
+    ),
+  ];
+
+  const purchaseSignals: PurchaseSignal[] = Array.from(
+    new Map<string, PurchaseSignal>(purchaseSignalEntries).values(),
+  ).slice(0, 8);
+
+  const sourceTimes = sources
+    .flatMap((source) => [source.cachedAt, source.fetchedAt])
+    .filter((value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)))
+    .map((value) => new Date(value).getTime());
   const freshness: SignalFreshness = {
-    oldestSignalAt: new Date(Date.now() - 3600000).toISOString(),
-    newestSignalAt: timestamp,
-    confidence: 0.88,
+    oldestSignalAt: sourceTimes.length > 0 ? new Date(Math.min(...sourceTimes)).toISOString() : undefined,
+    newestSignalAt: sourceTimes.length > 0 ? new Date(Math.max(...sourceTimes)).toISOString() : timestamp,
+    confidence: Math.round(Math.max(0, Math.min(1, aggregateConfidence)) * 100) / 100,
   };
 
   const payloadUnfrozen = {

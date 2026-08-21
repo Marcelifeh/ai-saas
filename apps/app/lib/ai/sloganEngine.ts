@@ -1,5 +1,12 @@
 // ─── Market Intelligence Helpers ───────────────────────────────────────────
 import { getNicheEvidence } from "@/lib/services/marketEvidenceService";
+import {
+  assessSemanticEligibility,
+  discoverCreativeTerritories,
+  type CreativeEvidenceContext,
+  type CreativeTerritory,
+  type SemanticEligibilityAssessment,
+} from "./dynamicCreativeSelectionEngine";
 
 // Get top and low-performing patterns for a niche from DB
 async function getTopPatterns(niche: string) {
@@ -243,6 +250,10 @@ export interface SloganEngineResult {
   personaKey: string;
   mode: string;
   dynamicProfile?: DynamicNicheProfile;
+  evidenceSnapshotId?: string;
+  evidenceContentHash?: string;
+  creativeTerritories?: CreativeTerritory[];
+  semanticEligibility?: SemanticEligibilityAssessment[];
   error?: "DYNAMIC_PROFILE_GENERATION_FAILED";
   fallbackUsed?: boolean;
 }
@@ -259,6 +270,7 @@ export interface SloganEngineInput {
   context?: string;
   cacheTtlSec?: number;
   layoutMode?: SloganLayoutMode;
+  excludeSlogans?: string[];
 }
 
 type PatternFamily = "ATTITUDE" | "HUMOR" | "IDENTITY" | "CONTRAST" | "STATEMENT" | "MINIMAL_LABEL" | "IDENTITY_SIGNAL" | "RELATABLE_LOOP" | "SOCIAL_SIGNAL" | "LEGACY";
@@ -2340,135 +2352,34 @@ function heuristicPatternScore(slogan: string): number {
   return clamp(score, 0, 100);
 }
 
-function computeConfidence(finalScore: number, wearability: number, memorability: number, genericPenalty: number, marketSignalScore: number): number {
+function computeConfidence(
+  finalScore: number,
+  wearability: number,
+  memorability: number,
+  genericPenalty: number,
+  marketSignalScore: number,
+): number {
   const clarity = wearability * 0.35 + memorability * 0.25;
   const distinctiveness = (100 - genericPenalty) * 0.2;
   const evidence = marketSignalScore * 0.2;
-  return clamp(Math.round(finalScore * 0.35 + clarity + distinctiveness + evidence), 0, 100);
+
+  return clamp(
+    Math.round(
+      finalScore * 0.35 +
+        clarity +
+        distinctiveness +
+        evidence,
+    ),
+    0,
+    100,
+  );
 }
 
-export async function refineWithGPT4o(
-  slogans: string[],
+function deriveTags(
+  slogan: string,
   niche: string,
   audience?: string,
-): Promise<string[]> {
-  if (slogans.length === 0) return [];
-
-  const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
-    temperature: 0.85,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `You are an elite t-shirt slogan polisher. 
-Take the draft slogans and refine them into "Best Sellers".
-
-ELITE DIVERSITY ENFORCEMENT:
-Your output must maintain this balance if possible:
-- Short labels (Pure niche hooks)
-- Wordplay/puns (Double meanings)
-- Relatable humor (Community struggles/loop)
-- Insider signals (Deep community knowledge)
-- Bold identity claims
-
-RULES:
-- NO PERIODS anywhere in the slogan. (e.g. "Pure Pickleball", NOT "Pure Pickleball.")
-- NO boring filler words like "Ref", "Mood", "Vibe", "Whisperer", "Legends".
-- Retain the core niche reference.
-- Phrases must be short, punchy, and wearable on a shirt.
-
-Return ONLY JSON: { "slogans": ["polished 1", "polished 2", ...] }`,
-      },
-      {
-        role: "user",
-        content: `Niche: ${niche}\nAudience: ${audience || "fans"}\nDrafts:\n- ${slogans.join("\n- ")}`,
-      },
-    ],
-  });
-
-  if (response.error || !response.data?.choices[0]?.message?.content) {
-    return slogans; // Fallback to originals
-  }
-
-  try {
-    const parsed = JSON.parse(response.data.choices[0].message.content);
-    return parsed.slogans || slogans;
-  } catch {
-    return slogans;
-  }
-}
-
-/**
- * Primary LLM-first generator: produce behavioral slogans directly from behavioral signals.
- * Falls back to `buildFromPatterns` when LLM is unavailable.
- */
-export async function generateBehavioralSlogans({
-  niche,
-  behaviors,
-  count = 20,
-}: {
-  niche: string;
-  behaviors: string[];
-  count?: number;
-}): Promise<string[]> {
-  try {
-    const prompt = `You are creating HIGH-CONVERTING t-shirt slogans.
-
-Niche: ${niche}
-
-Behavioral truths:
-${(behaviors || []).slice(0, 12).map((b) => `- ${b}`).join("\n")}
-
-Write ${count} slogans that:
-- sound like real people in this niche
-- use slang, humor, or inside jokes
-- are short (2–6 words)
-- feel wearable (not descriptive)
-
-Avoid:
-- generic phrases
-- "[niche] mode"
-- "too X to Y"
-- obvious templates
-
-Make them feel like something someone would actually wear.
-
-Return JSON:
-{ "slogans": ["...", "..."] }
-`;
-
-    const response = await chatCompletionSafe({
-      model: "gpt-4o-mini",
-      temperature: 0.95,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: "You are a witty, niche-aware t-shirt copywriter." },
-        { role: "user", content: prompt },
-      ],
-    });
-
-    if (response.error || !response.data?.choices?.[0]?.message?.content) throw new Error("LLM unavailable");
-    try {
-      const parsed = JSON.parse(response.data.choices[0].message.content);
-      if (Array.isArray(parsed.slogans)) return parsed.slogans.map(String).slice(0, count);
-    } catch (_) {
-      // fallthrough to naive parse
-    }
-
-    // naive parse fallback
-    const raw = response.data.choices[0].message.content || "";
-    return raw
-      .split(/\n+/)
-      .map((l: string) => l.replace(/^[-*\d.\s\"]+/, "").trim())
-      .filter((l: string) => l.length > 0)
-      .slice(0, count);
-  } catch {
-    return [];
-  }
-}
-
-function deriveTags(slogan: string, niche: string, audience?: string): string[] {
+): string[] {
   return dedupeStrings([
     ...extractMeaningfulTokens(niche),
     ...extractMeaningfulTokens(audience || ""),
@@ -2772,29 +2683,6 @@ function dedupeRanked(ranked: RankedSlogan[]): RankedSlogan[] {
   });
 }
 
-function remixSlogans(seed: string, identities: string[], emotions: string[]): string[] {
-  const results: string[] = [];
-  const transformations = [
-    (s: string) => s.replace(/\.$/, "!"),
-    (s: string) => `${s} All day.`,
-    (s: string) => `${s} No apologies.`,
-  ];
-  for (const fn of transformations) {
-    try {
-      const variant = cleanSlogan(fn(seed));
-      if (variant.split(/\s+/).length <= 10) results.push(variant);
-    } catch (_) { /* skip */ }
-  }
-  for (let i = 0; i < Math.min(3, identities.length); i++) {
-    const id = identities[i];
-    const em = emotions[i % emotions.length];
-    results.push(cleanSlogan(`${toTitleCase(id)}. No apologies.`));
-    results.push(cleanSlogan(`Built for ${id.toLowerCase()}.`));
-    results.push(cleanSlogan(`${toTitleCase(em)}. All in.`));
-  }
-  return results.slice(0, 20);
-}
-
 function buildCollections(ranked: RankedSlogan[]): SloganCollections {
   const assigned = new Set<string>();
   const topPicks: RankedSlogan[] = [];
@@ -2811,354 +2699,7 @@ function buildCollections(ranked: RankedSlogan[]): SloganCollections {
   return { topPicks, boldPicks, experimental };
 }
 
-// ─── Pattern Helpers (Build concrete slogans from LLM pattern templates) ───
-
-function isValidPattern(p: string): boolean {
-  if (!p || typeof p !== "string") return false;
-  const trimmed = p.trim();
-  if (trimmed.length === 0 || trimmed.length > 120) return false;
-  const lower = trimmed.toLowerCase();
-  if (lower.includes("generic") || lower.includes("vibe")) return false;
-  // Prefer patterns that include an anchor placeholder or at least mention the niche
-  if (/\[anchor\]|\{anchor\}|\[anchor\]/i.test(trimmed)) return true;
-  // Accept patterns that are short and contain a noun placeholder token
-  if (/\[(noun|anchor|thing)\]/i.test(trimmed)) return true;
-  // Otherwise accept if it includes a bracketed placeholder or the niche word
-  if (/\[.*\]/.test(trimmed)) return true;
-  return trimmed.split(/\s+/).length <= 5;
-}
-
-export function buildFromPatterns(patterns: string[], niche: string): string[] {
-  const anchors = dedupeStrings(deriveNicheIdentities(niche, inferPersona(niche).key)).slice(0, 6);
-  const emotions = dedupeStrings(deriveNicheEmotions(niche, inferPersona(niche).key)).slice(0, 6);
-  const results: string[] = [];
-
-  for (const pat of patterns) {
-    const template = pat.trim();
-    const variants: string[] = [];
-    // Replacement strategies
-    const placeholders = ["[ANCHOR]", "{ANCHOR}", "[anchor]", "[NOUN]", "[noun]"];
-    const hasPlaceholder = placeholders.some((ph) => template.includes(ph));
-
-    if (hasPlaceholder && anchors.length > 0) {
-      for (const a of anchors.slice(0, 3)) {
-        variants.push(template.replace(/\[ANCHOR\]|\{ANCHOR\}|\[anchor\]/gi, a));
-      }
-    } else if (template.includes("[EMOTION]") && emotions.length > 0) {
-      for (const e of emotions.slice(0, 3)) variants.push(template.replace(/\[EMOTION\]/gi, e));
-    } else {
-      // No placeholder — try to inject anchors in a few common positions
-      const candidate = template.replace(/\s+/g, " ").trim();
-      if (anchors.length > 0) {
-        variants.push(`${anchors[0]} ${candidate}`);
-        variants.push(`${candidate} ${anchors[0]}`);
-        if (anchors[1]) variants.push(`${anchors[1]} ${candidate}`);
-      } else {
-        variants.push(candidate);
-      }
-    }
-
-    for (const v of variants) {
-      const cleaned = cleanSlogan(v);
-      if (!isGeneric(cleaned) && cleaned.split(/\s+/).length <= 8) results.push(cleaned);
-    }
-  }
-
-  return dedupeStrings(results).slice(0, 48);
-}
-
-function selectTopPerformers(ranked: RankedSlogan[]): RankedSlogan[] {
-  const cutoff = Math.max(4, Math.ceil(ranked.length * 0.1));
-  return ranked.slice(0, cutoff);
-}
-
-// ─── AI Slogan Generator ──────────────────────────────────────────────────────
-
-async function generateAISlogans(
-  niche: string,
-  audience: string | undefined,
-  personaLabel: string,
-  mode: SloganMode,
-  dominantClusters: string[] = [],
-): Promise<string[]> {
-  // Market intelligence
-  const [winningPatterns, losingPatterns, trendingKeywords, buyerPhrases] = await Promise.all([
-    getTopPatterns(niche),
-    getLowPerformingPatterns(niche),
-    getTrendingKeywords(niche),
-    getBuyerPhrases(niche),
-  ]);
-
-  const emotions = pickEmotion(niche);
-
-  const systemPrompt = `You are a top-selling t-shirt copywriter.
-Your goal is to create slogans that trigger instant recognition and identity.
-
-ELITE STRUCTURAL DIVERSITY RULE (CRITICAL):
-You must provide a varied mix:
-- 2 short label-style slogans (2–3 words)
-- 2 wordplay or pun-based slogans
-- 2 relatable humor/struggle slogans
-- 2 niche-specific insider signals (use anchors or insider phrasing)
-- 2 bold attitude/identity slogans
-
-RULES:
-- NO PERIODS at the end of slogans.
-- NO generic filler like "Vibe", "Mood", "Legend", "Whisperer".
-- Keep each slogan short and hook-driven (2–7 words).
-- Use strong verbs, contrasts, or punchlines. Favor active voice.
-- Prefer surprising pairings, sharp contrasts, or clever wordplay over generic phrases.
-- Tone: ${mode === "edgy" ? "Raw and aggressive" : "Modern and authentic"}.
-- Preferred Emotions: ${emotions.join(", ")}.
-
-OUTPUT STYLE GUIDANCE:
-- Front-load the hook: start with the strongest word.
-- Avoid templated copy like "If you know you know"; instead use niche anchors (e.g., "[ANCHOR] Insiders", "Only [ANCHOR] People Know").
-- Include at least one slogan that is a punchy command or contrast (e.g., "Win Not Excuse").
-- If producing puns, ensure they are concise and immediately understandable.
-
-Return JSON: { "slogans": ["slogan 1", "slogan 2", ...] }`;
-
-  let userPrompt = [
-    `NICHE: ${niche}`,
-    audience ? `AUDIENCE: ${audience}` : `AUDIENCE: enthusiasts and fans of this niche`,
-    `PERSONA: ${personaLabel}`,
-    dominantClusters.length > 0 ? `DOMINANT TONES: ${dominantClusters.join(", ")}` : "",
-  ].filter(Boolean).join("\n");
-
-  // Inject high-conversion examples to bias generation towards winning patterns
-  try {
-    const topExamples = await getTopPerformingSlogans(niche, 4);
-    if (topExamples.length > 0) {
-      const exampleBlock = ["HIGH-CONVERTING EXAMPLES:", ...topExamples.map((s) => `\"${s}\"`)].join("\n");
-      // Place examples after user prompt to bias output without copying
-      userPrompt += `\n\n${exampleBlock}\nWrite new slogans inspired by these patterns but DO NOT copy them. Use punchy hooks, verbs, and avoid generic phrasing.`;
-    }
-  } catch (_) { /* non-blocking */ }
-
-  try {
-    const response = await chatCompletionSafe({
-      model: "gpt-4o-mini",
-      temperature: 0.95, // 🔥 increase creativity
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        { role: "user", content: userPrompt },
-      ],
-    });
-
-    if (response.error || !response.data?.choices[0]?.message?.content) return [];
-
-    const raw = response.data.choices[0].message.content;
-    let rawSlogans: string[] = [];
-
-    try {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      if (Array.isArray(parsed)) {
-        rawSlogans = parsed.map(String);
-      } else if (parsed && typeof parsed === "object") {
-        for (const val of Object.values(parsed)) {
-          if (Array.isArray(val)) { rawSlogans = val.map(String); break; }
-        }
-      }
-    } catch {
-      rawSlogans = raw
-        .split("\n")
-        .map((l) => l.replace(/^[-*\[\]\d."]+\s*/g, "").trim())
-        .filter((l) => l.length > 3);
-    }
-
-    // 🔥 SEMANTIC DEDUPLICATION
-    const unique: string[] = [];
-    const seen = new Set<string>();
-
-    for (const s of rawSlogans) {
-      if (typeof s !== "string") continue;
-      const normalized = s
-        .toLowerCase()
-        .replace(/[^a-z0-9 ]/g, "")
-        .replace(/\b(too|very|really)\b/g, "")
-        .trim();
-
-      if (normalized.length > 0 && !seen.has(normalized)) {
-        seen.add(normalized);
-        unique.push(cleanSlogan(s)); // our robust formatter
-      }
-    }
-
-    // 🔥 PATTERN PENALTY FILTER
-    const filtered = unique.filter((s) => {
-      const lower = s.toLowerCase();
-      if (lower.includes("too ") && lower.includes(" to ")) return false;
-      if (lower.startsWith("built for")) return false;
-      if (lower.includes("no apologies")) return false;
-      if (lower.includes("state of mind")) return false;
-      return true;
-    });
-
-    return filtered.slice(0, 10);
-  } catch (_) {
-    return [];
-  }
-}
-
-/**
- * Expand pattern families using the LLM — returns short slogan structures
- * (placeholders or short patterns) rather than final slogans. This is
- * intended to evolve pattern families, not replace deterministic templates.
- */
-export async function expandPatternFamilies(niche: string, count = 5, behaviors: string[] = []): Promise<string[]> {
-  try {
-    const response = await chatCompletionSafe({
-      model: "gpt-4o-mini",
-      temperature: 0.88,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `You are a creative slogan pattern inventor. Produce ${count} concise slogan structures or pattern templates for niche: ${niche}. Use insider phrasing and placeholders where appropriate. Prioritize the following behavioral truths when generating patterns:\n${(behaviors || []).slice(0,8).map((b) => `- ${b}`).join("\n")}\nReturn only JSON: { "patterns": ["pattern 1", "pattern 2", ...] }`,
-        },
-      ],
-    });
-
-    if (response.error || !response.data?.choices[0]?.message?.content) return [];
-
-    try {
-      const parsed = JSON.parse(response.data.choices[0].message.content);
-      if (Array.isArray(parsed.patterns)) return parsed.patterns.map(String).slice(0, count);
-    } catch (_) {
-      // fallthrough to safe parsing
-    }
-
-    // Fallback naive parse
-    const raw = response.data.choices[0].message.content;
-    return raw
-      .split(/\n+/)
-      .map((l: string) => l.replace(/^[-*\d.\s\"]+/, "").trim())
-      .filter((l: string) => l.length > 0)
-      .slice(0, count);
-  } catch (_) {
-    return [];
-  }
-}
-
-/**
- * Mutate a single base pattern into multiple novel pattern structures using the LLM.
- * Returns an array of short pattern templates (2-5 words) suitable for `buildFromPatterns`.
- */
-export async function mutatePatternFamily(basePattern: string, niche: string, count = 8, behaviors: string[] = []): Promise<string[]> {
-  if (!basePattern || basePattern.trim().length === 0) return [];
-  try {
-    const prompt = `You are a viral t-shirt slogan strategist.
-
-BASE PATTERN:
-"${basePattern}"
-
-NICHE:
-${niche}
-
-BEHAVIORAL TRUTHS:
-${(behaviors || []).slice(0,8).map((b) => `- ${b}`).join("\n")}
-
-TASK:
-Generate ${count} completely NEW slogan structures inspired by the base pattern and the behavioral truths above.
-
-RULES:
-- DO NOT reuse the original pattern exactly
-- DO NOT use "${niche}" explicitly in more than 2 outputs
-- Use insider language if possible
-- Keep each structure 2–6 words, favor conversational phrasing
-- Make them wearable, punchy, and natural
-- Vary structure (question, command, label, humor, inside joke, regret)
-
-RETURN JSON:
-{ "patterns": ["pattern 1", "pattern 2", ...] }
-`;
-
-    const response = await chatCompletionSafe({
-      model: "gpt-4o-mini",
-      temperature: 0.95,
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: prompt }],
-    });
-
-    if (response.error || !response.data?.choices[0]?.message?.content) return [];
-
-    try {
-      const parsed = JSON.parse(response.data.choices[0].message.content);
-      if (Array.isArray(parsed.patterns)) return parsed.patterns.map(String).slice(0, count);
-    } catch (_) {
-      // fallthrough to naive parsing
-    }
-
-    const raw = response.data.choices[0].message.content || "";
-    return raw
-      .split(/\n+/)
-      .map((l: string) => l.replace(/^[-*\d.\s\"]+/, "").trim())
-      .filter((l: string) => l.length > 0)
-      .slice(0, count);
-  } catch (_) {
-    return [];
-  }
-}
-
-function buildEliteSloganEngine(input: SloganEngineInput): SloganEngineResult {
-  const { niche, audience, mode: modeInput, salesSignals: rawSignals } = input;
-  const mode = normalizeMode(modeInput);
-  const persona = inferPersona(niche, audience);
-  const salesSignals = normalizeSalesSignals(rawSignals);
-
-  const seededInputSlogans = normalizeStrings(input.shirtSlogans);
-  const rawSlogans = rejectTemplateStructures(
-    dedupeStrings([...seededInputSlogans]),
-  ).filter((s) => !isGeneric(s) && !containsBoilerplateStructure(s) && !isRawNicheRestatement(s, niche) && !isGenericFallbackSlogan(s));
-  const clusters: EmotionCluster[] = detectEmotionalClustersForNiche(niche);
-
-  const ranked: RankedSlogan[] = rawSlogans.map((slogan) => {
-    const clean = cleanSlogan(slogan);
-    const scored = scoreSlogan(clean, salesSignals, mode, niche, {});
-    const reasons = buildReasons(scored);
-    const bucket = chooseBucket(scored.finalScore, scored.hookScore);
-    const pattern = detectPattern(clean);
-    return {
-      ...scored,
-      slogan: clean,
-      pattern,
-      persona: persona.label,
-      personaKey: persona.key,
-      tags: deriveTags(clean, niche, audience),
-      reasons,
-      salesSignals,
-      bucket,
-      hasSalesEvidence: (salesSignals.confidence ?? 0) > 0 || Object.keys(salesSignals).length > 0,
-    };
-  }).filter((entry) => !matchesTemplateDeathFilter(entry.slogan) && passesChestPrintFilter(entry.slogan));
-
-  // Apply dynamic normalization across the initial batch so component weights are meaningful
-  const normalizedBatch = applyBatchNormalization(ranked);
-
-  // use normalized batch for downstream sorting/collections
-  const sorted = applyBehavioralWinnerGate(diversifyRanked(dedupeRanked(sortRanked(normalizedBatch)), niche))
-    .filter((entry) => !matchesTemplateDeathFilter(entry.slogan));
-  const collections = buildCollections(sorted);
-  
-  const ELITE_THRESHOLD = 72;
-  const eliteSloganObjs = sorted.filter((s) => s.score >= ELITE_THRESHOLD);
-  const finalSloganObjs = eliteSloganObjs.length >= 5 ? eliteSloganObjs.slice(0, 5) : sorted.slice(0, 5);
-  const topSlogans = dedupeStrings(finalSloganObjs.map((r) => r.slogan));
-
-  return {
-    slogans: topSlogans,
-    ranked: sorted,
-    collections,
-    persona: persona.label,
-    personaKey: persona.key,
-    mode,
-  };
-}
+// Legacy template/pattern generation removed. The authoritative creative path begins below.
 
 // ─── Public Exports ───────────────────────────────────────────────────────────
 
@@ -3191,6 +2732,7 @@ function rankDynamicProfileSlogans(
   base: Pick<SloganEngineResult, "persona" | "personaKey" | "mode">,
   compressionAttempts: DynamicCompressionAttempt[] = [],
   selfRevelationAssessments: SelfRevelationAssessment[] = [],
+  semanticEligibilityAssessments: SemanticEligibilityAssessment[] = [],
 ): RankedSlogan[] {
   const salesSignals = normalizeSalesSignals(input.salesSignals);
   const layoutMode = input.layoutMode ?? "standard";
@@ -3208,11 +2750,17 @@ function rankDynamicProfileSlogans(
       assessment,
     ]),
   );
+  const semanticEligibilityDiagnostics = new Map(
+    semanticEligibilityAssessments.map((assessment) => [
+      canonicalSloganKey(assessment.slogan),
+      assessment,
+    ]),
+  );
 
   const individuallyRanked = dedupeStrings(slogans)
     .map(cleanSlogan)
     .filter(Boolean)
-    .filter((slogan) => !rejectsPatternLeakage(slogan))
+    .filter((slogan) => semanticEligibilityDiagnostics.get(canonicalSloganKey(slogan))?.eligible === true)
     .map((slogan) => {
       const brevity = evaluateAdaptiveBrevity(slogan, lengthBudget);
       const truthScore = dynamicTruthResonanceScore(slogan, profile);
@@ -3232,6 +2780,9 @@ function rankDynamicProfileSlogans(
         score: 50,
         reason: "Classifier unavailable",
       };
+      const semanticEligibility = semanticEligibilityDiagnostics.get(
+        canonicalSloganKey(slogan),
+      );
       const weightedScore = clamp(Math.round(
         truthScore * rankingWeights.truth +
           authenticityScore * rankingWeights.authenticity +
@@ -3265,11 +2816,12 @@ function rankDynamicProfileSlogans(
         personaKey: base.personaKey,
         tags: dedupeStrings([...profile.dimensions, ...deriveTags(slogan, input.niche, input.audience)]).slice(0, 8),
         reasons: [
-          "Generated from dynamic niche profile",
-          "Passed pattern leakage gate",
+          "Generated from grounded dynamic creative territory",
+          "Passed semantic truth eligibility gates",
           "Passed compressed behavioral evidence gate",
           `Estimated self-recognition: ${recognitionProbability}`,
           `Self-revelation: ${selfRevelationAssessment.classification}`,
+          ...(semanticEligibility?.reasons ?? []),
           `Ranked for ${layoutMode} layout`,
         ],
         salesSignals,
@@ -3349,8 +2901,30 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   const base = createEmptyResult(input);
 
   try {
-    const dynamicProfile = await buildDynamicNicheProfile(input.niche, input.audience);
-    const generated = await generateSlogansFromDynamicProfile(dynamicProfile, 20);
+    const marketEvidence = await getNicheEvidence(input.niche);
+    const creativeEvidence: CreativeEvidenceContext = {
+      snapshotId: marketEvidence.id,
+      contentHash: marketEvidence.contentHash,
+      trendSignals: marketEvidence.trendSignals.map((signal) => signal.phrase),
+      buyerLanguage: marketEvidence.buyerLanguage.map((signal) => signal.phrase),
+      culturalSignals: marketEvidence.culturalSignals.map((signal) => signal.phrase),
+      purchaseSignals: marketEvidence.purchaseSignals.map((signal) => signal.phrase),
+    };
+
+    const dynamicProfile = await buildDynamicNicheProfile(
+      input.niche,
+      input.audience,
+      creativeEvidence,
+    );
+    const creativeTerritories = await discoverCreativeTerritories(
+      dynamicProfile,
+      creativeEvidence,
+      8,
+    );
+    const generated = await generateSlogansFromDynamicProfile(dynamicProfile, 32, {
+      creativeTerritories,
+      excludeSlogans: input.excludeSlogans,
+    });
     const lengthBudget = deriveSloganLengthBudget(dynamicProfile, input.layoutMode ?? "standard");
     const compressionAttempts = await compressDynamicSlogansWithDiagnostics(
       dynamicProfile,
@@ -3371,17 +2945,32 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       .filter((attempt) => attempt.preservesMeaning)
       .map((attempt) => attempt.compressed);
     const compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
-    const selfRevelationAssessments = await classifyDynamicSelfRevelation(
+
+    // Eligibility is a hard semantic gate. Quality scores cannot compensate for
+    // fabricated behavior, merchandise-dependent copy, crossover collapse, or
+    // incoherent token stitching.
+    const semanticEligibility = await assessSemanticEligibility(
       dynamicProfile,
       compressionCandidates,
+      creativeTerritories,
+      creativeEvidence,
+    );
+    const eligibleCandidates = compressionCandidates.filter((slogan) => (
+      semanticEligibility.find((assessment) => canonicalSloganKey(assessment.slogan) === canonicalSloganKey(slogan))?.eligible
+    ));
+
+    const selfRevelationAssessments = await classifyDynamicSelfRevelation(
+      dynamicProfile,
+      eligibleCandidates,
     );
     const dynamicRanked = rankDynamicProfileSlogans(
-      compressionCandidates,
+      eligibleCandidates,
       input,
       dynamicProfile,
       base,
       [...compressionAttempts, ...retryAttempts],
       selfRevelationAssessments,
+      semanticEligibility,
     );
     if (dynamicRanked.length > 0) {
       const sortedDynamic = dedupeRanked(dynamicRanked);
@@ -3393,6 +2982,10 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         ranked: sortedDynamic,
         collections,
         dynamicProfile,
+        evidenceSnapshotId: marketEvidence.id,
+        evidenceContentHash: marketEvidence.contentHash,
+        creativeTerritories,
+        semanticEligibility,
         fallbackUsed: false,
       };
     }
@@ -3449,7 +3042,7 @@ export async function generateHighPotentialSlogans(
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
   const layoutKey = input.layoutMode ?? "standard";
-  const cacheKey = `slogans:behavior-v3:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
+  const cacheKey = `slogans:creative-selection-v1:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
 
   // Try in-memory/Redis cache (async read for cold-starts)
   try {
@@ -3508,17 +3101,6 @@ export function extractPersonas(niche: string, audience?: string): string[] {
 export function extractEmotions(niche: string, audience?: string): string[] {
   const persona = inferPersona(niche, audience);
   return buildNicheLexicon({ niche, audience }, persona, "safe").emotionWords;
-}
-
-export function generateVariants(slogan: string): string[] {
-  const variants = [
-    slogan,
-    slogan.toUpperCase(),
-    slogan.replace(/\.$/, "!"),
-    `The real ${slogan.toLowerCase()}`,
-    `Still ${slogan.toLowerCase()}`,
-  ];
-  return dedupeStrings(variants).filter((v) => v.split(/\s+/).length <= 10);
 }
 
 function sentenceCase(value: string): string {

@@ -847,7 +847,7 @@ export async function collectTrendSignals(): Promise<AggregatedTrendSignals> {
         timestamp: new Date(),
         signals: uniqueSignals.slice(0, 50), // Expanded to 50 signals
         sources: weighted,
-        signalConfidence: 0.85,
+        signalConfidence: calculateSignalConfidence(weighted),
     };
 }
 
@@ -890,7 +890,7 @@ Output ONLY a raw, valid JSON array of 30 short string phrases. NO markdown bloc
     });
 
     if (completion.error || !completion.data) {
-        return ["funny dog shirts", "developer humor", "coffee addict"]; // safe fallback array
+        return []; // fail closed: never inject fabricated niches when generation is unavailable
     }
 
     const text = completion.data.choices[0].message.content?.trim() || "[]";
@@ -905,7 +905,7 @@ Output ONLY a raw, valid JSON array of 30 short string phrases. NO markdown bloc
         return Array.isArray(niches) ? niches.slice(0, 30) : [];
     } catch (e) {
         console.error("Niche parse error on raw output:", text);
-        return ["Introverted Bookworms", "Sarcastic Nurses", "Cozy Gamers with Anxiety"];
+        return []; // parse failure must not fabricate discovery opportunities
     }
 }
 

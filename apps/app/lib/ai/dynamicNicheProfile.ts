@@ -63,6 +63,30 @@ export type DynamicNicheProfile = {
   latentLifestyleModel?: LatentLifestyleModel;
 };
 
+
+export interface DynamicProfileEvidenceContext {
+  snapshotId?: string;
+  contentHash?: string;
+  trendSignals?: string[];
+  buyerLanguage?: string[];
+  culturalSignals?: string[];
+  purchaseSignals?: string[];
+}
+
+export interface DynamicSloganGenerationOptions {
+  creativeTerritories?: Array<{
+    id: string;
+    premise: string;
+    humanTruth: string;
+    evidence: string[];
+    dimensionCoverage: string[];
+    emotionalPayoff?: string;
+    tension?: string;
+    confidence: number;
+  }>;
+  excludeSlogans?: string[];
+}
+
 export type SloganLayoutMode = "compact" | "standard" | "statement";
 
 export interface SloganLengthBudget {
@@ -344,7 +368,11 @@ async function callAIJson<T extends Record<string, unknown>>(
   }
 }
 
-export async function buildDynamicNicheProfile(niche: string, audience?: string): Promise<DynamicNicheProfile> {
+export async function buildDynamicNicheProfile(
+  niche: string,
+  audience?: string,
+  evidence?: DynamicProfileEvidenceContext,
+): Promise<DynamicNicheProfile> {
   const prompt = `
 Analyze this t-shirt niche as a real human subculture.
 
@@ -353,6 +381,9 @@ ${niche}
 
 AUDIENCE / SUBCULTURE QUALIFIER:
 ${audience?.trim() || "Not supplied; infer the narrowest plausible participating audience."}
+
+MARKET / COMMUNITY EVIDENCE (supporting context only; never force a term or invent behavior from it):
+${JSON.stringify(evidence ?? {}, null, 2)}
 
 Return ONLY valid JSON:
 {
@@ -428,6 +459,7 @@ Rules:
 - Extract concrete behaviors, rituals, contradictions, pain points, status signals, insider language, embarrassing truths, obsessions, and visual culture.
 - Do not use generic marketing words.
 - Do not force keywords.
+- Treat supplied market/community evidence as corroboration, not as permission to fabricate rituals. Prefer profile facts supported by both niche meaning and evidence.
 - Preserve every meaningful dimension in compound niches.
 - Treat the niche and audience together. Separate content interest, humor style, media behavior, role, and setting when they are distinct axes.
 - Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
@@ -457,6 +489,7 @@ Rules:
 export async function generateSlogansFromDynamicProfile(
   profile: DynamicNicheProfile,
   count = 20,
+  options: DynamicSloganGenerationOptions = {},
 ): Promise<string[]> {
   const prompt = `
 You are writing original t-shirt slogans from a dynamic niche profile.
@@ -503,13 +536,20 @@ ${profile.visualCulture.join(", ")}
 PURCHASE MOTIVES:
 ${profile.purchaseMotives.join("\n")}
 
+GROUNDED CREATIVE TERRITORIES (semantic premises only; do not copy wording):
+${JSON.stringify(options.creativeTerritories ?? [], null, 2)}
+
+PREVIOUS / EXCLUDED CANDIDATES (avoid semantic duplicates; do not imitate them):
+${JSON.stringify((options.excludeSlogans ?? []).slice(0, 30))}
+
 TASK:
 Write ${count} original t-shirt slogans.
 
 Rules:
-- Do NOT use reusable slogan templates.
-- Do NOT use "Just One More", "Powered By", "Mode", "Energy", "Vibes", "Love Language", "Official", "Addict", "Warrior", "MVP", "Hustler", "Eat Sleep Repeat".
+- Do NOT use reusable slogan templates or imitate recurring merchandising formulas.
 - Do NOT write generic identity labels.
+- Do not talk about finding, buying, wearing, gifting, printing, or promoting the merchandise carrying the slogan unless commerce itself is genuinely part of the niche truth.
+- Every implied behavior or use-case must be supported by the supplied profile or grounded creative territories.
 - Do NOT write category descriptions or product taglines such as "[interest], [mood]" or "[category] meets [comfort]".
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
 - Treat the latent lifestyle model as the primary creative source. Use the legacy fields as supporting evidence.
