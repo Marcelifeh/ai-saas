@@ -27,6 +27,7 @@ assert(!isSemanticallyEligibleAssessment({ ...passing, unsupportedInferenceRisk:
 const root = path.resolve(__dirname, "..", "lib");
 const factorySource = fs.readFileSync(path.join(root, "services", "factoryService.ts"), "utf8");
 const activeGenerationSource = fs.readFileSync(path.join(root, "ai", "dynamicNicheProfile.ts"), "utf8");
+const sloganEngineSource = fs.readFileSync(path.join(root, "ai", "sloganEngine.ts"), "utf8");
 
 for (const forbidden of [
   "Wearability: Phrases humans actually say (e.g.",
@@ -39,5 +40,25 @@ for (const forbidden of [
 
 assert(activeGenerationSource.includes("GROUNDED CREATIVE TERRITORIES"), "Dynamic generator must consume grounded creative territories");
 assert(activeGenerationSource.includes("Every implied behavior or use-case must be supported"), "Dynamic generator must require grounded behavior");
+assert(
+  sloganEngineSource.includes('from "../services/marketEvidenceService"'),
+  "Standalone runner must resolve market evidence without the Next.js alias",
+);
+assert(
+  sloganEngineSource.includes('error: "NO_ELIGIBLE_SLOGANS"') && sloganEngineSource.includes("diagnostics,"),
+  "Pipeline must distinguish downstream slogan rejection from profile failure",
+);
+assert(
+  factorySource.includes("No slogans survived semantic eligibility"),
+  "Factory must surface semantic eligibility exhaustion honestly",
+);
+assert(
+  factorySource.includes("No slogans survived compliance validation"),
+  "Factory must fail closed when compliance rejects every slogan",
+);
+assert(
+  !factorySource.includes("safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans"),
+  "Factory must never restore compliance-rejected slogans",
+);
 
 console.log("Creative selection regression gates passed");

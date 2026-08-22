@@ -2,6 +2,14 @@
 const fs = require("fs");
 const Module = require("module");
 const path = require("path");
+const tsconfigPaths = require("tsconfig-paths");
+
+// The script is commonly invoked from the monorepo root. Register the app's
+// existing alias contract before loading any application modules.
+tsconfigPaths.register({
+  baseUrl: path.resolve(__dirname, ".."),
+  paths: { "@/*": ["./*"] },
+});
 
 // Load local environment values before importing the server-only AI modules.
 try {

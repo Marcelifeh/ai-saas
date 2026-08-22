@@ -192,13 +192,29 @@ async function buildMerchPayload(
         excludeSlogans,
     });
 
-    // ── Compliance: filter slogans and attach report ──────────────────────
-    const { safe: safeSlogans } = filterSafeSlogans(sloganEngine.slogans);
-    const finalSlogans = safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans;
     const dynamicProfile = sloganEngine.dynamicProfile;
     if (!dynamicProfile) {
-        throw new Error("Dynamic niche profile unavailable for winner-aware creative generation");
+        throw new Error(
+            sloganEngine.error === "DYNAMIC_PROFILE_GENERATION_FAILED"
+                ? "Dynamic niche profile generation failed"
+                : "Dynamic niche profile missing unexpectedly",
+        );
     }
+
+    if (!sloganEngine.slogans.length || !sloganEngine.ranked.length) {
+        throw new Error(
+            sloganEngine.error === "NO_ELIGIBLE_SLOGANS"
+                ? "No slogans survived semantic eligibility"
+                : "Dynamic slogan generation produced no releasable candidates",
+        );
+    }
+
+    // ── Compliance: filter slogans and attach report ──────────────────────
+    const { safe: safeSlogans } = filterSafeSlogans(sloganEngine.slogans);
+    if (safeSlogans.length === 0) {
+        throw new Error("No slogans survived compliance validation");
+    }
+    const finalSlogans = safeSlogans;
     const visualStrategies = await generateDynamicDesignBatch({
             niche,
             slogans: finalSlogans,

@@ -1,5 +1,5 @@
 // ─── Market Intelligence Helpers ───────────────────────────────────────────
-import { getNicheEvidence } from "@/lib/services/marketEvidenceService";
+import { getNicheEvidence } from "../services/marketEvidenceService";
 import {
   assessSemanticEligibility,
   discoverCreativeTerritories,
@@ -242,6 +242,23 @@ export interface SloganCollections {
   experimental: RankedSlogan[];
 }
 
+export type DynamicCreativeStage =
+  | "EVIDENCE"
+  | "PROFILE"
+  | "TERRITORIES"
+  | "GENERATION"
+  | "COMPRESSION"
+  | "ELIGIBILITY"
+  | "SELF_REVELATION"
+  | "RANKING";
+
+export interface DynamicCreativeDiagnostic {
+  stage: DynamicCreativeStage;
+  ok: boolean;
+  code?: string;
+  message?: string;
+}
+
 export interface SloganEngineResult {
   slogans: string[];
   ranked: RankedSlogan[];
@@ -254,7 +271,13 @@ export interface SloganEngineResult {
   evidenceContentHash?: string;
   creativeTerritories?: CreativeTerritory[];
   semanticEligibility?: SemanticEligibilityAssessment[];
-  error?: "DYNAMIC_PROFILE_GENERATION_FAILED";
+  diagnostics?: DynamicCreativeDiagnostic[];
+  error?:
+    | "EVIDENCE_FAILED"
+    | "DYNAMIC_PROFILE_GENERATION_FAILED"
+    | "CREATIVE_TERRITORY_FAILED"
+    | "SLOGAN_GENERATION_FAILED"
+    | "NO_ELIGIBLE_SLOGANS";
   fallbackUsed?: boolean;
 }
 
@@ -2711,13 +2734,21 @@ export function enhanceSlogans(input: SloganEngineInput): SloganEngineResult {
   };
 }
 
+function emptyCollections(): SloganCollections {
+  return { topPicks: [], boldPicks: [], experimental: [] };
+}
+
+function pipelineErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function createEmptyResult(input: SloganEngineInput): SloganEngineResult {
   const mode = normalizeMode(input.mode);
   const persona = inferPersona(input.niche, input.audience);
   return {
     slogans: [],
     ranked: [],
-    collections: { topPicks: [], boldPicks: [], experimental: [] },
+    collections: emptyCollections(),
     persona: persona.label,
     personaKey: persona.key,
     mode,
@@ -2899,34 +2930,148 @@ function rankDynamicProfileSlogans(
 
 export async function runEliteSloganEngine(input: SloganEngineInput): Promise<SloganEngineResult> {
   const base = createEmptyResult(input);
+  const diagnostics: DynamicCreativeDiagnostic[] = [];
+  let marketEvidence: Awaited<ReturnType<typeof getNicheEvidence>>;
 
   try {
-    const marketEvidence = await getNicheEvidence(input.niche);
-    const creativeEvidence: CreativeEvidenceContext = {
-      snapshotId: marketEvidence.id,
-      contentHash: marketEvidence.contentHash,
-      trendSignals: marketEvidence.trendSignals.map((signal) => signal.phrase),
-      buyerLanguage: marketEvidence.buyerLanguage.map((signal) => signal.phrase),
-      culturalSignals: marketEvidence.culturalSignals.map((signal) => signal.phrase),
-      purchaseSignals: marketEvidence.purchaseSignals.map((signal) => signal.phrase),
+    marketEvidence = await getNicheEvidence(input.niche);
+    diagnostics.push({ stage: "EVIDENCE", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:EVIDENCE]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      error: "EVIDENCE_FAILED",
+      fallbackUsed: false,
+      diagnostics: [{
+        stage: "EVIDENCE",
+        ok: false,
+        message: pipelineErrorMessage(error),
+      }],
     };
+  }
 
-    const dynamicProfile = await buildDynamicNicheProfile(
+  const creativeEvidence: CreativeEvidenceContext = {
+    snapshotId: marketEvidence.id,
+    contentHash: marketEvidence.contentHash,
+    trendSignals: marketEvidence.trendSignals.map((signal) => signal.phrase),
+    buyerLanguage: marketEvidence.buyerLanguage.map((signal) => signal.phrase),
+    culturalSignals: marketEvidence.culturalSignals.map((signal) => signal.phrase),
+    purchaseSignals: marketEvidence.purchaseSignals.map((signal) => signal.phrase),
+  };
+  const evidenceProvenance = {
+    evidenceSnapshotId: marketEvidence.id,
+    evidenceContentHash: marketEvidence.contentHash,
+  };
+
+  let dynamicProfile: DynamicNicheProfile;
+  try {
+    dynamicProfile = await buildDynamicNicheProfile(
       input.niche,
       input.audience,
       creativeEvidence,
     );
-    const creativeTerritories = await discoverCreativeTerritories(
+    diagnostics.push({ stage: "PROFILE", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:PROFILE]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...evidenceProvenance,
+      error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "PROFILE",
+          ok: false,
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  const profileProvenance = {
+    ...evidenceProvenance,
+    dynamicProfile,
+  };
+  let creativeTerritories: CreativeTerritory[] = [];
+  try {
+    creativeTerritories = await discoverCreativeTerritories(
       dynamicProfile,
       creativeEvidence,
       8,
     );
-    const generated = await generateSlogansFromDynamicProfile(dynamicProfile, 32, {
+    if (creativeTerritories.length === 0) {
+      throw new Error("Creative territory generation returned no grounded territories");
+    }
+    diagnostics.push({ stage: "TERRITORIES", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:TERRITORIES]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      error: "CREATIVE_TERRITORY_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "TERRITORIES",
+          ok: false,
+          code: creativeTerritories.length === 0 ? "NO_TERRITORIES" : undefined,
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  let generated: string[] = [];
+  try {
+    generated = await generateSlogansFromDynamicProfile(dynamicProfile, 32, {
       creativeTerritories,
       excludeSlogans: input.excludeSlogans,
     });
-    const lengthBudget = deriveSloganLengthBudget(dynamicProfile, input.layoutMode ?? "standard");
-    const compressionAttempts = await compressDynamicSlogansWithDiagnostics(
+    if (generated.length === 0) {
+      throw new Error("Dynamic slogan generation returned no candidates");
+    }
+    diagnostics.push({ stage: "GENERATION", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:GENERATION]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      error: "SLOGAN_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "GENERATION",
+          ok: false,
+          code: generated.length === 0 ? "NO_CANDIDATES" : undefined,
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  const lengthBudget = deriveSloganLengthBudget(dynamicProfile, input.layoutMode ?? "standard");
+  let compressionAttempts: DynamicCompressionAttempt[] = [];
+  let retryAttempts: DynamicCompressionAttempt[] = [];
+  let compressionCandidates: string[] = [];
+  try {
+    compressionAttempts = await compressDynamicSlogansWithDiagnostics(
       dynamicProfile,
       generated,
       lengthBudget,
@@ -2938,32 +3083,146 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       !evaluateAdaptiveBrevity(slogan, lengthBudget).passes ||
       !compressionAttempts[index]?.preservesMeaning
     ));
-    const retryAttempts = needsCompression.length > 0
+    retryAttempts = needsCompression.length > 0
       ? await compressDynamicSlogansWithDiagnostics(dynamicProfile, needsCompression, lengthBudget)
       : [];
     const retryCompressed = retryAttempts
       .filter((attempt) => attempt.preservesMeaning)
       .map((attempt) => attempt.compressed);
-    const compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
+    compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
+    if (compressionCandidates.length === 0) {
+      throw new Error("Compression produced no meaning-preserving candidates");
+    }
+    diagnostics.push({ stage: "COMPRESSION", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:COMPRESSION]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      error: "SLOGAN_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "COMPRESSION",
+          ok: false,
+          code: compressionCandidates.length === 0 ? "NO_COMPRESSION_CANDIDATES" : undefined,
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
 
-    // Eligibility is a hard semantic gate. Quality scores cannot compensate for
-    // fabricated behavior, merchandise-dependent copy, crossover collapse, or
-    // incoherent token stitching.
-    const semanticEligibility = await assessSemanticEligibility(
+  // Eligibility is a hard semantic gate. Quality scores cannot compensate for
+  // fabricated behavior, merchandise-dependent copy, crossover collapse, or
+  // incoherent token stitching.
+  let semanticEligibility: SemanticEligibilityAssessment[] = [];
+  try {
+    semanticEligibility = await assessSemanticEligibility(
       dynamicProfile,
       compressionCandidates,
       creativeTerritories,
       creativeEvidence,
     );
-    const eligibleCandidates = compressionCandidates.filter((slogan) => (
-      semanticEligibility.find((assessment) => canonicalSloganKey(assessment.slogan) === canonicalSloganKey(slogan))?.eligible
-    ));
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:ELIGIBILITY]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      semanticEligibility,
+      error: "SLOGAN_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "ELIGIBILITY",
+          ok: false,
+          code: "ELIGIBILITY_EVALUATION_FAILED",
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
 
-    const selfRevelationAssessments = await classifyDynamicSelfRevelation(
+  const eligibleCandidates = compressionCandidates.filter((slogan) => (
+    semanticEligibility.find((assessment) => canonicalSloganKey(assessment.slogan) === canonicalSloganKey(slogan))?.eligible
+  ));
+
+  if (eligibleCandidates.length === 0) {
+    console.info("[SLOGAN_PIPELINE]", {
+      niche: input.niche,
+      evidence: marketEvidence.id,
+      profile: true,
+      territories: creativeTerritories.length,
+      generated: generated.length,
+      compressionCandidates: compressionCandidates.length,
+      eligible: 0,
+      ranked: 0,
+    });
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      semanticEligibility,
+      error: "NO_ELIGIBLE_SLOGANS",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "ELIGIBILITY",
+          ok: false,
+          code: "ALL_CANDIDATES_REJECTED",
+        },
+      ],
+    };
+  }
+  diagnostics.push({ stage: "ELIGIBILITY", ok: true });
+
+  let selfRevelationAssessments: SelfRevelationAssessment[] = [];
+  try {
+    selfRevelationAssessments = await classifyDynamicSelfRevelation(
       dynamicProfile,
       eligibleCandidates,
     );
-    const dynamicRanked = rankDynamicProfileSlogans(
+    diagnostics.push({ stage: "SELF_REVELATION", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:SELF_REVELATION]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      semanticEligibility,
+      error: "SLOGAN_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "SELF_REVELATION",
+          ok: false,
+          code: "SELF_REVELATION_FAILED",
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  let dynamicRanked: RankedSlogan[] = [];
+  try {
+    dynamicRanked = rankDynamicProfileSlogans(
       eligibleCandidates,
       input,
       dynamicProfile,
@@ -2972,34 +3231,86 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       selfRevelationAssessments,
       semanticEligibility,
     );
-    if (dynamicRanked.length > 0) {
-      const sortedDynamic = dedupeRanked(dynamicRanked);
-      const collections = buildCollections(sortedDynamic);
-      const topSlogans = dedupeStrings(sortedDynamic.slice(0, 10).map((entry) => entry.slogan));
-      return {
-        ...base,
-        slogans: topSlogans,
-        ranked: sortedDynamic,
-        collections,
-        dynamicProfile,
-        evidenceSnapshotId: marketEvidence.id,
-        evidenceContentHash: marketEvidence.contentHash,
-        creativeTerritories,
-        semanticEligibility,
-        fallbackUsed: false,
-      };
-    }
-  } catch {
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:RANKING]", error);
     return {
       ...base,
-      error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      semanticEligibility,
+      error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "RANKING",
+          ok: false,
+          code: "RANKING_FAILED",
+          message: pipelineErrorMessage(error),
+        },
+      ],
     };
   }
 
+  const sortedDynamic = dedupeRanked(dynamicRanked);
+  if (sortedDynamic.length === 0) {
+    console.info("[SLOGAN_PIPELINE]", {
+      niche: input.niche,
+      evidence: marketEvidence.id,
+      profile: true,
+      territories: creativeTerritories.length,
+      generated: generated.length,
+      compressionCandidates: compressionCandidates.length,
+      eligible: eligibleCandidates.length,
+      ranked: 0,
+    });
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      semanticEligibility,
+      error: "NO_ELIGIBLE_SLOGANS",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "RANKING",
+          ok: false,
+          code: "NO_RANKED_CANDIDATES",
+        },
+      ],
+    };
+  }
+
+  diagnostics.push({ stage: "RANKING", ok: true });
+  const collections = buildCollections(sortedDynamic);
+  const topSlogans = dedupeStrings(sortedDynamic.slice(0, 10).map((entry) => entry.slogan));
+  console.info("[SLOGAN_PIPELINE]", {
+    niche: input.niche,
+    evidence: marketEvidence.id,
+    profile: true,
+    territories: creativeTerritories.length,
+    generated: generated.length,
+    compressionCandidates: compressionCandidates.length,
+    eligible: eligibleCandidates.length,
+    ranked: sortedDynamic.length,
+  });
+
   return {
     ...base,
-    error: "DYNAMIC_PROFILE_GENERATION_FAILED",
+    slogans: topSlogans,
+    ranked: sortedDynamic,
+    collections,
+    ...profileProvenance,
+    creativeTerritories,
+    semanticEligibility,
+    diagnostics,
     fallbackUsed: false,
   };
 }
@@ -3042,7 +3353,7 @@ export async function generateHighPotentialSlogans(
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
   const layoutKey = input.layoutMode ?? "standard";
-  const cacheKey = `slogans:creative-selection-v1:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
+  const cacheKey = `slogans:creative-selection-v2:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
 
   // Try in-memory/Redis cache (async read for cold-starts)
   try {
