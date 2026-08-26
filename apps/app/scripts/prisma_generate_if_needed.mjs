@@ -12,7 +12,13 @@ const generatedDir = path.resolve(appDir, "../../packages/db/generated/client");
 const generatedSchemaPath = path.join(generatedDir, "schema.prisma");
 const hashFilePath = path.join(generatedDir, ".schema-hash");
 const clientEntryPath = path.join(generatedDir, "index.js");
-const enginePath = path.join(generatedDir, "query_engine-windows.dll.node");
+
+const runtimeEnginePattern =
+  process.platform === "win32"
+    ? /^query_engine-windows\.dll\.node$/i
+    : process.platform === "darwin"
+      ? /^libquery_engine-.*\.dylib\.node$/i
+      : /^libquery_engine-.*\.so\.node$/i;
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -35,7 +41,7 @@ function cleanupTempEngines() {
   if (!existsSync(generatedDir)) return;
 
   for (const entry of readdirSync(generatedDir)) {
-    if (!/^query_engine-windows\.dll\.node\.tmp\d+$/i.test(entry)) continue;
+    if (!/^(?:lib)?query_engine-.*\.node\.tmp\d+$/i.test(entry)) continue;
     try {
       rmSync(path.join(generatedDir, entry), { force: true });
     } catch {
@@ -44,9 +50,14 @@ function cleanupTempEngines() {
   }
 }
 
+function hasRuntimeEngine() {
+  if (!existsSync(generatedDir)) return false;
+  return readdirSync(generatedDir).some((entry) => runtimeEnginePattern.test(entry));
+}
+
 function generatedClientMatchesSchema(schemaHash, schemaText) {
   if (!existsSync(clientEntryPath)) return false;
-  if (!existsSync(enginePath)) return false;
+  if (!hasRuntimeEngine()) return false;
 
   if (existsSync(hashFilePath) && readText(hashFilePath).trim() === schemaHash) {
     return true;

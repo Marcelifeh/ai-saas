@@ -7,3 +7,7 @@ apps/app/dist-scripts/
 build/
 .vercel
 .env*.local
+
+# Native Prisma engines for non-Windows deployments are generated at build time.
+packages/db/generated/client/libquery_engine-*.so.node
+packages/db/generated/client/libquery_engine-*.dylib.node
