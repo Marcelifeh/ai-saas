@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateSingleStrategy, bulkDiscover, generateChunk } from "../../../lib/services/factoryService";
+import { generateSingleStrategy, bulkDiscover, generateChunk, SloganPipelineFailure } from "../../../lib/services/factoryService";
 import { withWorkspaceAuth } from "@/lib/api/routeWrappers";
 import { ensureUsageAllowed } from "@/lib/services/usageService";
 import { z } from "zod";
@@ -78,6 +78,12 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
 
     } catch (err: unknown) {
         console.error("Core API Error:", err);
+        if (err instanceof SloganPipelineFailure) {
+            return NextResponse.json(
+                { success: false, error: err.message, code: err.code },
+                { status: 422 },
+            );
+        }
         const message = err instanceof Error ? err.message : "Operation failed";
         return NextResponse.json(
             { success: false, error: "Operation failed", details: message },

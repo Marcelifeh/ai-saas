@@ -5,7 +5,11 @@ import { detectPlatform, PLATFORM_RULES } from "../ai/promptBuilder";
 import { globalCache } from "../utils/cache";
 import { chatCompletionSafe } from "../ai/aiGateway";
 import { TrendSignalSourceResult } from "../ai/trendEngine";
-import { runEliteSloganEngine } from "../ai/sloganEngine";
+import {
+    runEliteSloganEngine,
+    type SloganEngineResult,
+    type SloganPipelineMetrics,
+} from "../ai/sloganEngine";
 import {
     evaluateVisualBatchRelease,
     generateDynamicDesignBatch,
@@ -48,6 +52,7 @@ export interface SloganRegenerationResult {
     evidenceContentHash?: string;
     creativeTerritories?: unknown[];
     semanticEligibility?: unknown[];
+    sloganPipelineMetrics?: SloganPipelineMetrics;
     dynamicListing: DynamicListingResult;
     amazonListing: ReturnType<typeof toLegacyListingShape>;
     sloganInsights: any[];
@@ -65,6 +70,26 @@ export interface SloganRegenerationResult {
         apiCallsUsed: number;
         mode: "slogan-only";
     };
+}
+
+export type SloganPipelineFailureCode = NonNullable<SloganEngineResult["error"]>;
+
+const sloganFailureMessages: Partial<Record<SloganPipelineFailureCode, string>> = {
+    PROFILE_INSUFFICIENT_EVIDENCE: "We couldn't find enough grounded behavioral evidence for this opportunity. Try a more specific opportunity or choose another one.",
+    NO_ELIGIBLE_SLOGANS: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
+    GENERATION_EXHAUSTED: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
+};
+
+export class SloganPipelineFailure extends Error {
+    readonly code: SloganPipelineFailureCode;
+    readonly pipelineMetrics?: SloganPipelineMetrics;
+
+    constructor(code: SloganPipelineFailureCode, pipelineMetrics?: SloganPipelineMetrics) {
+        super(sloganFailureMessages[code] ?? "Slogan generation could not produce a releasable result. Please try again.");
+        this.name = "SloganPipelineFailure";
+        this.code = code;
+        this.pipelineMetrics = pipelineMetrics;
+    }
 }
 
 function parseJsonPayload(text: string): any {
@@ -194,18 +219,16 @@ async function buildMerchPayload(
 
     const dynamicProfile = sloganEngine.dynamicProfile;
     if (!dynamicProfile) {
-        throw new Error(
-            sloganEngine.error === "DYNAMIC_PROFILE_GENERATION_FAILED"
-                ? "Dynamic niche profile generation failed"
-                : "Dynamic niche profile missing unexpectedly",
+        throw new SloganPipelineFailure(
+            sloganEngine.error ?? "DYNAMIC_PROFILE_GENERATION_FAILED",
+            sloganEngine.pipelineMetrics,
         );
     }
 
     if (!sloganEngine.slogans.length || !sloganEngine.ranked.length) {
-        throw new Error(
-            sloganEngine.error === "NO_ELIGIBLE_SLOGANS"
-                ? "No slogans survived semantic eligibility"
-                : "Dynamic slogan generation produced no releasable candidates",
+        throw new SloganPipelineFailure(
+            sloganEngine.error ?? "GENERATION_EXHAUSTED",
+            sloganEngine.pipelineMetrics,
         );
     }
 
@@ -267,6 +290,7 @@ async function buildMerchPayload(
         evidenceContentHash: sloganEngine.evidenceContentHash,
         creativeTerritories: sloganEngine.creativeTerritories,
         semanticEligibility: sloganEngine.semanticEligibility,
+        sloganPipelineMetrics: sloganEngine.pipelineMetrics,
         dynamicListing,
         amazonListing,
         sloganInsights: sloganEngine.ranked,
@@ -364,6 +388,7 @@ export async function regenerateSlogansOnly(prompt: string, platform?: string, a
         evidenceContentHash: merchPayload.evidenceContentHash,
         creativeTerritories: merchPayload.creativeTerritories,
         semanticEligibility: merchPayload.semanticEligibility,
+        sloganPipelineMetrics: merchPayload.sloganPipelineMetrics,
         dynamicListing: merchPayload.dynamicListing,
         amazonListing: merchPayload.amazonListing,
         sloganInsights: merchPayload.sloganInsights,

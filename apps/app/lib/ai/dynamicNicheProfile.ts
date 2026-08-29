@@ -42,8 +42,31 @@ export interface LatentLifestyleModel {
   emotionalRewards: string[];
 }
 
+export interface NicheComposition {
+  kind: "single" | "compound";
+  axes: string[];
+}
+
+export interface RecoveryContext {
+  attempt: number;
+  dominantFailureDimensions: string[];
+  supportedProfileTruths: string[];
+  territoryTruths: string[];
+  rejectedSemanticTendencies: string[];
+  alreadyGeneratedCandidateFingerprints: string[];
+  evidenceConstraints: {
+    snapshotId?: string;
+    contentHash?: string;
+    trendSignalCount: number;
+    buyerLanguageCount: number;
+    culturalSignalCount: number;
+    purchaseSignalCount: number;
+  };
+}
+
 export type DynamicNicheProfile = {
   niche: string;
+  nicheComposition?: NicheComposition;
   dimensions: string[];
   audience: string;
   rituals: string[];
@@ -85,6 +108,7 @@ export interface DynamicSloganGenerationOptions {
     confidence: number;
   }>;
   excludeSlogans?: string[];
+  recoveryContext?: RecoveryContext;
 }
 
 export type SloganLayoutMode = "compact" | "standard" | "statement";
@@ -215,6 +239,16 @@ function safeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function safeNicheComposition(value: unknown): NicheComposition | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const kind = safeString(record.kind).toLowerCase();
+  if (kind !== "single" && kind !== "compound") return undefined;
+  const axes = safeStringArray(record.axes);
+  if (kind === "compound" && axes.length < 2) return undefined;
+  return { kind, axes };
+}
+
 export function canonicalSloganKey(slogan: string): string {
   return slogan
     .normalize("NFKC")
@@ -319,8 +353,18 @@ export function normalizeDynamicNicheProfile(
     ? value as DynamicProfileJson
     : {};
 
+  const parsedComposition = safeNicheComposition(json.nicheComposition);
+  const explicitCompoundAxes = niche.split("×").map((axis) => axis.trim()).filter(Boolean);
+  const nicheComposition = explicitCompoundAxes.length >= 2
+    ? {
+        kind: "compound" as const,
+        axes: explicitCompoundAxes,
+      }
+    : parsedComposition;
+
   return {
     niche,
+    nicheComposition,
     dimensions: safeStringArray(json.dimensions),
     audience: safeString(json.audience) || audience?.trim() || niche,
     rituals: safeStringArray(json.rituals),
@@ -358,13 +402,18 @@ async function callAIJson<T extends Record<string, unknown>>(
     ],
   });
 
-  const content = response.data?.choices?.[0]?.message?.content;
-  if (!content) return {};
+  if (response.error) throw new Error(response.message || "Dynamic profile request failed");
+  const choice = response.data?.choices?.[0];
+  if (choice?.finish_reason === "length") {
+    throw new Error("Dynamic profile response exceeded its output budget");
+  }
+  const content = choice?.message?.content;
+  if (!content) throw new Error("Dynamic profile returned no JSON content");
 
   try {
     return JSON.parse(content) as Partial<T>;
   } catch {
-    return {};
+    throw new Error("Dynamic profile returned malformed JSON");
   }
 }
 
@@ -387,6 +436,10 @@ ${JSON.stringify(evidence ?? {}, null, 2)}
 
 Return ONLY valid JSON:
 {
+  "nicheComposition": {
+    "kind": "single",
+    "axes": []
+  },
   "dimensions": [],
   "audience": "",
   "latentLifestyleModel": {
@@ -435,6 +488,7 @@ Return ONLY valid JSON:
 
 Rules:
 - Do not create slogans.
+- Classify nicheComposition as "compound" only when the opportunity combines two or more independently meaningful audience/activity/culture axes whose intersection must remain present. Put those axes in axes. Otherwise classify it as "single"; descriptive modifiers inside one coherent niche do not make it compound.
 - Build the latentLifestyleModel first. Use the legacy arrays to summarize and corroborate that model, not as a substitute for it.
 - Infer a lifestyle, not a bag of related topics or keywords.
 - Calibrate detail to evidence. Never invent rituals, objects, jargon, social behavior, or scenes merely to fill a field or meet a count target. For a sparse or unusual niche, return fewer high-confidence items and leave unsupported arrays empty.
@@ -461,6 +515,7 @@ Rules:
 - Do not force keywords.
 - Treat supplied market/community evidence as corroboration, not as permission to fabricate rituals. Prefer profile facts supported by both niche meaning and evidence.
 - Preserve every meaningful dimension in compound niches.
+- For a compound niche, infer only scenes where the axes interact in one causally coherent moment. Do not profile each axis separately and join the summaries. If the evidence cannot support a shared behavior, ritual, tension, decision, or consequence, keep compound-scene fields sparse rather than inventing a bridge.
 - Treat the niche and audience together. Separate content interest, humor style, media behavior, role, and setting when they are distinct axes.
 - Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
 - For behaviorally rich niches, return at least 6 rituals and 8 microRituals. Sparse niches may return fewer. Most rituals must be observable, repeated actions with a context, trigger, or consequence; microRituals must be small "that's me" moments, not category summaries.
@@ -499,6 +554,9 @@ ${profile.niche}
 
 AUDIENCE:
 ${profile.audience}
+
+NICHE COMPOSITION:
+${JSON.stringify(profile.nicheComposition ?? { kind: "single", axes: [] }, null, 2)}
 
 LATENT LIFESTYLE MODEL:
 ${JSON.stringify(profile.latentLifestyleModel || safeLatentLifestyleModel(undefined), null, 2)}
@@ -542,6 +600,11 @@ ${JSON.stringify(options.creativeTerritories ?? [], null, 2)}
 PREVIOUS / EXCLUDED CANDIDATES (avoid semantic duplicates; do not imitate them):
 ${JSON.stringify((options.excludeSlogans ?? []).slice(0, 30))}
 
+${options.recoveryContext ? `REJECTION-AWARE RECOVERY CONTEXT:
+${JSON.stringify(options.recoveryContext, null, 2)}
+
+This is a bounded recovery attempt after the hard semantic gate rejected the prior batch. Generate fresh semantic premises from supported profile truths and grounded territories. Correct the listed failure tendencies without copying prior wording. Candidate fingerprints are exclusion signals, not phrase suggestions.` : ""}
+
 TASK:
 Write ${count} original t-shirt slogans.
 
@@ -550,6 +613,9 @@ Rules:
 - Do NOT write generic identity labels.
 - Do not talk about finding, buying, wearing, gifting, printing, or promoting the merchandise carrying the slogan unless commerce itself is genuinely part of the niche truth.
 - Every implied behavior or use-case must be supported by the supplied profile or grounded creative territories.
+- When recovery feedback is supplied, respond directly to its dominant failure dimensions. Do not evade the feedback by becoming more generic.
+- For a compound niche, every returned candidate must make each nicheComposition axis semantically recoverable from one coherent premise. A tone, mood, season, setting, or decorative object does not preserve an axis unless it changes the behavior, ritual, decision, tension, or consequence being expressed.
+- Before returning a compound batch, discard and replace candidates that serve only one axis, list adjacent axis symbols, or concatenate unrelated axis language.
 - Do NOT write category descriptions or product taglines such as "[interest], [mood]" or "[category] meets [comfort]".
 - Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
 - Treat the latent lifestyle model as the primary creative source. Use the legacy fields as supporting evidence.

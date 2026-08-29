@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { withWorkspaceAuth } from "@/lib/api/routeWrappers";
 import { ensureUsageAllowed } from "@/lib/services/usageService";
-import { regenerateSlogansOnly } from "@/lib/services/factoryService";
+import { regenerateSlogansOnly, SloganPipelineFailure } from "@/lib/services/factoryService";
 
 const SloganRouteSchema = z.object({
     prompt: z.string().min(1),
@@ -37,6 +37,12 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
 
         return NextResponse.json({ success: true, data });
     } catch (err: unknown) {
+        if (err instanceof SloganPipelineFailure) {
+            return NextResponse.json(
+                { success: false, error: err.message, code: err.code },
+                { status: 422 },
+            );
+        }
         const message = err instanceof Error ? err.message : "Slogan regeneration failed";
         return NextResponse.json({ success: false, error: message }, { status: 500 });
     }

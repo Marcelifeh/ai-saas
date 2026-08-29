@@ -4,6 +4,7 @@ import { safeJson } from "@/lib/utils/safeJson";
 type CoreStrategyResponse = {
     success?: boolean;
     error?: string;
+    code?: string;
     plan?: string;
     usedTokens24h?: number;
     limitTokens24h?: number;
@@ -31,6 +32,7 @@ type CoreChunkResponse = {
 type CoreSloganResponse = {
     success?: boolean;
     error?: string;
+    code?: string;
     plan?: string;
     usedTokens24h?: number;
     limitTokens24h?: number;

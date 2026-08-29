@@ -59,16 +59,49 @@ async function main() {
   console.log(`Niche: ${niche}`);
   if (audience) console.log(`Audience: ${audience}`);
   console.log(`Evidence snapshot: ${result.evidenceSnapshotId ?? "unavailable"}`);
-  console.log(`Creative territories: ${result.creativeTerritories?.length ?? 0}`);
-  console.log(`Eligible candidates: ${result.semanticEligibility?.filter((item) => item.eligible).length ?? 0}`);
+  const metrics = result.pipelineMetrics;
+  console.table([{
+    profile: metrics?.profileStatus ?? (result.dynamicProfile ? "UNKNOWN" : "NOT_CREATED"),
+    nicheStructure: result.dynamicProfile?.nicheComposition?.kind ?? "UNKNOWN",
+    territories: metrics?.territoryCount ?? result.creativeTerritories?.length ?? 0,
+    generated: metrics?.rawCandidateCount ?? 0,
+    deduplicated: metrics?.deduplicatedCandidateCount ?? 0,
+    compressed: metrics?.compressedCandidateCount ?? 0,
+    eligibleFirstPass: metrics?.eligibleFirstPassCount ?? 0,
+    recoveryAttempts: metrics?.recoveryAttemptCount ?? 0,
+    eligibleFinal: metrics?.eligibleCount ?? 0,
+    ranked: metrics?.rankedCount ?? result.ranked.length,
+    error: result.error ?? "NONE",
+  }]);
+  if (metrics) console.log("Rejection dimensions:", metrics.rejectionReasonCounts);
+  if (result.ranked.length === 0) {
+    console.table((result.creativeTerritories ?? []).slice(0, 5).map((territory) => ({
+      premise: territory.premise,
+      humanTruth: territory.humanTruth,
+      dimensions: territory.dimensionCoverage.join(" | "),
+    })));
+    console.table((result.semanticEligibility ?? []).slice(0, 8).map((assessment) => ({
+      slogan: assessment.slogan,
+      truth: assessment.truthGrounding,
+      product: assessment.productIndependence,
+      intersection: assessment.intersectionIntegrity,
+      coherence: assessment.semanticCoherence,
+      risk: assessment.unsupportedInferenceRisk,
+      axes: assessment.axisGrounding.map((axis) => `${axis.axis}:${axis.grounding}`).join(" | "),
+      reasons: assessment.reasons.join("; "),
+    })));
+  }
   console.table(
-    result.ranked.slice(0, 12).map((entry) => ({
+    result.ranked.slice(0, 5).map((entry) => ({
       slogan: entry.slogan,
       score: entry.score,
       family: entry.rhetoricalFamily,
       thumbnail: entry.thumbnailReadabilityScore,
       truth: entry.truthScore,
       recognition: entry.recognitionProbability,
+      axes: result.semanticEligibility
+        ?.find((assessment) => assessment.slogan === entry.slogan)
+        ?.axisGrounding.map((axis) => `${axis.axis}:${axis.grounding}`).join(" | ") ?? "",
     })),
   );
 }
