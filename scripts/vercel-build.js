@@ -7,6 +7,14 @@ const appRoot = path.join(repoRoot, "apps", "app");
 
 const fallbackDatabaseUrl = "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
 
+if (process.env.VERCEL) {
+  const missingVariables = ["DATABASE_URL", "DIRECT_URL"].filter((name) => !process.env[name]);
+  if (missingVariables.length > 0) {
+    console.error(`Missing required Vercel environment variables: ${missingVariables.join(", ")}`);
+    process.exit(1);
+  }
+}
+
 const env = {
   ...process.env,
   DATABASE_URL: process.env.DATABASE_URL || fallbackDatabaseUrl,
