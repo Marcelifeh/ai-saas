@@ -5,15 +5,35 @@ import {
   aggregateSemanticRejections,
   assessDynamicProfileEvidence,
   buildRecoveryContext,
+  isEmergentIntersectionPreserved,
   isSemanticallyEligibleAssessment,
   normalizeEligibilityScoreRecord,
   requiresIntersectionIntegrity,
   SEMANTIC_ELIGIBILITY_THRESHOLDS,
+  validateTerritoryEvidenceRefs,
   type CreativeTerritory,
   type SemanticEligibilityAssessment,
 } from "../lib/ai/dynamicCreativeSelectionEngine";
 import type { DynamicNicheProfile, RecoveryContext } from "../lib/ai/dynamicNicheProfile";
+import type { CompositionType } from "../lib/ai/dynamicNicheProfile";
 import { runBoundedSemanticRecovery } from "../lib/ai/semanticEligibilityRecovery";
+import {
+  buildExpressionRecoveryContext,
+  dedupeByExpressionConcept,
+  isExpressionWorthy,
+  normalizeCreativeDirectionBrief,
+  scoreExpressionWorthiness,
+  semanticConceptKey,
+  EXPRESSION_WORTHINESS_RELEASE,
+} from "../lib/ai/expressionWorthiness";
+import {
+  activeCompositionHypotheses,
+  expressionIntentFingerprint,
+  isExpressionIntentEligible,
+  selectDiverseExpressionIntents,
+  EXPRESSION_INTENT_THRESHOLDS,
+  type ExpressionIntent,
+} from "../lib/ai/expressionIntent";
 
 const thresholdPassing = {
   truthGrounding: SEMANTIC_ELIGIBILITY_THRESHOLDS.truthGrounding,
@@ -125,6 +145,148 @@ async function main(): Promise<void> {
     axisGroundingScores: [80, 60],
   }), true);
 
+  const emergent = (overrides: Partial<{
+    compositionType: CompositionType;
+    supports: number[];
+    presences: number[];
+    shared: number;
+    dependence: number;
+    adjacency: number;
+    contextRisk: number;
+    risk: number;
+    preservation: number;
+  }> = {}) => {
+    const supports = overrides.supports ?? [82, 84];
+    const presences = overrides.presences ?? [75, 75];
+    return isEmergentIntersectionPreserved({
+      axisSupport: supports.map((support, index) => ({
+        axis: `axis ${index + 1}`,
+        support,
+        presence: presences[index] ?? 0,
+      })),
+      sharedPremiseSupport: overrides.shared ?? 80,
+      mutualDependence: overrides.dependence ?? 80,
+      adjacencyRisk: overrides.adjacency ?? 15,
+      contextDependenceRisk: overrides.contextRisk ?? 15,
+      unsupportedInferenceRisk: overrides.risk ?? 20,
+      intersectionPreservation: overrides.preservation ?? 82,
+    }, 2);
+  };
+
+  assert.equal(emergent({ shared: 30, dependence: 25, adjacency: 80 }), false, "1. compound adjacency rejected");
+  assert.equal(emergent({ supports: [85, 40] }), false, "2. one-axis collapse rejected");
+  assert.equal(emergent({ compositionType: "CULTURAL_INTERSECTION", risk: 70, preservation: 40 }), false, "3. forced behavior intersection rejected when the invented scene lacks support");
+  assert.equal(emergent({ compositionType: "BEHAVIORAL_INTERSECTION" }), true, "4. genuine behavioral intersection accepted");
+  assert.equal(emergent({ compositionType: "IDENTITY_INTERSECTION", presences: [35, 30] }), true, "5. identity intersection accepted without literal syntax");
+  assert.equal(emergent({ compositionType: "CULTURAL_INTERSECTION", presences: [25, 20] }), true, "6. cultural intersection accepted");
+  assert.equal(emergent({ compositionType: "SYMBOLIC_INTERSECTION", presences: [15, 10] }), true, "7. symbolic intersection accepted");
+  assert.equal(emergent({ presences: [0, 0], supports: [88, 86], shared: 90, dependence: 88 }), true, "8. compact emergent phrase accepted even when neither axis is named");
+  assert.equal(emergent({ risk: 75 }), false, "9. unsupported clever phrase rejected");
+  assert.equal(emergent({ presences: [0, 0], contextRisk: 80 }), false, "Context-supplied intersection must be rejected");
+  assert.equal(isSemanticallyEligibleAssessment({ ...thresholdPassing, intersectionIntegrity: 0 }, { intersectionRequired: false }), true, "10. single-niche behavior remains unchanged");
+  assert.deepEqual(SEMANTIC_ELIGIBILITY_THRESHOLDS, {
+    truthGrounding: 65,
+    productIndependence: 70,
+    intersectionIntegrity: 60,
+    semanticCoherence: 65,
+    unsupportedInferenceRisk: 35,
+  }, "Semantic thresholds must remain unchanged");
+  assert.deepEqual(EXPRESSION_WORTHINESS_RELEASE, {
+    score: 60,
+    conceptualTransformation: 50,
+    naturalness: 60,
+    wearability: 60,
+    creativeConstraintAlignment: 60,
+  }, "Expression-worthiness thresholds must remain unchanged");
+
+  const passingIntentScores = {
+    groundedness: 80,
+    humanWearReason: 78,
+    distinctiveHumanMeaning: 75,
+    socialSignalSpecificity: 72,
+    productIndependence: 90,
+    intersectionPreservation: 75,
+    decorativeDescriptionRisk: 15,
+    unsupportedInferenceRisk: 20,
+  };
+  assert.equal(isExpressionIntentEligible(passingIntentScores), true, "Grounded human expression intent must pass");
+  assert.equal(isExpressionIntentEligible({ ...passingIntentScores, decorativeDescriptionRisk: 80 }), false, "Decorative-description intent must fail");
+  assert.equal(isExpressionIntentEligible({ ...passingIntentScores, unsupportedInferenceRisk: 80 }), false, "Unsupported identity intent must fail");
+  assert.deepEqual(EXPRESSION_INTENT_THRESHOLDS, {
+    groundedness: 65,
+    humanWearReason: 60,
+    distinctiveHumanMeaning: 60,
+    socialSignalSpecificity: 60,
+    productIndependence: 70,
+    intersectionPreservation: 60,
+    decorativeDescriptionRisk: 35,
+    unsupportedInferenceRisk: 35,
+  });
+
+  const makeIntent = (id: string, intentType: ExpressionIntent["intentType"], humanMeaning: string): ExpressionIntent => {
+    const intent: ExpressionIntent = {
+      id,
+      territoryId: "territory_1",
+      groundedPremise: "supported shared premise",
+      intentType,
+      humanMeaning,
+      whySomeoneWouldWearThis: `Signals ${humanMeaning}`,
+      supportedByPremise: ["territory_1"],
+      sourceEvidenceRefs: ["niche"],
+      socialSignal: humanMeaning,
+      identityTarget: "participating insider",
+      confidence: 80,
+      intentFingerprint: "",
+    };
+    intent.intentFingerprint = expressionIntentFingerprint(intent);
+    return intent;
+  };
+  const intentA = makeIntent("a", "IDENTITY_CLAIM", "chosen outsider affiliation");
+  const intentADuplicate = { ...intentA, id: "a2" };
+  const intentB = makeIntent("b", "ROLE_REFRAME", "misread symbol becomes companion role");
+  const intentC = makeIntent("c", "OBSERVATIONAL_WIT", "insiders recognize the superstition reversal");
+  const diverseIntents = selectDiverseExpressionIntents([intentA, intentADuplicate, intentB, intentC], 10);
+  assert.equal(diverseIntents.length, 3, "Intent fingerprint deduplication must remove semantic duplicates");
+  assert.equal(new Set(diverseIntents.map((intent) => intent.intentType)).size, 3, "Intent selection must preserve semantic-purpose diversity");
+
+  const lowConfidenceProfile: DynamicNicheProfile = {
+    ...compoundProfile,
+    nicheComposition: {
+      kind: "compound",
+      axes: ["axis a", "axis b"],
+      compositionType: "BEHAVIORAL_INTERSECTION",
+      sharedPremise: "shared activity",
+      compositionConfidence: 54,
+      alternativeCompositionTypes: [{
+        compositionType: "CULTURAL_INTERSECTION",
+        confidence: 48,
+        sharedPremise: "shared cultural code",
+      }],
+    },
+  };
+  assert.equal(activeCompositionHypotheses(lowConfidenceProfile).length, 2, "Low-confidence composition must expose one bounded secondary interpretation");
+  assert.equal(activeCompositionHypotheses({
+    ...lowConfidenceProfile,
+    nicheComposition: {
+      ...lowConfidenceProfile.nicheComposition!,
+      compositionConfidence: 90,
+      alternativeCompositionTypes: [{
+        compositionType: "CULTURAL_INTERSECTION",
+        confidence: 40,
+        sharedPremise: "weak alternative",
+      }],
+    },
+  }).length, 1, "High-confidence composition must not branch");
+  assert.equal(activeCompositionHypotheses({
+    ...compoundProfile,
+    nicheComposition: {
+      kind: "single",
+      axes: [],
+      compositionType: "IDENTITY_INTERSECTION",
+      compositionConfidence: 90,
+    },
+  }).length, 0, "Single niches must never enter compound composition branching");
+
   assert.equal(assessment("Buy This Plant Shirt", { productIndependence: 20 }).eligible, false);
   assert.equal(assessment("Invented midnight greenhouse ritual", { unsupportedInferenceRisk: 80 }).eligible, false);
   assert.equal(assessment("Checked New Growth Before Messages").eligible, true);
@@ -153,6 +315,33 @@ async function main(): Promise<void> {
     microRituals: [],
     latentLifestyleModel: undefined,
   }).status, "INSUFFICIENT");
+  const identityProfile: DynamicNicheProfile = {
+    ...compoundProfile,
+    nicheComposition: {
+      kind: "compound",
+      axes: ["night-animal affiliation", "seasonal folklore"],
+      compositionType: "IDENTITY_INTERSECTION",
+      sharedPremise: "an outsider-coded seasonal identity",
+      axisRoles: [
+        { axis: "night-animal affiliation", contribution: "outsider-coded affinity" },
+        { axis: "seasonal folklore", contribution: "mythic cultural identity" },
+      ],
+    },
+    rituals: [],
+    microRituals: [],
+    statusSignals: ["projects knowing affinity", "signals outsider confidence"],
+    latentLifestyleModel: {
+      ...baseProfile.latentLifestyleModel!,
+      observableScenes: [],
+      privateRituals: [],
+      participationHabits: [],
+      involuntaryBehaviors: [],
+      repeatedDecisions: [],
+      identitySignals: ["claims outsider-coded belonging", "projects nocturnal confidence"],
+      sharedMeanings: ["misunderstood symbols become chosen identity", "seasonal folklore becomes self-definition"],
+    },
+  };
+  assert.equal(assessDynamicProfileEvidence(identityProfile).status, "SUFFICIENT", "Identity composition must not require an invented behavioral scene");
 
   const rejected = [
     assessment("Generic identity", { truthGrounding: 20, semanticCoherence: 40 }),
@@ -171,8 +360,108 @@ async function main(): Promise<void> {
     alreadyGeneratedCandidateFingerprints: ["generic identity"],
   });
   assert.equal(recoveryContext.dominantFailureDimensions[0], "truthGrounding");
-  assert.ok(recoveryContext.supportedProfileTruths.length > 0);
+  assert.ok(recoveryContext.profileHypotheses.length > 0);
+  assert.deepEqual(recoveryContext.corroboratedTruths, [], "Uncorroborated profile claims must not be relabeled as evidence");
   assert.ok(recoveryContext.rejectedSemanticTendencies.every((value) => !value.includes("More X")));
+
+  assert.deepEqual(
+    validateTerritoryEvidenceRefs(["buyer:0", "profile:0", "niche", "invented:9"], {
+      buyerLanguage: ["new leaf"],
+    }),
+    ["buyer:0", "niche"],
+    "Territory provenance may reference original inputs, never model profile output",
+  );
+
+  const creativeBrief = normalizeCreativeDirectionBrief({
+    sourcePresent: true,
+    desiredQualities: ["dry self-aware confidence"],
+    referenceAttributes: ["Embracing Black Cat Flair", "identity projection through understated attitude"],
+    negativeConstraints: ["avoid generic affirmations"],
+  }, ["no cute pet-owner language"], ["Embracing Black Cat Flair"]);
+  assert.deepEqual(creativeBrief.referenceAttributes, ["identity projection through understated attitude"]);
+  assert.ok(creativeBrief.negativeConstraints.includes("no cute pet-owner language"));
+  assert.ok(creativeBrief.negativeConstraints.includes("avoid generic affirmations"));
+
+  assert.equal(
+    semanticConceptKey("Embracing Black Cat Flair"),
+    semanticConceptKey("Embrace Black Cat Flair"),
+    "Gerund and imperative variants must share a downstream concept key",
+  );
+  assert.deepEqual(
+    dedupeByExpressionConcept([
+      { slogan: "Embracing Black Cat Flair", score: 91 },
+      { slogan: "Embrace Black Cat Flair", score: 88 },
+      { slogan: "Night Shift Familiar", score: 84 },
+    ]).map((candidate) => candidate.slogan),
+    ["Embracing Black Cat Flair", "Night Shift Familiar"],
+  );
+
+  const expressionStrong = scoreExpressionWorthiness({
+    selfRecognition: 88,
+    identityProjection: 92,
+    insiderResonance: 84,
+    conceptualTransformation: 91,
+    naturalness: 90,
+    wearability: 94,
+    creativeConstraintAlignment: 95,
+  });
+  const expressionWeak = scoreExpressionWorthiness({
+    selfRecognition: 45,
+    identityProjection: 38,
+    insiderResonance: 40,
+    conceptualTransformation: 25,
+    naturalness: 58,
+    wearability: 52,
+    creativeConstraintAlignment: 30,
+  });
+  assert.ok(expressionStrong > expressionWeak, "Expression-worthiness must reward commercial creative strength");
+  const weakExpressionAssessment = {
+    slogan: "Broad Topic Approved",
+    conceptKey: "broad topic approval",
+    rhetoricalFamily: "OBSERVATION" as const,
+    selfRecognition: 40,
+    identityProjection: 45,
+    insiderResonance: 30,
+    conceptualTransformation: 25,
+    naturalness: 65,
+    wearability: 60,
+    creativeConstraintAlignment: 25,
+    expressionMode: "DECORATIVE_DESCRIPTION" as const,
+    diagnosticTraits: ["DECORATIVE" as const],
+    score: expressionWeak,
+    reasons: ["Generic approval wording", "Violates non-cutesy constraint"],
+  };
+  assert.equal(isExpressionWorthy(weakExpressionAssessment), false);
+  assert.equal(isExpressionWorthy({
+    ...weakExpressionAssessment,
+    slogan: "Compact Insider Identity",
+    selfRecognition: 85,
+    identityProjection: 88,
+    insiderResonance: 82,
+    conceptualTransformation: 75,
+    naturalness: 80,
+    wearability: 84,
+    creativeConstraintAlignment: 85,
+    expressionMode: "SYMBOLIC_EXPRESSION",
+    diagnosticTraits: ["IDENTITY_BEARING", "SOCIALLY_SIGNALABLE", "NATURALLY_SPEAKABLE"],
+    score: 82,
+  }), true, "Short identity expression must remain viable without an explicit behavior");
+  assert.equal(isExpressionWorthy({
+    ...weakExpressionAssessment,
+    score: 90,
+    conceptualTransformation: 90,
+    naturalness: 90,
+    wearability: 90,
+    creativeConstraintAlignment: 90,
+    expressionMode: "DECORATIVE_DESCRIPTION",
+  }), false, "Atmospheric decorative language must fail even when numeric scores are high");
+  const expressionRecoveryContext = buildExpressionRecoveryContext(
+    [weakExpressionAssessment],
+    creativeBrief,
+  );
+  assert.ok(expressionRecoveryContext.dominantWeakDimensions.includes("conceptualTransformation"));
+  assert.ok(expressionRecoveryContext.bindingNegativeConstraints.includes("no cute pet-owner language"));
+  assert.deepEqual(expressionRecoveryContext.excludedConceptKeys, ["broad topic approval"]);
 
   let generateCalls = 0;
   let receivedContext: RecoveryContext | undefined;
@@ -217,6 +506,8 @@ async function main(): Promise<void> {
   const sloganEngineSource = fs.readFileSync(path.join(root, "ai", "sloganEngine.ts"), "utf8");
   const selectionSource = fs.readFileSync(path.join(root, "ai", "dynamicCreativeSelectionEngine.ts"), "utf8");
   const recoverySource = fs.readFileSync(path.join(root, "ai", "semanticEligibilityRecovery.ts"), "utf8");
+  const expressionSource = fs.readFileSync(path.join(root, "ai", "expressionWorthiness.ts"), "utf8");
+  const intentSource = fs.readFileSync(path.join(root, "ai", "expressionIntent.ts"), "utf8");
 
   for (const forbidden of [
     "Wearability: Phrases humans actually say (e.g.",
@@ -227,9 +518,23 @@ async function main(): Promise<void> {
     assert.ok(!factorySource.includes(forbidden), `Factory must not contain parallel slogan template prompt: ${forbidden}`);
   }
   assert.ok(activeGenerationSource.includes("REJECTION-AWARE RECOVERY CONTEXT"));
-  assert.ok(activeGenerationSource.includes("Every implied behavior or use-case must be supported"));
+  assert.ok(activeGenerationSource.includes("Every implied behavior, identity, role, affiliation, status, or use-case must be supported"));
+  assert.ok(activeGenerationSource.includes("does not require profile-token overlap"));
+  assert.ok(selectionSource.includes("MODEL-INFERRED PROFILE HYPOTHESES"));
+  assert.ok(!selectionSource.includes("GROUND TRUTH PROFILE"));
+  assert.ok(expressionSource.includes("Allow many rhetorical families"));
+  assert.ok(expressionSource.includes("especially every negative constraint"));
+  assert.ok(expressionSource.includes("A compact identity or insider phrase can be SYMBOLIC_EXPRESSION without a verb or explicit behavior"));
+  assert.ok(intentSource.includes("An intent explains WHY someone would wear or say an idea, never HOW a sentence is phrased"));
+  assert.ok(intentSource.includes("No slogan wording, phrase examples, sentence frames, puns, rhyme plans, or templates"));
+  assert.ok(!intentSource.includes("Black Cats"), "Expression intent production code must not contain niche-specific answers");
+  assert.ok(sloganEngineSource.includes("semanticQualityPrior * 0.35 + expressionWorthiness.score * 0.65"));
+  assert.ok(sloganEngineSource.includes("EXPRESSION_RECOVERY_SUCCEEDED"));
+  assert.ok(sloganEngineSource.includes("cacheDisabled = input.cacheTtlSec === 0"));
   assert.ok(sloganEngineSource.includes("runBoundedSemanticRecovery"));
   assert.ok(selectionSource.includes("assessCompoundIntersectionBatch"), "Compound niches require a focused second verifier");
+  assert.ok(selectionSource.includes("Axis presence has no threshold"), "Compound verifier must separate lexical presence from semantic preservation");
+  assert.ok(!selectionSource.includes("causal behavioral bridge"), "Territory generation must not assume every compound is behavioral");
   assert.ok(sloganEngineSource.includes('error: "GENERATION_EXHAUSTED"'));
   assert.ok(factorySource.includes("We couldn't find a sufficiently grounded slogan"));
   assert.ok(!factorySource.includes("No slogans survived semantic eligibility"), "Raw evaluator wording must not reach users");

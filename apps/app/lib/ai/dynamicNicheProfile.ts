@@ -1,3 +1,6 @@
+import type { CreativeDirectionBrief } from "./expressionWorthiness";
+import type { ExpressionIntent } from "./expressionIntent";
+
 export type IdentityDirection =
   | "proud_participant"
   | "reluctant_participant"
@@ -40,18 +43,42 @@ export interface LatentLifestyleModel {
   smallVictories: string[];
   unspokenRules: string[];
   emotionalRewards: string[];
+  sharedMeanings?: string[];
+  culturalCodes?: string[];
+  aestheticCodes?: string[];
+  symbolicAssociations?: string[];
 }
+
+export type CompositionType =
+  | "BEHAVIORAL_INTERSECTION"
+  | "IDENTITY_INTERSECTION"
+  | "CULTURAL_INTERSECTION"
+  | "AESTHETIC_INTERSECTION"
+  | "RITUAL_INTERSECTION"
+  | "SYMBOLIC_INTERSECTION";
 
 export interface NicheComposition {
   kind: "single" | "compound";
   axes: string[];
+  compositionType?: CompositionType;
+  sharedPremise?: string;
+  axisRoles?: Array<{ axis: string; contribution: string }>;
+  evidenceRefs?: string[];
+  confidence?: number;
+  compositionConfidence?: number;
+  alternativeCompositionTypes?: Array<{
+    compositionType: CompositionType;
+    confidence: number;
+    sharedPremise: string;
+  }>;
 }
 
 export interface RecoveryContext {
   attempt: number;
   dominantFailureDimensions: string[];
-  supportedProfileTruths: string[];
-  territoryTruths: string[];
+  profileHypotheses: string[];
+  territoryHypotheses: string[];
+  corroboratedTruths: string[];
   rejectedSemanticTendencies: string[];
   alreadyGeneratedCandidateFingerprints: string[];
   evidenceConstraints: {
@@ -62,6 +89,15 @@ export interface RecoveryContext {
     culturalSignalCount: number;
     purchaseSignalCount: number;
   };
+}
+
+export interface ExpressionRecoveryContext {
+  attempt: number;
+  minimumExpressionTarget: number;
+  dominantWeakDimensions: string[];
+  rejectedExpressionTendencies: string[];
+  bindingNegativeConstraints: string[];
+  excludedConceptKeys: string[];
 }
 
 export type DynamicNicheProfile = {
@@ -102,13 +138,22 @@ export interface DynamicSloganGenerationOptions {
     premise: string;
     humanTruth: string;
     evidence: string[];
+    evidenceRefs?: string[];
+    groundingBasis?: "market_corroborated" | "niche_supported_inference";
     dimensionCoverage: string[];
     emotionalPayoff?: string;
     tension?: string;
     confidence: number;
+    compositionType?: CompositionType;
+    sharedPremise?: string;
+    axisContributions?: Array<{ axis: string; contribution: string }>;
   }>;
   excludeSlogans?: string[];
   recoveryContext?: RecoveryContext;
+  expressionRecoveryContext?: ExpressionRecoveryContext;
+  creativeDirection?: CreativeDirectionBrief;
+  expressionIntents?: ExpressionIntent[];
+  originalUserDirection?: string;
 }
 
 export type SloganLayoutMode = "compact" | "standard" | "statement";
@@ -246,7 +291,66 @@ function safeNicheComposition(value: unknown): NicheComposition | undefined {
   if (kind !== "single" && kind !== "compound") return undefined;
   const axes = safeStringArray(record.axes);
   if (kind === "compound" && axes.length < 2) return undefined;
-  return { kind, axes };
+  const compositionTypes: CompositionType[] = [
+    "BEHAVIORAL_INTERSECTION",
+    "IDENTITY_INTERSECTION",
+    "CULTURAL_INTERSECTION",
+    "AESTHETIC_INTERSECTION",
+    "RITUAL_INTERSECTION",
+    "SYMBOLIC_INTERSECTION",
+  ];
+  const compositionType = compositionTypes.includes(record.compositionType as CompositionType)
+    ? record.compositionType as CompositionType
+    : undefined;
+  const rawAxisRoles = Array.isArray(record.axisRoles) ? record.axisRoles : [];
+  const axisRoles = rawAxisRoles.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const role = value as Record<string, unknown>;
+    const axis = safeString(role.axis);
+    const contribution = safeString(role.contribution);
+    return axis && contribution ? [{ axis, contribution }] : [];
+  });
+  const rawConfidence = Number(record.confidence);
+  const rawCompositionConfidence = Number(record.compositionConfidence);
+  const alternativeCompositionTypes = (Array.isArray(record.alternativeCompositionTypes)
+    ? record.alternativeCompositionTypes
+    : []).flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const alternative = value as Record<string, unknown>;
+      const alternativeType = compositionTypes.includes(alternative.compositionType as CompositionType)
+        ? alternative.compositionType as CompositionType
+        : undefined;
+      const rawAlternativeConfidence = Number(alternative.confidence);
+      const sharedPremise = safeString(alternative.sharedPremise);
+      if (!alternativeType || !Number.isFinite(rawAlternativeConfidence) || !sharedPremise) return [];
+      return [{
+        compositionType: alternativeType,
+        confidence: Math.max(0, Math.min(100, Math.round(rawAlternativeConfidence <= 1
+          ? rawAlternativeConfidence * 100
+          : rawAlternativeConfidence))),
+        sharedPremise,
+      }];
+    }).slice(0, 2);
+  const confidence = Number.isFinite(rawCompositionConfidence)
+    ? Math.max(0, Math.min(100, Math.round(rawCompositionConfidence <= 1
+      ? rawCompositionConfidence * 100
+      : rawCompositionConfidence)))
+    : Number.isFinite(rawConfidence)
+      ? Math.max(0, Math.min(100, Math.round(rawConfidence <= 1 ? rawConfidence * 100 : rawConfidence)))
+      : undefined;
+  return {
+    kind,
+    axes,
+    compositionType,
+    sharedPremise: safeString(record.sharedPremise) || undefined,
+    axisRoles: axisRoles.length > 0 ? axisRoles : undefined,
+    evidenceRefs: safeStringArray(record.evidenceRefs),
+    confidence,
+    compositionConfidence: confidence,
+    alternativeCompositionTypes: alternativeCompositionTypes.length > 0
+      ? alternativeCompositionTypes
+      : undefined,
+  };
 }
 
 export function canonicalSloganKey(slogan: string): string {
@@ -341,6 +445,10 @@ function safeLatentLifestyleModel(value: unknown): LatentLifestyleModel {
     smallVictories: safeStringArray(model.smallVictories),
     unspokenRules: safeStringArray(model.unspokenRules),
     emotionalRewards: safeStringArray(model.emotionalRewards),
+    sharedMeanings: safeStringArray(model.sharedMeanings),
+    culturalCodes: safeStringArray(model.culturalCodes),
+    aestheticCodes: safeStringArray(model.aestheticCodes),
+    symbolicAssociations: safeStringArray(model.symbolicAssociations),
   };
 }
 
@@ -348,6 +456,7 @@ export function normalizeDynamicNicheProfile(
   niche: string,
   audience: string | undefined,
   value: unknown,
+  inferredComposition?: NicheComposition,
 ): DynamicNicheProfile {
   const json = value && typeof value === "object" && !Array.isArray(value)
     ? value as DynamicProfileJson
@@ -355,12 +464,12 @@ export function normalizeDynamicNicheProfile(
 
   const parsedComposition = safeNicheComposition(json.nicheComposition);
   const explicitCompoundAxes = niche.split("×").map((axis) => axis.trim()).filter(Boolean);
-  const nicheComposition = explicitCompoundAxes.length >= 2
+  const nicheComposition = inferredComposition ?? (explicitCompoundAxes.length >= 2
     ? {
         kind: "compound" as const,
         axes: explicitCompoundAxes,
       }
-    : parsedComposition;
+    : parsedComposition);
 
   return {
     niche,
@@ -384,11 +493,13 @@ export function normalizeDynamicNicheProfile(
 async function callAIJson<T extends Record<string, unknown>>(
   prompt: string,
   temperature = 0.35,
+  model = "gpt-4o-mini",
 ): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    model,
     temperature,
+    max_tokens: 5200,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -417,10 +528,123 @@ async function callAIJson<T extends Record<string, unknown>>(
   }
 }
 
+export interface NicheCompositionInferenceInput {
+  niche: string;
+  audience?: string;
+  originalUserBrief?: string;
+  creativeDirection?: CreativeDirectionBrief;
+  evidence?: DynamicProfileEvidenceContext;
+}
+
+export async function inferNicheComposition(
+  input: NicheCompositionInferenceInput,
+): Promise<NicheComposition> {
+  const indexedEvidence = [
+    ...(input.evidence?.trendSignals ?? []).map((value, index) => ({ ref: `trend:${index}`, value })),
+    ...(input.evidence?.buyerLanguage ?? []).map((value, index) => ({ ref: `buyer:${index}`, value })),
+    ...(input.evidence?.culturalSignals ?? []).map((value, index) => ({ ref: `culture:${index}`, value })),
+    ...(input.evidence?.purchaseSignals ?? []).map((value, index) => ({ ref: `purchase:${index}`, value })),
+  ];
+  const explicitAxes = input.niche.split("×").map((axis) => axis.trim()).filter(Boolean);
+  const compositionModel = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
+  const response = await callAIJson<Record<string, unknown>>(`
+Infer the semantic composition of this niche before profile generation.
+
+NICHE:
+${input.niche}
+
+EXPLICIT COMPOUND AXES (authoritative when two or more are supplied):
+${JSON.stringify(explicitAxes)}
+
+AUDIENCE CONTEXT:
+${input.audience?.trim() || "Not supplied"}
+
+ORIGINAL USER BRIEF:
+${input.originalUserBrief?.trim() || "Not supplied"}
+
+VERIFIED SOURCE EVIDENCE:
+${JSON.stringify({ niche: input.niche, audience: input.audience ?? "", indexedEvidence }, null, 2)}
+
+CREATIVE-DIRECTION ATTRIBUTES AND NEGATIVE CONSTRAINTS (interpretive context only; never evidence):
+${JSON.stringify(input.creativeDirection ?? {}, null, 2)}
+
+Classify the strongest shared semantic relationship between the axes. Composition types are semantic models, never slogan structures:
+- BEHAVIORAL_INTERSECTION: the axes jointly cause or alter a repeated action, decision, consequence, or participation pattern.
+- IDENTITY_INTERSECTION: the axes combine into a self-concept, affiliation, role, status, or projected identity whose meaning depends on both.
+- CULTURAL_INTERSECTION: shared lore, language, norms, community shorthand, tradition, media code, or subcultural knowledge binds the axes.
+- AESTHETIC_INTERSECTION: a coherent taste system, visual grammar, atmosphere, material language, or style code binds the axes.
+- RITUAL_INTERSECTION: a recurring ceremony, observance, preparation, seasonal practice, or socially meaningful routine binds the axes.
+- SYMBOLIC_INTERSECTION: mythology, metaphor, archetype, emblematic meaning, superstition, or conceptual symbolism binds the axes.
+
+Rules:
+- Classify as compound only when removing an axis materially changes the shared premise or creative justification.
+- Do not assume every compound is behavioral.
+- Select one primary compositionType from the list for a compound niche. Do not create hybrid labels.
+- Evaluate every composition type before selecting the primary. Activity axes that jointly describe what people repeatedly do should normally favor BEHAVIORAL_INTERSECTION or RITUAL_INTERSECTION unless original evidence shows that identity, culture, aesthetics, or symbolism is the stronger relationship.
+- Return calibrated confidence for the primary and up to two plausible alternatives. Alternatives are bounded semantic hypotheses, not extra labels to force into every territory.
+- Describe each axis's semantic contribution without requiring literal keywords in eventual slogans.
+- sharedPremise must explain the emergent relationship, not restate "A plus B".
+- Cite only exact evidence refs: "niche", "audience", or IDs from indexedEvidence. Creative direction cannot be cited as evidence.
+- Profile claims do not exist yet and cannot be used as support.
+- Negative constraints may disambiguate intended meaning but cannot manufacture a relationship.
+
+Return JSON only:
+{
+  "kind": "single",
+  "axes": [],
+  "compositionType": null,
+  "sharedPremise": "",
+  "axisRoles": [{ "axis": "", "contribution": "" }],
+  "evidenceRefs": [],
+  "compositionConfidence": 0,
+  "alternativeCompositionTypes": [{
+    "compositionType": "CULTURAL_INTERSECTION",
+    "confidence": 0,
+    "sharedPremise": ""
+  }]
+}`,
+  0.08, compositionModel);
+
+  const parsed = safeNicheComposition(response);
+  if (!parsed) throw new Error("Composition classifier returned an invalid composition");
+  const kind = explicitAxes.length >= 2 ? "compound" as const : parsed.kind;
+  const axes = explicitAxes.length >= 2 ? explicitAxes : parsed.axes;
+  const allowedRefs = new Set(["niche", "audience", ...indexedEvidence.map((item) => item.ref)]);
+  const evidenceRefs = (parsed.evidenceRefs ?? []).filter((ref) => allowedRefs.has(ref));
+  if (kind === "single") {
+    return {
+      kind: "single",
+      axes: [],
+      evidenceRefs,
+    };
+  }
+  if (kind === "compound") {
+    if (axes.length < 2) throw new Error("Composition classifier did not resolve compound axes");
+    if (!parsed.compositionType) throw new Error("Composition classifier omitted the compound composition type");
+    if (!parsed.sharedPremise) throw new Error("Composition classifier omitted the shared compound premise");
+    const roleAxes = new Set((parsed.axisRoles ?? []).map((role) => role.axis.toLowerCase()));
+    if (!axes.every((axis) => roleAxes.has(axis.toLowerCase()))) {
+      throw new Error("Composition classifier omitted one or more axis contributions");
+    }
+    if (evidenceRefs.length === 0) throw new Error("Composition classifier cited no original source evidence");
+  }
+  return {
+    ...parsed,
+    kind,
+    axes,
+    evidenceRefs,
+    alternativeCompositionTypes: (parsed.alternativeCompositionTypes ?? [])
+      .filter((alternative) => alternative.compositionType !== parsed.compositionType)
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 2),
+  };
+}
+
 export async function buildDynamicNicheProfile(
   niche: string,
   audience?: string,
   evidence?: DynamicProfileEvidenceContext,
+  inferredComposition?: NicheComposition,
 ): Promise<DynamicNicheProfile> {
   const prompt = `
 Analyze this t-shirt niche as a real human subculture.
@@ -434,11 +658,19 @@ ${audience?.trim() || "Not supplied; infer the narrowest plausible participating
 MARKET / COMMUNITY EVIDENCE (supporting context only; never force a term or invent behavior from it):
 ${JSON.stringify(evidence ?? {}, null, 2)}
 
+INFERRED COMPOSITION MODEL (authoritative semantic structure; do not reclassify it):
+${JSON.stringify(inferredComposition ?? { kind: "single", axes: [] }, null, 2)}
+
 Return ONLY valid JSON:
 {
   "nicheComposition": {
     "kind": "single",
-    "axes": []
+    "axes": [],
+    "compositionType": null,
+    "sharedPremise": "",
+    "axisRoles": [],
+    "evidenceRefs": [],
+    "confidence": 0
   },
   "dimensions": [],
   "audience": "",
@@ -472,7 +704,11 @@ Return ONLY valid JSON:
     "tinyFrustrations": [],
     "smallVictories": [],
     "unspokenRules": [],
-    "emotionalRewards": []
+    "emotionalRewards": [],
+    "sharedMeanings": [],
+    "culturalCodes": [],
+    "aestheticCodes": [],
+    "symbolicAssociations": []
   },
   "rituals": [],
   "microRituals": [],
@@ -488,11 +724,11 @@ Return ONLY valid JSON:
 
 Rules:
 - Do not create slogans.
-- Classify nicheComposition as "compound" only when the opportunity combines two or more independently meaningful audience/activity/culture axes whose intersection must remain present. Put those axes in axes. Otherwise classify it as "single"; descriptive modifiers inside one coherent niche do not make it compound.
+- Copy the supplied inferred composition model exactly. It was classified from original inputs before profile inference and must not be replaced by a behavior-first interpretation.
 - Build the latentLifestyleModel first. Use the legacy arrays to summarize and corroborate that model, not as a substitute for it.
 - Infer a lifestyle, not a bag of related topics or keywords.
 - Calibrate detail to evidence. Never invent rituals, objects, jargon, social behavior, or scenes merely to fill a field or meet a count target. For a sparse or unusual niche, return fewer high-confidence items and leave unsupported arrays empty.
-- Discover what repeatedly happens that outsiders rarely notice: private rituals, small interruptions, recurring choices, handled objects, social exchanges, tiny frustrations, and quiet victories.
+- Discover what members recognize that outsiders rarely notice. Depending on compositionType, that may be behavior, ritual, identity, cultural shorthand, aesthetic grammar, symbolism, status, tension, or shared meaning.
 - participationHabits must capture repeated ways members consume, practice, maintain, prepare for, or return to the core activity. This is the niche-agnostic equivalent of fields such as reading habits, training habits, viewing habits, care habits, or collecting routines; name the actual behavior rather than the category.
 - involuntaryBehaviors must capture automatic, barely noticed actions or decisions triggered by a niche situation. Each item should expose a tiny cause-and-response, interruption, reflex, repeated mistake, or private accommodation—not summarize an activity, aesthetic, or planned routine.
 - seasonalBehaviors must capture behavior that changes with a supported season, holiday, event cycle, weather pattern, or time of day. Leave it empty when the niche has no credible temporal trigger. Do not return seasonal imagery by itself.
@@ -507,7 +743,7 @@ Rules:
 - Infer environments and recurringObjects from the observableScenes. Prefer places and objects the audience actually encounters over decorative symbols associated with the topic.
 - tensions must express lived conflicts between compatible forces, choices, roles, or rewards. They are behavioral source material, not prewritten jokes.
 - repeatedDecisions must capture choices the audience makes again and again. smallVictories must capture what they quietly take pride in. unspokenRules must capture insider expectations that members follow without explaining.
-- identitySignals must show how someone proves belonging through behavior, taste, timing, knowledge, preparation, or choices.
+- identitySignals may show belonging through behavior, taste, timing, knowledge, preparation, choices, symbolism, or culturally legible self-presentation.
 - Classify identityDirection from the audience's relationship to the behavior, not from a hardcoded niche-name lookup. When the evidence supports a direction, return exactly one of: proud_participant, reluctant_participant, aspiring_participant, or self_deprecating_outsider. If the relationship is genuinely ambiguous, omit identityDirection rather than defaulting to proud participation.
 - Keep identity direction consistent across the model. A proud-participant niche should not be defined by repeatedly failing or avoiding the core behavior; an aspiring or reluctant niche may support that contradiction.
 - Extract concrete behaviors, rituals, contradictions, pain points, status signals, insider language, embarrassing truths, obsessions, and visual culture.
@@ -515,16 +751,18 @@ Rules:
 - Do not force keywords.
 - Treat supplied market/community evidence as corroboration, not as permission to fabricate rituals. Prefer profile facts supported by both niche meaning and evidence.
 - Preserve every meaningful dimension in compound niches.
-- For a compound niche, infer only scenes where the axes interact in one causally coherent moment. Do not profile each axis separately and join the summaries. If the evidence cannot support a shared behavior, ritual, tension, decision, or consequence, keep compound-scene fields sparse rather than inventing a bridge.
+- For BEHAVIORAL_INTERSECTION and RITUAL_INTERSECTION compounds, infer only scenes where the axes interact causally. Do not join separate axis behaviors.
+- For IDENTITY_INTERSECTION, CULTURAL_INTERSECTION, AESTHETIC_INTERSECTION, or SYMBOLIC_INTERSECTION compounds, do not invent behavior merely to make the intersection observable. Populate sharedMeanings, identitySignals, culturalCodes, aestheticCodes, symbolicAssociations, statusSignals, insiderLanguage, visualCulture, tensions, and emotionalRewards only when supported as conservative hypotheses.
+- Every compound field must serve the inferred sharedPremise. Keep fields sparse rather than converting symbolic, cultural, identity, or aesthetic meaning into a fictional ritual.
 - Treat the niche and audience together. Separate content interest, humor style, media behavior, role, and setting when they are distinct axes.
 - Dimensions must describe distinct behavioral or cultural axes, not synonyms for the category.
 - For behaviorally rich niches, return at least 6 rituals and 8 microRituals. Sparse niches may return fewer. Most rituals must be observable, repeated actions with a context, trigger, or consequence; microRituals must be small "that's me" moments, not category summaries.
 - Prefer consumption behavior and community rituals over pretending the wearer performs the profession or activity shown in the content.
 - Humor about sensitive subject matter must target the viewer's habits, algorithms, commentary, or absurd decisions—not victims or harm.
 - For visually rich niches, return at least 6 visualCulture items; sparse niches may return fewer. Make them concrete objects, interfaces, textures, tools, settings, or recurring visual details inferred from the rituals.
-- Avoid mood-only abstractions like relaxing, comfort, aesthetic, vibes, self-care, or community unless tied to a specific action or object.
-- Do not return broad interests or aesthetics by themselves. Attach every detail to a repeated behavior or scene.
-- Every ritual, contradiction, frustration, status signal, embarrassing truth, and obsession should name an action, choice, object, mechanic, chore, collection, avoidance, or recurring decision.
+- Avoid unsupported mood-only abstractions like relaxing, comfort, vibes, self-care, or community. For nonbehavioral compositions, a meaning may instead be grounded by a coherent identity, cultural, aesthetic, or symbolic relationship that depends on both axes.
+- Do not return broad interests or aesthetics by themselves. Attach every detail to the sharedPremise and the relevant source axes; require a repeated behavior or scene only for behavioral and ritual claims.
+- Every ritual must name an action. Other fields may name grounded identity, cultural, aesthetic, or symbolic meaning without fabricating an action.
 - Prefer oddly specific subculture behavior over category labels.
 - For rituals, ask: what do they repeatedly do that outsiders would not immediately understand?
 - For microRituals, ask: what tiny action, interruption, excuse, object, time of day, or social habit would make someone in the niche instantly say "that's me"?
@@ -538,7 +776,7 @@ Rules:
 `;
 
   const json = await callAIJson<DynamicProfileJson>(prompt);
-  return normalizeDynamicNicheProfile(niche, audience, json);
+  return normalizeDynamicNicheProfile(niche, audience, json, inferredComposition);
 }
 
 export async function generateSlogansFromDynamicProfile(
@@ -546,6 +784,82 @@ export async function generateSlogansFromDynamicProfile(
   count = 20,
   options: DynamicSloganGenerationOptions = {},
 ): Promise<string[]> {
+  const compositionType = profile.nicheComposition?.compositionType;
+  const behaviorLed = !compositionType ||
+    compositionType === "BEHAVIORAL_INTERSECTION" ||
+    compositionType === "RITUAL_INTERSECTION";
+  const compositionSourcePriority = behaviorLed
+    ? "Prioritize supported shared scenes, rituals, decisions, tensions, consequences, and insider mechanics. The joint behavior or observance must remain semantically intact, although it need not be narrated literally."
+    : `This is ${compositionType}. Prioritize the classified sharedPremise, axisRoles, sharedMeanings, identitySignals, culturalCodes, aestheticCodes, symbolicAssociations, statusSignals, tensions, and emotionalRewards. Behavioral fields are secondary hypotheses, not mandatory creative material. Do not invent a scene to justify an identity, cultural, aesthetic, or symbolic expression.`;
+  const creativeModel = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
+  const expressionIntents = options.expressionIntents ?? [];
+  if (profile.nicheComposition?.kind === "compound" && expressionIntents.length === 0) {
+    throw new Error("Compound generation requires at least one eligible expression intent");
+  }
+  if (profile.nicheComposition?.kind === "compound") {
+    const maxPerIntent = Math.max(2, Math.ceil(count / expressionIntents.length) + 1);
+    const compoundResponse = await callAIJson<{ candidates?: unknown }>(`
+Realize eligible human expression intents as original t-shirt slogans for a compound niche.
+
+ORIGINAL USER DIRECTION (no reference-example wording):
+${options.originalUserDirection?.trim() || "Not supplied"}
+
+ABSTRACT CREATIVE ATTRIBUTES AND BINDING NEGATIVE CONSTRAINTS:
+${JSON.stringify(options.creativeDirection ?? {}, null, 2)}
+
+COMPOSITION MODEL:
+${JSON.stringify(profile.nicheComposition, null, 2)}
+
+ELIGIBLE EXPRESSION INTENTS:
+${JSON.stringify(expressionIntents, null, 2)}
+
+PREVIOUS FINGERPRINTS / EXCLUSIONS:
+${JSON.stringify((options.excludeSlogans ?? []).slice(0, 60), null, 2)}
+
+${options.recoveryContext ? `SEMANTIC RECOVERY FEEDBACK:
+${JSON.stringify(options.recoveryContext, null, 2)}` : ""}
+
+${options.expressionRecoveryContext ? `EXPRESSION RECOVERY FEEDBACK:
+${JSON.stringify(options.expressionRecoveryContext, null, 2)}` : ""}
+
+Write ${count} candidates. Every candidate must realize exactly one supplied intent and return its exact intentId.
+
+Rules:
+- Realize WHY a person would wear or say the intent. Do not summarize the niche, territory, premise, or metadata.
+- The phrase itself must communicate the intent's humanMeaning, socialSignal, identityTarget, and intersection. Metadata will not accompany it downstream.
+- Preserve why both axes are indispensable, but literal axis names are optional.
+- Do not invent behavior, lore, status, identity, or relationships beyond original sources.
+- Do not turn symbolic, identity, or cultural meaning into atmospheric poetry, visual captions, mystical adjective stacks, motif lists, or noun decoration. Instead make the supported human identity, role, affiliation, attitude, recognition, status, or observation socially legible.
+- A compact label or fragment is valid when naturally speakable and identity-bearing; no explicit verb or behavior is required.
+- Honor every negative constraint. Reference examples were abstracted upstream and are unavailable; do not reconstruct familiar wording.
+- Use varied rhetorical families based on intent meaning, never reusable phrase templates.
+- Generate no more than ${maxPerIntent} candidates for one intent. Cover distinct intent fingerprints before adding another realization of an intent.
+- Do not reuse excluded concepts, sentence frames, or openings.
+- Return slogan wording only inside the requested JSON objects.
+
+Return JSON only:
+{
+  "candidates": [{ "intentId": "intent_1", "slogan": "" }]
+}`,
+    0.85,
+    creativeModel);
+    const validIntentIds = new Set(expressionIntents.map((intent) => intent.id));
+    const intentCounts = new Map<string, number>();
+    const slogans = (Array.isArray(compoundResponse.candidates) ? compoundResponse.candidates : [])
+      .flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const record = value as Record<string, unknown>;
+        const intentId = safeString(record.intentId);
+        const slogan = safeString(record.slogan);
+        if (!validIntentIds.has(intentId) || !slogan) return [];
+        const used = intentCounts.get(intentId) ?? 0;
+        if (used >= maxPerIntent) return [];
+        intentCounts.set(intentId, used + 1);
+        return [slogan];
+      });
+    if (slogans.length === 0) throw new Error("Compound intent realization returned no traceable candidates");
+    return safeStringArray(slogans, count);
+  }
   const prompt = `
 You are writing original t-shirt slogans from a dynamic niche profile.
 
@@ -557,6 +871,9 @@ ${profile.audience}
 
 NICHE COMPOSITION:
 ${JSON.stringify(profile.nicheComposition ?? { kind: "single", axes: [] }, null, 2)}
+
+COMPOSITION-AWARE SOURCE PRIORITY:
+${compositionSourcePriority}
 
 LATENT LIFESTYLE MODEL:
 ${JSON.stringify(profile.latentLifestyleModel || safeLatentLifestyleModel(undefined), null, 2)}
@@ -594,8 +911,15 @@ ${profile.visualCulture.join(", ")}
 PURCHASE MOTIVES:
 ${profile.purchaseMotives.join("\n")}
 
-GROUNDED CREATIVE TERRITORIES (semantic premises only; do not copy wording):
-${JSON.stringify(options.creativeTerritories ?? [], null, 2)}
+USER CREATIVE BRIEF (creative preference only; never behavioral evidence):
+${JSON.stringify(options.creativeDirection ?? {
+    sourcePresent: false,
+    desiredQualities: [],
+    voiceAttributes: [],
+    conceptualMoves: [],
+    referenceAttributes: [],
+    negativeConstraints: [],
+  }, null, 2)}
 
 PREVIOUS / EXCLUDED CANDIDATES (avoid semantic duplicates; do not imitate them):
 ${JSON.stringify((options.excludeSlogans ?? []).slice(0, 30))}
@@ -603,7 +927,12 @@ ${JSON.stringify((options.excludeSlogans ?? []).slice(0, 30))}
 ${options.recoveryContext ? `REJECTION-AWARE RECOVERY CONTEXT:
 ${JSON.stringify(options.recoveryContext, null, 2)}
 
-This is a bounded recovery attempt after the hard semantic gate rejected the prior batch. Generate fresh semantic premises from supported profile truths and grounded territories. Correct the listed failure tendencies without copying prior wording. Candidate fingerprints are exclusion signals, not phrase suggestions.` : ""}
+This is a bounded recovery attempt after the hard semantic gate rejected the prior batch. Generate fresh semantic premises from corroborated truths and conservative implications of the original niche/audience. Treat profileHypotheses and territoryHypotheses as creative leads requiring independent plausibility, not as proof. Correct the listed failure tendencies without copying prior wording. Candidate fingerprints are exclusion signals, not phrase suggestions.` : ""}
+
+${options.expressionRecoveryContext ? `EXPRESSION-WORTHINESS RECOVERY CONTEXT:
+${JSON.stringify(options.expressionRecoveryContext, null, 2)}
+
+This is one bounded creative-quality recovery after the previous candidates passed semantic eligibility but failed to become worthwhile expressions. Generate genuinely new concepts from the same grounded source material. Correct the weak dimensions and rejected tendencies without copying prior wording, reconstructing excluded concepts, or adopting a shared sentence frame. Binding negative constraints remain release conditions.` : ""}
 
 TASK:
 Write ${count} original t-shirt slogans.
@@ -612,45 +941,51 @@ Rules:
 - Do NOT use reusable slogan templates or imitate recurring merchandising formulas.
 - Do NOT write generic identity labels.
 - Do not talk about finding, buying, wearing, gifting, printing, or promoting the merchandise carrying the slogan unless commerce itself is genuinely part of the niche truth.
-- Every implied behavior or use-case must be supported by the supplied profile or grounded creative territories.
+- Every implied behavior, identity, role, affiliation, status, or use-case must be supported by the original niche/audience and an eligible expression intent.
+- The user creative brief controls expression, not factual grounding. Honor every negative constraint throughout the batch.
+- Reference attributes describe why examples appealed; never reconstruct, closely paraphrase, or imitate reference wording.
+- Treat negative creative constraints as binding release conditions. Before returning, silently discard and replace any candidate that credibly violates one.
+- When the brief asks for insider, identity-rich, or conceptually transformed expression, a broad topic noun plus a seasonal adjective, approval word, decorative rhyme, or familiar catchphrase rewrite is insufficient.
+- Use grounded source material to create a new stance, identity signal, double meaning, conceptual substitution, or socially recognizable implication. Do not merely decorate category labels.
 - When recovery feedback is supplied, respond directly to its dominant failure dimensions. Do not evade the feedback by becoming more generic.
-- For a compound niche, every returned candidate must make each nicheComposition axis semantically recoverable from one coherent premise. A tone, mood, season, setting, or decorative object does not preserve an axis unless it changes the behavior, ritual, decision, tension, or consequence being expressed.
-- Before returning a compound batch, discard and replace candidates that serve only one axis, list adjacent axis symbols, or concatenate unrelated axis language.
+- For a compound niche, every returned candidate must preserve the inferred sharedPremise and each axis contribution in one coherent emergent meaning. Literal axis names and independent lexical recoverability are not required.
+- Use compositionType to determine what kind of meaning must survive. Behavioral and ritual intersections require a supported joint action or observance. Identity, cultural, aesthetic, and symbolic intersections may instead express self-concept, lore, shorthand, taste grammar, mythology, status, or conceptual reframing without an explicit behavioral scene.
+- Apply the removal test: if removing either axis would not materially change the candidate's meaning or creative justification, discard it as one-axis collapse. Also discard simple adjacency, decorative axis props, or unrelated concatenation.
 - Do NOT write category descriptions or product taglines such as "[interest], [mood]" or "[category] meets [comfort]".
-- Do NOT write mood descriptions about comfort, ambience, escape, relaxation, or self-care unless the line also names a concrete niche behavior.
-- Treat the latent lifestyle model as the primary creative source. Use the legacy fields as supporting evidence.
-- Each slogan must reveal one or more inferred scenes, private rituals, tensions, identity signals, repeated decisions, tiny frustrations, small victories, unspoken rules, or emotional rewards.
-- Prefer participation habits, seasonal behaviors, comfort-object use, and collection habits when they reveal a widely shared "that's me" moment. An object alone is not behavioral evidence; preserve what the audience repeatedly does with it.
-- Give involuntary behaviors, private accommodations, repeated mistakes, and tiny trigger-response moments priority over descriptions of activities.
+- Do NOT write unsupported mood descriptions about comfort, ambience, escape, relaxation, self-care, or community. A nonbehavioral shared meaning is valid when it is conservatively supported by the source axes.
+- Treat the composition-aware source priority above as authoritative. Use other profile fields only as supporting hypotheses.
+- Each slogan must be traceable to the shared premise or to a conservative implication of original niche/audience evidence. Grounding may remain latent and does not require profile-token overlap.
 - Favor evidence likely to be recognized by a meaningful share of the specific audience over obscure cleverness or topic-word combinations.
-- Let the observable behavior determine the rhetoric. Invent the wording and sentence structure for this niche; do not translate evidence into a recurring frame.
-- Prefer an observable moment over a description of the audience.
-- Compress compatible details from the same scene when it improves recognition. Do not splice unrelated objects or actions together for superficial specificity.
-- Preserve identityDirection. Celebrate core follow-through for proud participants; use failed intentions or avoidance as defining behavior only when the profile supports a reluctant, aspiring, or self-deprecating identity. If identityDirection is absent, do not invent a strong success-or-failure stance.
-- Draw across different scenes and behavioral sources so the batch explores the lifestyle rather than repeating one discovery.
+- Let the strongest composition-relevant meaning determine the rhetoric. Invent the wording and sentence structure for this niche; do not translate evidence into a recurring frame.
+- Prefer expressive transformation of a grounded truth over description of the audience. Observable moments are one valid source, not mandatory surface syntax.
+- Combine only details that belong to the same shared premise. Do not splice unrelated objects, actions, or symbols for superficial specificity.
+- Preserve identityDirection when it is relevant, but do not force behavioral success/failure syntax onto identity, cultural, aesthetic, or symbolic compositions.
+- Draw across different composition-relevant meanings so the batch explores the intersection rather than repeating one discovery.
 - Do not copy source phrases mechanically. Synthesize their lived truth into short, natural language.
-- Express a behavior and its recognizable truth or consequence; do not merely pair the topic with an opinion.
-- Prefer micro-rituals that reveal a tiny recognizable moment over broad statements of interest or personality.
+- Express the recognizable meaning or identity consequence of a grounded truth; do not merely pair the topic with an opinion.
+- Prefer precise insider recognition over broad statements of interest or personality; use micro-rituals only when the composition is behavior- or ritual-led.
 - Do not imply the wearer performs a profession when the profile says they consume, watch, read, listen, scroll, or discuss it.
 - For sensitive topics, joke about audience behavior, platform culture, implausible decisions, or bad excuses—not victims, suspects, gore, harm, or violence.
 - Avoid fandom nicknames, show-specific catchphrases, branded community labels, or slogans that require a specific podcast/show/creator fandom to understand.
 - At least three quarters of the slogans should work without naming the niche or its broad category.
 - No more than one quarter of slogans may include broad category labels from the niche such as "true crime", "crime", "murder", "sports", "fashion", "pets", or equivalent topic names.
-- Before returning, discard slogans whose main meaning is only "I like this topic" or "this topic is dramatic/funny/interesting"; replace them with a line built from a ritual, repeated choice, interface, object, or social behavior.
-- Strongly prefer slogans that repurpose insider language, mechanics, acronyms, or category terms into a niche-specific joke.
-- Prefer concrete actions, objects, mechanics, recurring chores, and insider decisions over vibe words.
+- Before returning, discard slogans whose main meaning is only "I like this topic" or "this topic is dramatic/funny/interesting"; replace them with a supported identity stance, cultural shorthand, conceptual reframing, symbolic transformation, aesthetic code, ritual, repeated choice, or insider consequence appropriate to compositionType.
+- Prefer repurposed insider language, mechanics, symbols, myths, taste codes, or category terms when they produce genuine recognition rather than decoration.
+- Prefer precise composition-relevant meaning over vibe words.
 - Vary rhetorical structure across the batch. Mix observations, confessions, commands, questions, priorities, contrasts, and identity lines when the profile supports them.
 - Do not repeat the same grammatical frame with different nouns. In particular, generate no more than two comparisons, confessions, identity statements, commands, or questions.
 - Vary sentence openings. Do not begin multiple slogans with the same word.
-- Preserve the strongest complete behavioral concept in this stage; a downstream adaptive pass handles length and visual fit.
+- Preserve the strongest complete semantic concept in this stage; a downstream adaptive pass handles length and visual fit.
 - Do not optimize against a fixed word or character count here.
 - Keep slogans wearable and human.
-- Prefer lived truth over cleverness.
+- Reward self-recognition, identity projection, insider resonance, conceptual transformation, naturalness, and wearability. Allow multiple rhetorical families; do not force every line into confession or narrated behavior.
+- Freshness must come from the transformed idea, not from inserting niche nouns into a common caption, rhyme, or pop-culture phrase.
+- Prefer lived truth over cleverness, but do not confuse truth with literal profile-word overlap.
 - Return ONLY JSON:
 { "slogans": [] }
 `;
 
-  const json = await callAIJson<{ slogans?: unknown }>(prompt);
+  const json = await callAIJson<{ slogans?: unknown }>(prompt, 0.8, creativeModel);
   return safeStringArray(json.slogans, count);
 }
 
@@ -735,6 +1070,7 @@ export async function compressDynamicSlogansWithDiagnostics(
   profile: DynamicNicheProfile,
   slogans: string[],
   budget: SloganLengthBudget,
+  creativeDirection?: CreativeDirectionBrief,
 ): Promise<DynamicCompressionAttempt[]> {
   if (slogans.length === 0) return [];
 
@@ -754,8 +1090,20 @@ TARGET:
 - Absolute maximum characters: ${budget.maxCharacters}
 - Target reading time: ${budget.targetReadTimeMs} milliseconds
 
+USER CREATIVE BRIEF (preference only; never evidence):
+${JSON.stringify(creativeDirection ?? {
+    sourcePresent: false,
+    desiredQualities: [],
+    voiceAttributes: [],
+    conceptualMoves: [],
+    referenceAttributes: [],
+    negativeConstraints: [],
+  }, null, 2)}
+
 RULES:
 - Preserve the specific behavior, contradiction, ritual, or insider truth.
+- Preserve the intended conceptual transformation, voice, and all negative creative constraints.
+- Grounding may be implicit. Do not add literal action words merely to make the source behavior visible.
 - Preserve any trigger, involuntary response, private accommodation, repeated mistake, or revealing consequence that makes the candidate recognizable.
 - Do not turn an accidental self-revelation into a thematic caption or activity description.
 - Remove explanatory wording and sentence-like setup.
@@ -794,8 +1142,9 @@ export async function compressDynamicSlogans(
   profile: DynamicNicheProfile,
   slogans: string[],
   budget: SloganLengthBudget,
+  creativeDirection?: CreativeDirectionBrief,
 ): Promise<string[]> {
-  const attempts = await compressDynamicSlogansWithDiagnostics(profile, slogans, budget);
+  const attempts = await compressDynamicSlogansWithDiagnostics(profile, slogans, budget, creativeDirection);
   return attempts
     .filter((attempt) => attempt.preservesMeaning)
     .map((attempt) => attempt.compressed);
@@ -1485,11 +1834,17 @@ export function evaluateCompressionMeaningRetention(
   const originalHasActionEvidence = containsProfileActionEvidence(original, actionStems);
   const preservesActionEvidence = !originalHasActionEvidence ||
     containsProfileActionEvidence(compressed, actionStems);
+  const compositionType = profile.nicheComposition?.compositionType;
+  const allowsEmergentCompression = profile.nicheComposition?.kind === "compound" &&
+    Boolean(compositionType) &&
+    !["BEHAVIORAL_INTERSECTION", "RITUAL_INTERSECTION"].includes(compositionType as CompositionType);
   const preservesMeaning = Boolean(compressed.trim()) &&
-    truthRetentionRatio >= minimumRetention &&
-    specificityRetentionRatio >= minimumRetention &&
-    evidenceOverlapRatio >= minimumRetention &&
-    preservesActionEvidence;
+    (allowsEmergentCompression || (
+      truthRetentionRatio >= minimumRetention &&
+      specificityRetentionRatio >= minimumRetention &&
+      evidenceOverlapRatio >= minimumRetention &&
+      preservesActionEvidence
+    ));
 
   return {
     originalTruth,

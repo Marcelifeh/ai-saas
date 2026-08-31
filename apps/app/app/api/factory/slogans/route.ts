@@ -11,6 +11,9 @@ const SloganRouteSchema = z.object({
     style: z.string().optional(),
     designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]).optional(),
     excludeSlogans: z.array(z.string()).max(20).optional(),
+    creativeDirection: z.string().max(4000).optional(),
+    creativeExamples: z.array(z.string().max(300)).max(8).optional(),
+    negativeCreativeConstraints: z.array(z.string().max(300)).max(12).optional(),
 });
 
 export const POST = withWorkspaceAuth(async ({ req, session }) => {
@@ -32,8 +35,29 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             return NextResponse.json({ success: false, error: guard.reason, plan: guard.plan }, { status: 429 });
         }
 
-        const { prompt, platform, audience, style, designMode, excludeSlogans } = parsed.data;
-        const data = await regenerateSlogansOnly(prompt, platform, audience, style, userId, excludeSlogans, designMode);
+        const {
+            prompt,
+            platform,
+            audience,
+            style,
+            designMode,
+            excludeSlogans,
+            creativeDirection,
+            creativeExamples,
+            negativeCreativeConstraints,
+        } = parsed.data;
+        const data = await regenerateSlogansOnly(
+            prompt,
+            platform,
+            audience,
+            style,
+            userId,
+            excludeSlogans,
+            designMode,
+            creativeExamples,
+            negativeCreativeConstraints,
+            creativeDirection,
+        );
 
         return NextResponse.json({ success: true, data });
     } catch (err: unknown) {

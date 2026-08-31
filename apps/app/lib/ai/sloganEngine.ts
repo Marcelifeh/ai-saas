@@ -14,6 +14,22 @@ import {
   runBoundedSemanticRecovery,
   type SemanticRecoveryAttempt,
 } from "./semanticEligibilityRecovery";
+import {
+  assessExpressionWorthiness,
+  buildExpressionRecoveryContext,
+  dedupeByExpressionConcept,
+  emptyCreativeDirectionBrief,
+  interpretCreativeDirection,
+  isExpressionWorthy,
+  semanticConceptKey,
+  type CreativeDirectionBrief,
+  type ExpressionWorthinessAssessment,
+} from "./expressionWorthiness";
+import {
+  planAndValidateExpressionIntents,
+  type ExpressionIntent,
+  type ExpressionIntentAssessment,
+} from "./expressionIntent";
 
 // Get top and low-performing patterns for a niche from DB
 async function getTopPatterns(niche: string) {
@@ -125,7 +141,6 @@ import {
 import { getBehavioralProfile, type BehavioralArchetype, type BehavioralProfile } from "./behavioralLexicon";
 import {
   adaptiveVisualWidthScore,
-  applySelfRevelationScoreCap,
   applyStructuralDiversityRanking,
   buildDynamicNicheProfile,
   behavioralContradictionScore,
@@ -143,7 +158,7 @@ import {
   genericMoodPenalty,
   generateSlogansFromDynamicProfile,
   insiderWordplayScore,
-  passesDimensionCoverage,
+  inferNicheComposition,
   recognitionLatencyScore,
   recognitionProbabilityScore,
   rejectsPatternLeakage,
@@ -241,6 +256,8 @@ export interface RankedSlogan {
   compressionDiagnostics?: DynamicCompressionAttempt;
   selfRevelationScore?: number;
   selfRevelationAssessment?: SelfRevelationAssessment;
+  expressionWorthinessScore?: number;
+  expressionWorthiness?: ExpressionWorthinessAssessment;
 }
 
 export interface SloganCollections {
@@ -250,13 +267,16 @@ export interface SloganCollections {
 }
 
 export type DynamicCreativeStage =
+  | "CREATIVE_DIRECTION"
   | "EVIDENCE"
   | "PROFILE"
   | "TERRITORIES"
+  | "EXPRESSION_INTENT"
   | "GENERATION"
   | "COMPRESSION"
   | "ELIGIBILITY"
   | "SELF_REVELATION"
+  | "EXPRESSION_WORTHINESS"
   | "RANKING";
 
 export interface DynamicCreativeDiagnostic {
@@ -269,6 +289,8 @@ export interface DynamicCreativeDiagnostic {
 export interface SloganPipelineMetrics {
   profileStatus: "NOT_CREATED" | "SUFFICIENT" | "INSUFFICIENT";
   territoryCount: number;
+  expressionIntentCount: number;
+  eligibleExpressionIntentCount: number;
   rawCandidateCount: number;
   deduplicatedCandidateCount: number;
   compressedCandidateCount: number;
@@ -276,6 +298,10 @@ export interface SloganPipelineMetrics {
   eligibleFirstPassCount: number;
   eligibleCount: number;
   rankedCount: number;
+  expressionAssessedCount: number;
+  distinctConceptCount: number;
+  expressionWorthyCount: number;
+  expressionRecoveryAttemptCount: number;
   recoveryAttemptCount: number;
   rejectionReasonCounts: ReturnType<typeof aggregateSemanticRejections>;
   recoveryAttempts: SemanticRecoveryAttempt[];
@@ -292,7 +318,11 @@ export interface SloganEngineResult {
   evidenceSnapshotId?: string;
   evidenceContentHash?: string;
   creativeTerritories?: CreativeTerritory[];
+  expressionIntents?: ExpressionIntent[];
+  expressionIntentAssessments?: ExpressionIntentAssessment[];
   semanticEligibility?: SemanticEligibilityAssessment[];
+  creativeDirection?: CreativeDirectionBrief;
+  expressionWorthiness?: ExpressionWorthinessAssessment[];
   diagnostics?: DynamicCreativeDiagnostic[];
   pipelineMetrics?: SloganPipelineMetrics;
   error?:
@@ -300,6 +330,7 @@ export interface SloganEngineResult {
     | "DYNAMIC_PROFILE_GENERATION_FAILED"
     | "PROFILE_INSUFFICIENT_EVIDENCE"
     | "CREATIVE_TERRITORY_FAILED"
+    | "EXPRESSION_INTENT_FAILED"
     | "SLOGAN_GENERATION_FAILED"
     | "NO_ELIGIBLE_SLOGANS"
     | "GENERATION_EXHAUSTED";
@@ -319,6 +350,10 @@ export interface SloganEngineInput {
   cacheTtlSec?: number;
   layoutMode?: SloganLayoutMode;
   excludeSlogans?: string[];
+  /** Original user direction; kept separate from normalized niche/evidence. */
+  creativeDirection?: string;
+  creativeExamples?: string[];
+  negativeCreativeConstraints?: string[];
 }
 
 type PatternFamily = "ATTITUDE" | "HUMOR" | "IDENTITY" | "CONTRAST" | "STATEMENT" | "MINIMAL_LABEL" | "IDENTITY_SIGNAL" | "RELATABLE_LOOP" | "SOCIAL_SIGNAL" | "LEGACY";
@@ -2780,6 +2815,8 @@ function createEmptyResult(input: SloganEngineInput): SloganEngineResult {
     pipelineMetrics: {
       profileStatus: "NOT_CREATED",
       territoryCount: 0,
+      expressionIntentCount: 0,
+      eligibleExpressionIntentCount: 0,
       rawCandidateCount: 0,
       deduplicatedCandidateCount: 0,
       compressedCandidateCount: 0,
@@ -2787,6 +2824,10 @@ function createEmptyResult(input: SloganEngineInput): SloganEngineResult {
       eligibleFirstPassCount: 0,
       eligibleCount: 0,
       rankedCount: 0,
+      expressionAssessedCount: 0,
+      distinctConceptCount: 0,
+      expressionWorthyCount: 0,
+      expressionRecoveryAttemptCount: 0,
       recoveryAttemptCount: 0,
       rejectionReasonCounts: aggregateSemanticRejections([]),
       recoveryAttempts: [],
@@ -2803,6 +2844,7 @@ function rankDynamicProfileSlogans(
   compressionAttempts: DynamicCompressionAttempt[] = [],
   selfRevelationAssessments: SelfRevelationAssessment[] = [],
   semanticEligibilityAssessments: SemanticEligibilityAssessment[] = [],
+  expressionAssessments: ExpressionWorthinessAssessment[] = [],
 ): RankedSlogan[] {
   const salesSignals = normalizeSalesSignals(input.salesSignals);
   const layoutMode = input.layoutMode ?? "standard";
@@ -2822,6 +2864,12 @@ function rankDynamicProfileSlogans(
   );
   const semanticEligibilityDiagnostics = new Map(
     semanticEligibilityAssessments.map((assessment) => [
+      canonicalSloganKey(assessment.slogan),
+      assessment,
+    ]),
+  );
+  const expressionDiagnostics = new Map(
+    expressionAssessments.map((assessment) => [
       canonicalSloganKey(assessment.slogan),
       assessment,
     ]),
@@ -2853,7 +2901,7 @@ function rankDynamicProfileSlogans(
       const semanticEligibility = semanticEligibilityDiagnostics.get(
         canonicalSloganKey(slogan),
       );
-      const weightedScore = clamp(Math.round(
+      const semanticQualityPrior = clamp(Math.round(
         truthScore * rankingWeights.truth +
           authenticityScore * rankingWeights.authenticity +
           recognitionScore * rankingWeights.recognition +
@@ -2865,10 +2913,16 @@ function rankDynamicProfileSlogans(
           contradictionScore * rankingWeights.contradiction -
           explanatoryPenalty,
       ), 0, 100);
-      const finalScore = applySelfRevelationScoreCap(
-        weightedScore,
-        selfRevelationAssessment,
-      );
+      const expressionWorthiness = expressionDiagnostics.get(canonicalSloganKey(slogan));
+      if (!expressionWorthiness) {
+        throw new Error(`Missing expression-worthiness assessment for: ${slogan}`);
+      }
+      // Semantic eligibility is already authoritative. Ranking therefore gives
+      // commercial expression quality more influence than literal profile-token
+      // overlap while retaining a smaller grounded-quality prior.
+      const finalScore = clamp(Math.round(
+        semanticQualityPrior * 0.35 + expressionWorthiness.score * 0.65
+      ), 0, 100);
       const insiderScore = insiderWordplayScore(slogan, profile);
       const ritualScore = ritualRecognitionScore(slogan, profile);
       const specificityScore = dynamicSpecificityScore(slogan, profile);
@@ -2891,6 +2945,8 @@ function rankDynamicProfileSlogans(
           "Passed compressed behavioral evidence gate",
           `Estimated self-recognition: ${recognitionProbability}`,
           `Self-revelation: ${selfRevelationAssessment.classification}`,
+          `Expression worthiness: ${expressionWorthiness.score}`,
+          ...expressionWorthiness.reasons,
           ...(semanticEligibility?.reasons ?? []),
           `Ranked for ${layoutMode} layout`,
         ],
@@ -2940,6 +2996,8 @@ function rankDynamicProfileSlogans(
         compressionDiagnostics: compressionDiagnostics.get(canonicalSloganKey(slogan)),
         selfRevelationScore: selfRevelationAssessment.score,
         selfRevelationAssessment,
+        expressionWorthinessScore: expressionWorthiness.score,
+        expressionWorthiness,
         thumbnailReadabilityScore: thumbnailReadability,
         screenshotScore,
         nicheAlignmentScore: specificityScore,
@@ -2951,7 +3009,6 @@ function rankDynamicProfileSlogans(
       };
     })
     .filter((item) => item.brevity.passes)
-    .filter((item) => passesDimensionCoverage(item.slogan, profile) || item.semanticCompression >= 25)
     .sort((a, b) => b.score - a.score);
 
   return applyStructuralDiversityRanking(individuallyRanked).map((entry) => ({
@@ -2971,6 +3028,29 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   const base = createEmptyResult(input);
   const pipelineMetrics = base.pipelineMetrics as SloganPipelineMetrics;
   const diagnostics: DynamicCreativeDiagnostic[] = [];
+  let creativeDirection = emptyCreativeDirectionBrief();
+  try {
+    creativeDirection = await interpretCreativeDirection({
+      rawDirection: input.creativeDirection,
+      styleOrTone: input.style,
+      referenceExamples: input.creativeExamples,
+      negativeConstraints: input.negativeCreativeConstraints,
+    });
+    diagnostics.push({ stage: "CREATIVE_DIRECTION", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:CREATIVE_DIRECTION]", error);
+    return {
+      ...base,
+      creativeDirection,
+      error: "SLOGAN_GENERATION_FAILED",
+      diagnostics: [{
+        stage: "CREATIVE_DIRECTION",
+        ok: false,
+        code: "CREATIVE_DIRECTION_INTERPRETATION_FAILED",
+        message: pipelineErrorMessage(error),
+      }],
+    };
+  }
   let marketEvidence: Awaited<ReturnType<typeof getNicheEvidence>>;
 
   try {
@@ -2980,6 +3060,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     console.error("[SLOGAN_PIPELINE:EVIDENCE]", error);
     return {
       ...base,
+      creativeDirection,
       slogans: [],
       ranked: [],
       collections: emptyCollections(),
@@ -3004,16 +3085,37 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   const evidenceProvenance = {
     evidenceSnapshotId: marketEvidence.id,
     evidenceContentHash: marketEvidence.contentHash,
+    creativeDirection,
   };
 
   let dynamicProfile: DynamicNicheProfile;
   try {
+    const nicheComposition = await inferNicheComposition({
+      niche: input.niche,
+      audience: input.audience,
+      originalUserBrief: input.creativeDirection,
+      creativeDirection,
+      evidence: creativeEvidence,
+    });
     dynamicProfile = await buildDynamicNicheProfile(
       input.niche,
       input.audience,
       creativeEvidence,
+      nicheComposition,
     );
-    const profileEvidence = assessDynamicProfileEvidence(dynamicProfile);
+    let profileEvidence = assessDynamicProfileEvidence(dynamicProfile);
+    if (profileEvidence.status === "INSUFFICIENT") {
+      dynamicProfile = await buildDynamicNicheProfile(
+        input.niche,
+        input.audience,
+        creativeEvidence,
+        nicheComposition,
+      );
+      profileEvidence = assessDynamicProfileEvidence(dynamicProfile);
+      if (profileEvidence.status === "SUFFICIENT") {
+        diagnostics.push({ stage: "PROFILE", ok: true, code: "PROFILE_RECOVERY_SUCCEEDED" });
+      }
+    }
     pipelineMetrics.profileStatus = profileEvidence.status;
     if (profileEvidence.status === "INSUFFICIENT") {
       return {
@@ -3068,6 +3170,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       dynamicProfile,
       creativeEvidence,
       8,
+      creativeDirection,
     );
     pipelineMetrics.territoryCount = creativeTerritories.length;
     if (creativeTerritories.length === 0) {
@@ -3097,12 +3200,69 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     };
   }
 
+  let expressionIntents: ExpressionIntent[] = [];
+  let expressionIntentAssessments: ExpressionIntentAssessment[] = [];
+  try {
+    const intentPlan = await planAndValidateExpressionIntents({
+      profile: dynamicProfile,
+      territories: creativeTerritories,
+      evidence: creativeEvidence,
+      creativeDirection,
+      limit: 20,
+    });
+    expressionIntents = intentPlan.intents;
+    expressionIntentAssessments = intentPlan.assessments;
+    pipelineMetrics.expressionIntentCount = expressionIntentAssessments.length;
+    pipelineMetrics.eligibleExpressionIntentCount = expressionIntents.length;
+    if (dynamicProfile.nicheComposition?.kind === "compound" && expressionIntents.length === 0) {
+      throw new Error("No grounded human expression intents survived eligibility");
+    }
+    diagnostics.push({
+      stage: "EXPRESSION_INTENT",
+      ok: true,
+      code: dynamicProfile.nicheComposition?.kind === "compound"
+        ? "EXPRESSION_INTENTS_READY"
+        : "SINGLE_NICHE_UNCHANGED",
+    });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:EXPRESSION_INTENT]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      expressionIntents,
+      expressionIntentAssessments,
+      error: "EXPRESSION_INTENT_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "EXPRESSION_INTENT",
+          ok: false,
+          code: "NO_ELIGIBLE_EXPRESSION_INTENTS",
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  const intentProvenance = {
+    expressionIntents,
+    expressionIntentAssessments,
+  };
+
   let generated: string[] = [];
   let deduplicatedGenerated: string[] = [];
   try {
     generated = await generateSlogansFromDynamicProfile(dynamicProfile, 32, {
       creativeTerritories,
+      expressionIntents,
       excludeSlogans: input.excludeSlogans,
+      creativeDirection,
+      originalUserDirection: input.creativeDirection,
     });
     pipelineMetrics.rawCandidateCount = generated.length;
     deduplicatedGenerated = dedupeCanonicalSlogans(generated);
@@ -3120,6 +3280,8 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      expressionIntents,
+      expressionIntentAssessments,
       error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
@@ -3139,25 +3301,37 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   let retryAttempts: DynamicCompressionAttempt[] = [];
   let compressionCandidates: string[] = [];
   try {
-    compressionAttempts = await compressDynamicSlogansWithDiagnostics(
-      dynamicProfile,
-      deduplicatedGenerated,
-      lengthBudget,
-    );
+    const alreadyWearable = deduplicatedGenerated.filter((slogan) => (
+      evaluateAdaptiveBrevity(slogan, lengthBudget).passes
+    ));
+    const needsCompression = deduplicatedGenerated.filter((slogan) => (
+      !evaluateAdaptiveBrevity(slogan, lengthBudget).passes
+    ));
+    compressionAttempts = needsCompression.length > 0
+      ? await compressDynamicSlogansWithDiagnostics(
+          dynamicProfile,
+          needsCompression,
+          lengthBudget,
+          creativeDirection,
+        )
+      : [];
     const compressed = compressionAttempts
       .filter((attempt) => attempt.preservesMeaning)
       .map((attempt) => attempt.compressed);
-    const needsCompression = deduplicatedGenerated.filter((slogan, index) => (
-      !evaluateAdaptiveBrevity(slogan, lengthBudget).passes ||
-      !compressionAttempts[index]?.preservesMeaning
-    ));
-    retryAttempts = needsCompression.length > 0
-      ? await compressDynamicSlogansWithDiagnostics(dynamicProfile, needsCompression, lengthBudget)
+    const failedCompression = compressionAttempts
+      .filter((attempt) => !attempt.preservesMeaning)
+      .map((attempt) => attempt.original);
+    retryAttempts = failedCompression.length > 0
+      ? await compressDynamicSlogansWithDiagnostics(dynamicProfile, failedCompression, lengthBudget, creativeDirection)
       : [];
     const retryCompressed = retryAttempts
       .filter((attempt) => attempt.preservesMeaning)
       .map((attempt) => attempt.compressed);
-    compressionCandidates = dedupeStrings([...compressed, ...retryCompressed]);
+    compressionCandidates = dedupeCanonicalSlogans([
+      ...alreadyWearable,
+      ...compressed,
+      ...retryCompressed,
+    ]);
     pipelineMetrics.compressedCandidateCount = compressionCandidates.length;
     if (compressionCandidates.length === 0) {
       throw new Error("Compression produced no meaning-preserving candidates");
@@ -3172,6 +3346,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      ...intentProvenance,
       error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
@@ -3206,6 +3381,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      ...intentProvenance,
       semanticEligibility,
       error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
@@ -3253,13 +3429,27 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         }),
         generate: (recoveryContext) => generateSlogansFromDynamicProfile(dynamicProfile, 32, {
           creativeTerritories,
+          expressionIntents,
           excludeSlogans: [...(input.excludeSlogans ?? []), ...generated],
           recoveryContext,
+          creativeDirection,
+          originalUserDirection: input.creativeDirection,
         }),
         compress: async (candidates) => {
-          const attempts = await compressDynamicSlogansWithDiagnostics(dynamicProfile, candidates, lengthBudget);
+          const alreadyWearable = candidates.filter((candidate) => (
+            evaluateAdaptiveBrevity(candidate, lengthBudget).passes
+          ));
+          const overBudget = candidates.filter((candidate) => (
+            !evaluateAdaptiveBrevity(candidate, lengthBudget).passes
+          ));
+          const attempts = overBudget.length > 0
+            ? await compressDynamicSlogansWithDiagnostics(dynamicProfile, overBudget, lengthBudget, creativeDirection)
+            : [];
           recoveryCompressionAttempts.push(...attempts);
-          return attempts.filter((attempt) => attempt.preservesMeaning).map((attempt) => attempt.compressed);
+          return [
+            ...alreadyWearable,
+            ...attempts.filter((attempt) => attempt.preservesMeaning).map((attempt) => attempt.compressed),
+          ];
         },
         assess: (candidates) => assessSemanticEligibility(
           dynamicProfile,
@@ -3290,6 +3480,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         collections: emptyCollections(),
         ...profileProvenance,
         creativeTerritories,
+        ...intentProvenance,
         semanticEligibility,
         error: "SLOGAN_GENERATION_FAILED",
         fallbackUsed: false,
@@ -3314,6 +3505,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         collections: emptyCollections(),
         ...profileProvenance,
         creativeTerritories,
+        ...intentProvenance,
         semanticEligibility,
         error: "GENERATION_EXHAUSTED",
         fallbackUsed: false,
@@ -3333,6 +3525,193 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
   }
 
   let selfRevelationAssessments: SelfRevelationAssessment[] = [];
+  let expressionAssessments: ExpressionWorthinessAssessment[] = [];
+  try {
+    expressionAssessments = await assessExpressionWorthiness(
+      dynamicProfile,
+      finalEligibleCandidates,
+      creativeDirection,
+    );
+    pipelineMetrics.expressionAssessedCount = expressionAssessments.length;
+    diagnostics.push({ stage: "EXPRESSION_WORTHINESS", ok: true });
+  } catch (error) {
+    console.error("[SLOGAN_PIPELINE:EXPRESSION_WORTHINESS]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      ...intentProvenance,
+      semanticEligibility,
+      expressionWorthiness: expressionAssessments,
+      error: "SLOGAN_GENERATION_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "EXPRESSION_WORTHINESS",
+          ok: false,
+          code: "EXPRESSION_WORTHINESS_FAILED",
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+
+  let expressionWorthyCandidates = expressionAssessments
+    .filter(isExpressionWorthy)
+    .map((assessment) => assessment.slogan);
+  pipelineMetrics.expressionWorthyCount = expressionWorthyCandidates.length;
+
+  if (expressionWorthyCandidates.length === 0) {
+    diagnostics.push({
+      stage: "EXPRESSION_WORTHINESS",
+      ok: false,
+      code: "NO_EXPRESSION_WORTHY_SLOGANS",
+      message: "Semantic survivors failed the commercial expression release floor; bounded recovery started",
+    });
+    pipelineMetrics.expressionRecoveryAttemptCount = 1;
+    const expressionRecoveryContext = buildExpressionRecoveryContext(
+      expressionAssessments,
+      creativeDirection,
+    );
+    try {
+      const knownConcepts = new Set([
+        ...generated,
+        ...compressionCandidates,
+      ].map(semanticConceptKey).filter(Boolean));
+      const recoveryGeneratedRaw = await generateSlogansFromDynamicProfile(dynamicProfile, 32, {
+        creativeTerritories,
+        expressionIntents,
+        excludeSlogans: [...(input.excludeSlogans ?? []), ...generated],
+        creativeDirection,
+        originalUserDirection: input.creativeDirection,
+        expressionRecoveryContext,
+      });
+      const recoveryGenerated = dedupeCanonicalSlogans(recoveryGeneratedRaw).filter((candidate) => (
+        !knownConcepts.has(semanticConceptKey(candidate))
+      ));
+      pipelineMetrics.rawCandidateCount += recoveryGeneratedRaw.length;
+      pipelineMetrics.deduplicatedCandidateCount += recoveryGenerated.length;
+
+      const recoveryAlreadyWearable = recoveryGenerated.filter((candidate) => (
+        evaluateAdaptiveBrevity(candidate, lengthBudget).passes
+      ));
+      const recoveryOverBudget = recoveryGenerated.filter((candidate) => (
+        !evaluateAdaptiveBrevity(candidate, lengthBudget).passes
+      ));
+      const recoveryCompressionAttempts = recoveryOverBudget.length > 0
+        ? await compressDynamicSlogansWithDiagnostics(
+            dynamicProfile,
+            recoveryOverBudget,
+            lengthBudget,
+            creativeDirection,
+          )
+        : [];
+      compressionAttempts.push(...recoveryCompressionAttempts);
+      const recoveryCandidates = dedupeCanonicalSlogans([
+        ...recoveryAlreadyWearable,
+        ...recoveryCompressionAttempts
+          .filter((attempt) => attempt.preservesMeaning)
+          .map((attempt) => attempt.compressed),
+      ]);
+      pipelineMetrics.compressedCandidateCount += recoveryCandidates.length;
+
+      const recoveryEligibility = await assessSemanticEligibility(
+        dynamicProfile,
+        recoveryCandidates,
+        creativeTerritories,
+        creativeEvidence,
+      );
+      const recoveryEligibleCandidates = recoveryCandidates.filter((candidate) => (
+        recoveryEligibility.find((assessment) => (
+          canonicalSloganKey(assessment.slogan) === canonicalSloganKey(candidate)
+        ))?.eligible === true
+      ));
+      pipelineMetrics.eligibilityAssessedCount += recoveryEligibility.length;
+      pipelineMetrics.eligibleCount = recoveryEligibleCandidates.length;
+      pipelineMetrics.rejectionReasonCounts = aggregateSemanticRejections(recoveryEligibility);
+
+      const recoveryExpressionAssessments = await assessExpressionWorthiness(
+        dynamicProfile,
+        recoveryEligibleCandidates,
+        creativeDirection,
+      );
+      pipelineMetrics.expressionAssessedCount += recoveryExpressionAssessments.length;
+      expressionWorthyCandidates = recoveryExpressionAssessments
+        .filter(isExpressionWorthy)
+        .map((assessment) => assessment.slogan);
+      pipelineMetrics.expressionWorthyCount = expressionWorthyCandidates.length;
+
+      semanticEligibility = recoveryEligibility;
+      expressionAssessments = recoveryExpressionAssessments;
+      finalEligibleCandidates = expressionWorthyCandidates;
+      if (expressionWorthyCandidates.length > 0) {
+        diagnostics.push({
+          stage: "EXPRESSION_WORTHINESS",
+          ok: true,
+          code: "EXPRESSION_RECOVERY_SUCCEEDED",
+        });
+      }
+    } catch (error) {
+      console.error("[SLOGAN_PIPELINE:EXPRESSION_RECOVERY]", error);
+      return {
+        ...base,
+        slogans: [],
+        ranked: [],
+        collections: emptyCollections(),
+        ...profileProvenance,
+        creativeTerritories,
+        ...intentProvenance,
+        semanticEligibility,
+        expressionWorthiness: expressionAssessments,
+        error: "SLOGAN_GENERATION_FAILED",
+        fallbackUsed: false,
+        diagnostics: [
+          ...diagnostics,
+          {
+            stage: "EXPRESSION_WORTHINESS",
+            ok: false,
+            code: "EXPRESSION_RECOVERY_FAILED",
+            message: pipelineErrorMessage(error),
+          },
+        ],
+      };
+    }
+  } else {
+    const worthyKeys = new Set(expressionWorthyCandidates.map(canonicalSloganKey));
+    finalEligibleCandidates = finalEligibleCandidates.filter((candidate) => (
+      worthyKeys.has(canonicalSloganKey(candidate))
+    ));
+  }
+
+  if (finalEligibleCandidates.length === 0) {
+    console.info("[SLOGAN_PIPELINE]", { error: "GENERATION_EXHAUSTED", ...pipelineMetrics });
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      ...intentProvenance,
+      semanticEligibility,
+      expressionWorthiness: expressionAssessments,
+      error: "GENERATION_EXHAUSTED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "EXPRESSION_WORTHINESS",
+          ok: false,
+          code: "EXPRESSION_GENERATION_EXHAUSTED",
+        },
+      ],
+    };
+  }
+
   try {
     selfRevelationAssessments = await classifyDynamicSelfRevelation(
       dynamicProfile,
@@ -3348,7 +3727,9 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      ...intentProvenance,
       semanticEligibility,
+      expressionWorthiness: expressionAssessments,
       error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
@@ -3373,6 +3754,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       [...compressionAttempts, ...retryAttempts],
       selfRevelationAssessments,
       semanticEligibility,
+      expressionAssessments,
     );
   } catch (error) {
     console.error("[SLOGAN_PIPELINE:RANKING]", error);
@@ -3383,7 +3765,9 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      ...intentProvenance,
       semanticEligibility,
+      expressionWorthiness: expressionAssessments,
       error: "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
@@ -3398,7 +3782,8 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     };
   }
 
-  const sortedDynamic = dedupeRanked(dynamicRanked);
+  const sortedDynamic = dedupeByExpressionConcept(dedupeRanked(dynamicRanked));
+  pipelineMetrics.distinctConceptCount = sortedDynamic.length;
   pipelineMetrics.rankedCount = sortedDynamic.length;
   if (sortedDynamic.length === 0) {
     console.info("[SLOGAN_PIPELINE]", { error: "GENERATION_EXHAUSTED", ...pipelineMetrics });
@@ -3409,7 +3794,9 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       collections: emptyCollections(),
       ...profileProvenance,
       creativeTerritories,
+      ...intentProvenance,
       semanticEligibility,
+      expressionWorthiness: expressionAssessments,
       error: "GENERATION_EXHAUSTED",
       fallbackUsed: false,
       diagnostics: [
@@ -3435,7 +3822,9 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     collections,
     ...profileProvenance,
     creativeTerritories,
+    ...intentProvenance,
     semanticEligibility,
+    expressionWorthiness: expressionAssessments,
     diagnostics,
     fallbackUsed: false,
   };
@@ -3479,16 +3868,25 @@ export async function generateHighPotentialSlogans(
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
   const layoutKey = input.layoutMode ?? "standard";
-  const cacheKey = `slogans:creative-selection-v3:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}`;
+  const creativeDirectionKey = nicheHash(JSON.stringify({
+    direction: input.creativeDirection || "",
+    style: input.style || "",
+    examples: input.creativeExamples || [],
+    negatives: input.negativeCreativeConstraints || [],
+  }));
+  const cacheKey = `slogans:creative-selection-v4:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}:${creativeDirectionKey}`;
+  const cacheDisabled = input.cacheTtlSec === 0;
 
   // Try in-memory/Redis cache (async read for cold-starts)
-  try {
-    const cached = await globalCache.getAsync(cacheKey);
-    if (cached && typeof cached === "object") {
-      return cached as SloganEngineResult;
+  if (!cacheDisabled) {
+    try {
+      const cached = await globalCache.getAsync(cacheKey);
+      if (cached && typeof cached === "object") {
+        return cached as SloganEngineResult;
+      }
+    } catch {
+      // ignore cache failures — non-blocking
     }
-  } catch {
-    // ignore cache failures — non-blocking
   }
 
   // Map execMode -> behavior
@@ -3510,10 +3908,16 @@ export async function generateHighPotentialSlogans(
   const normalized = normalizeResult(result);
 
   // Persist to cache (memory-first with Redis write-through)
-  try {
-    globalCache.set(cacheKey, normalized, input.cacheTtlSec ? input.cacheTtlSec * 1000 : ttlMap[execMode]);
-  } catch {
-    // swallow cache write errors
+  if (!cacheDisabled) {
+    try {
+      globalCache.set(
+        cacheKey,
+        normalized,
+        input.cacheTtlSec !== undefined ? input.cacheTtlSec * 1000 : ttlMap[execMode],
+      );
+    } catch {
+      // swallow cache write errors
+    }
   }
 
   return normalized;

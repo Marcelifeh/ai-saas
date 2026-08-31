@@ -52,6 +52,8 @@ export interface SloganRegenerationResult {
     evidenceContentHash?: string;
     creativeTerritories?: unknown[];
     semanticEligibility?: unknown[];
+    creativeDirection?: unknown;
+    expressionWorthiness?: unknown[];
     sloganPipelineMetrics?: SloganPipelineMetrics;
     dynamicListing: DynamicListingResult;
     amazonListing: ReturnType<typeof toLegacyListingShape>;
@@ -75,7 +77,8 @@ export interface SloganRegenerationResult {
 export type SloganPipelineFailureCode = NonNullable<SloganEngineResult["error"]>;
 
 const sloganFailureMessages: Partial<Record<SloganPipelineFailureCode, string>> = {
-    PROFILE_INSUFFICIENT_EVIDENCE: "We couldn't find enough grounded behavioral evidence for this opportunity. Try a more specific opportunity or choose another one.",
+    PROFILE_INSUFFICIENT_EVIDENCE: "We couldn't find enough grounded evidence for this opportunity. Try a more specific opportunity or choose another one.",
+    EXPRESSION_INTENT_FAILED: "We couldn't find a grounded human expression angle for this opportunity. Try refining the creative direction or choose another opportunity.",
     NO_ELIGIBLE_SLOGANS: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
     GENERATION_EXHAUSTED: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
 };
@@ -190,6 +193,9 @@ async function buildMerchPayload(
     platform?: string,
     designMode: DesignMode = "AUTO",
     excludeSlogans: string[] = [],
+    creativeDirection?: string,
+    creativeExamples: string[] = [],
+    negativeCreativeConstraints: string[] = [],
 ) {
     const sloganMode = detectSloganMode(style);
 
@@ -215,6 +221,9 @@ async function buildMerchPayload(
         salesSignals: mergedSalesSignals,
         mode: sloganMode,
         excludeSlogans,
+        creativeDirection,
+        creativeExamples,
+        negativeCreativeConstraints,
     });
 
     const dynamicProfile = sloganEngine.dynamicProfile;
@@ -290,6 +299,8 @@ async function buildMerchPayload(
         evidenceContentHash: sloganEngine.evidenceContentHash,
         creativeTerritories: sloganEngine.creativeTerritories,
         semanticEligibility: sloganEngine.semanticEligibility,
+        creativeDirection: sloganEngine.creativeDirection,
+        expressionWorthiness: sloganEngine.expressionWorthiness,
         sloganPipelineMetrics: sloganEngine.pipelineMetrics,
         dynamicListing,
         amazonListing,
@@ -355,7 +366,18 @@ function buildBestSellerPredictor(result: any, market: MarketIntel, topSloganSco
     };
 }
 
-export async function regenerateSlogansOnly(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, excludeSlogans?: string[], designMode: DesignMode = "AUTO"): Promise<SloganRegenerationResult> {
+export async function regenerateSlogansOnly(
+    prompt: string,
+    platform?: string,
+    audience?: string,
+    style?: string,
+    userId?: string,
+    excludeSlogans?: string[],
+    designMode: DesignMode = "AUTO",
+    creativeExamples: string[] = [],
+    negativeCreativeConstraints: string[] = [],
+    creativeDirection?: string,
+): Promise<SloganRegenerationResult> {
     const detectedPlatform = detectPlatform(platform);
     const blockedSlogans = Array.isArray(excludeSlogans)
         ? excludeSlogans.filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 30)
@@ -373,6 +395,9 @@ export async function regenerateSlogansOnly(prompt: string, platform?: string, a
         detectedPlatform,
         designMode,
         blockedSlogans,
+        creativeDirection?.trim() || prompt,
+        creativeExamples,
+        negativeCreativeConstraints,
     );
 
     return {
@@ -388,6 +413,8 @@ export async function regenerateSlogansOnly(prompt: string, platform?: string, a
         evidenceContentHash: merchPayload.evidenceContentHash,
         creativeTerritories: merchPayload.creativeTerritories,
         semanticEligibility: merchPayload.semanticEligibility,
+        creativeDirection: merchPayload.creativeDirection,
+        expressionWorthiness: merchPayload.expressionWorthiness,
         sloganPipelineMetrics: merchPayload.sloganPipelineMetrics,
         dynamicListing: merchPayload.dynamicListing,
         amazonListing: merchPayload.amazonListing,
@@ -406,7 +433,17 @@ export async function regenerateSlogansOnly(prompt: string, platform?: string, a
     };
 }
 
-export async function generateSingleStrategy(prompt: string, platform?: string, audience?: string, style?: string, userId?: string, designMode: DesignMode = "AUTO"): Promise<any> {
+export async function generateSingleStrategy(
+    prompt: string,
+    platform?: string,
+    audience?: string,
+    style?: string,
+    userId?: string,
+    designMode: DesignMode = "AUTO",
+    creativeExamples: string[] = [],
+    negativeCreativeConstraints: string[] = [],
+    creativeDirection?: string,
+): Promise<any> {
     const detectedPlatform = detectPlatform(platform);
 
     const aiResponse = await chatCompletionSafe({
@@ -467,7 +504,19 @@ Output ONLY valid JSON:
         throw new Error("AI did not return valid JSON");
     }
 
-    parsed = await buildMerchPayload(parsed, parsed?.niche || prompt, audience, style, userId, detectedPlatform, designMode);
+    parsed = await buildMerchPayload(
+        parsed,
+        parsed?.niche || prompt,
+        audience,
+        style,
+        userId,
+        detectedPlatform,
+        designMode,
+        [],
+        creativeDirection?.trim() || prompt,
+        creativeExamples,
+        negativeCreativeConstraints,
+    );
 
     const trend = createTrendSnapshot({
         trend_score: parsed.estimatedTrend,

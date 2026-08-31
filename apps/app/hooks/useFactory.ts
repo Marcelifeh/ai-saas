@@ -83,14 +83,33 @@ export function useFactory() {
     const [isListingRefreshing, setIsListingRefreshing] = useState(false);
     const [isDesignRefreshing, setIsDesignRefreshing] = useState(false);
 
-    const generateSingleStrategy = async (prompt: string, platform?: string, audience?: string, style?: string, designMode: DesignMode = "AUTO") => {
+    const generateSingleStrategy = async (
+        prompt: string,
+        platform?: string,
+        audience?: string,
+        style?: string,
+        designMode: DesignMode = "AUTO",
+        creativeDirection?: string,
+        creativeExamples?: string[],
+        negativeCreativeConstraints?: string[],
+    ) => {
         setIsLoading(true);
         setError(null);
         try {
             const res = await fetch("/api/core", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "generateStrategy", prompt, platform, audience, style, designMode })
+                body: JSON.stringify({
+                    action: "generateStrategy",
+                    prompt,
+                    platform,
+                    audience,
+                    style,
+                    designMode,
+                    creativeDirection,
+                    creativeExamples,
+                    negativeCreativeConstraints,
+                })
             });
             const json: unknown = await safeJson(res);
             const result = json as CoreStrategyResponse;
@@ -235,14 +254,34 @@ export function useFactory() {
         }
     };
 
-    const regenerateSlogans = async (prompt: string, platform?: string, audience?: string, style?: string, excludeSlogans?: string[], designMode: DesignMode = "AUTO") => {
+    const regenerateSlogans = async (
+        prompt: string,
+        platform?: string,
+        audience?: string,
+        style?: string,
+        excludeSlogans?: string[],
+        designMode: DesignMode = "AUTO",
+        creativeDirection?: string,
+        creativeExamples?: string[],
+        negativeCreativeConstraints?: string[],
+    ) => {
         setIsSloganRefreshing(true);
         setError(null);
         try {
             const res = await fetch("/api/factory/slogans", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt, platform, audience, style, excludeSlogans, designMode }),
+                body: JSON.stringify({
+                    prompt,
+                    platform,
+                    audience,
+                    style,
+                    excludeSlogans,
+                    designMode,
+                    creativeDirection,
+                    creativeExamples,
+                    negativeCreativeConstraints,
+                }),
             });
             const json: unknown = await safeJson(res);
             const result = json as CoreSloganResponse;

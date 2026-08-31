@@ -10,6 +10,9 @@ const CoreRequestSchema = z.object({
     platform: z.string().optional(),
     audience: z.string().optional(),
     style: z.string().optional(),
+    creativeDirection: z.string().max(4000).optional(),
+    creativeExamples: z.array(z.string().max(300)).max(8).optional(),
+    negativeCreativeConstraints: z.array(z.string().max(300)).max(12).optional(),
     designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]).optional(),
     niches: z.array(z.any()).optional(),
     isAutopilot: z.boolean().optional()
@@ -24,7 +27,19 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
             return NextResponse.json({ success: false, error: "Invalid payload format", details: parsed.error }, { status: 400 });
         }
 
-        const { action, prompt, platform, audience, style, designMode, niches, isAutopilot } = parsed.data;
+        const {
+            action,
+            prompt,
+            platform,
+            audience,
+            style,
+            creativeDirection,
+            creativeExamples,
+            negativeCreativeConstraints,
+            designMode,
+            niches,
+            isAutopilot,
+        } = parsed.data;
 
         const userId = session.user?.id as string | undefined;
 
@@ -41,7 +56,17 @@ export const POST = withWorkspaceAuth(async ({ req, session }) => {
                 return NextResponse.json({ success: false, error: guard.reason, plan: guard.plan }, { status: 429 });
             }
 
-            const data = await generateSingleStrategy(prompt, platform, audience, style, userId, designMode);
+            const data = await generateSingleStrategy(
+                prompt,
+                platform,
+                audience,
+                style,
+                userId,
+                designMode,
+                creativeExamples,
+                negativeCreativeConstraints,
+                creativeDirection,
+            );
             return NextResponse.json({ success: true, data });
         }
 
