@@ -10,7 +10,9 @@ const DesignRouteSchema = z.object({
   niche: z.string().trim().min(1).max(300),
   slogans: z.array(z.string().trim().min(1).max(200)).min(1).max(12),
   profile: z.record(z.string(), z.unknown()),
-  style: z.string().trim().max(120).optional(),
+  // Intentionally free-form: visual aesthetics evolve independently from releases.
+  // Keep system behavior in designMode; never turn style into a preset enum.
+  style: z.string().trim().min(1).max(1600).optional(),
   platform: z.string().trim().max(40).optional(),
   designMode: z.enum(["AUTO", "TEXT_ONLY", "HYBRID", "CHARACTER", "CARTOON", "ILLUSTRATION_ONLY"]),
   subjectOverride: z.enum(["AUTO", "NO_PERSON", "INCLUDE_PERSON"]).optional(),

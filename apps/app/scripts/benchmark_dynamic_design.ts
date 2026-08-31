@@ -10,6 +10,7 @@ import type {
 } from "../lib/ai/dynamicDesignPrompt";
 import type { DynamicNicheProfile } from "../lib/ai/dynamicNicheProfile";
 import { getVisualReleasePresentation } from "../lib/utils/visualReleasePresentation";
+import { buildCustomVisualStyle, resolveVisualStyle } from "../components/design/CustomStyleSelector";
 
 function loadLocalEnvironment(): void {
   const candidates = [
@@ -203,16 +204,33 @@ function makeSyntheticStrategy(index: number): DynamicDesignStrategy {
 }
 
 function canonicalizeRenderingStyle(prompt: string): string {
-  return prompt.replace(/ART DIRECTION:\s*\n[^\n]*/i, "ART DIRECTION:\n[RENDERING_STYLE]");
+  return prompt.replace(
+    /ART DIRECTION:\s*\n[\s\S]*?(?=\nEmotional tone:)/i,
+    "ART DIRECTION:\n[RENDERING_STYLE]",
+  );
 }
 
 async function runDeterministicBenchmark(): Promise<void> {
+  const appRoot = path.resolve(__dirname, "..");
+  const routeSource = fs.readFileSync(path.join(appRoot, "app", "api", "factory", "designs", "route.ts"), "utf8");
+  const factorySource = fs.readFileSync(path.join(appRoot, "lib", "services", "factoryService.ts"), "utf8");
+  const designSource = fs.readFileSync(path.join(appRoot, "lib", "ai", "dynamicDesignPrompt.ts"), "utf8");
+  const studioSource = fs.readFileSync(path.join(appRoot, "app", "(dashboard)", "design-studio", "page.tsx"), "utf8");
+  assert.match(routeSource, /style:\s*z\.string\(\)/, "Design API style must remain a free-form string");
+  assert.doesNotMatch(routeSource, /style:\s*z\.enum\(/, "Design API must not enumerate visual styles");
+  assert.ok(factorySource.includes('style: input.style?.trim() || "Bold Graphic"'), "Factory must forward free-form style unchanged");
+  assert.doesNotMatch(designSource, /switch\s*\(\s*input\.style\s*\)/, "Dynamic design must not map arbitrary style names");
+  assert.ok(!designSource.includes("Neo Botanical Etching"), "Invented regression style must not become a production rule");
+  assert.ok(studioSource.includes("style: resolvedVisualStyle"), "Design regeneration must use the single resolved visual style");
+  assert.ok(studioSource.includes('setCustomStyle("")'), "Preset selection must deactivate custom style");
+
   const {
     analyzeDynamicDesignBatch,
     analyzeAutoModeDistribution,
     buildCompositionPlanForMode,
     buildDynamicImagePrompt,
     buildDynamicStyleVariants,
+    buildStyleDirection,
     buildVisualCacheKey,
     evaluateVisualBatchRelease,
     evaluateVisualReleaseGate,
@@ -238,6 +256,39 @@ async function runDeterministicBenchmark(): Promise<void> {
   for (const variant of variants) {
     assert.ok(variant.prompt.includes(`ART DIRECTION:\n${variant.style}`), `Missing rendering style ${variant.style}`);
   }
+
+  const futureStyle = buildCustomVisualStyle(
+    "Neo Botanical Etching",
+    "Asymmetric engraved linework. Layered geometric botanical elements. Two-color weathered print treatment.",
+  );
+  const folkStyle = buildCustomVisualStyle(
+    "Vintage Folk Art Linocut",
+    "Carved-looking linework, folk-inspired nature motifs, and a balanced one-color emblem composition.",
+  );
+  assert.ok(futureStyle.includes("Neo Botanical Etching"));
+  assert.ok(futureStyle.includes("Asymmetric engraved linework"));
+  assert.notEqual(futureStyle, "Bold Graphic");
+  assert.equal(resolveVisualStyle(futureStyle, "Vintage Distressed"), futureStyle, "Activated custom style must override the preset");
+  assert.equal(resolveVisualStyle("", "Vintage Distressed"), "Vintage Distressed", "Clearing custom style must restore the preset");
+  assert.equal(resolveVisualStyle("", ""), "Bold Graphic", "Empty style state must retain the existing default");
+  const futureVariants = buildDynamicStyleVariants(
+    {
+      niche: syntheticProfile.niche,
+      profile: syntheticProfile,
+      garmentBackground: "dark",
+      printBackground: "transparent",
+      marketplace: "etsy",
+    },
+    strategies[0],
+    ["Vintage Distressed", futureStyle, folkStyle],
+  );
+  assert.equal(new Set(futureVariants.map((variant) => variant.semanticSignature)).size, 1, "Free-form style changed semantic strategy");
+  assert.equal(new Set(futureVariants.map((variant) => canonicalizeRenderingStyle(variant.prompt))).size, 1, "Free-form style changed non-rendering instructions");
+  assert.ok(futureVariants[1].prompt.includes("Neo Botanical Etching"), "Invented future style was not forwarded to the prompt");
+  assert.ok(futureVariants[1].prompt.includes("Asymmetric engraved linework"), "Custom visual direction was not forwarded to the prompt");
+  assert.ok(futureVariants[2].prompt.includes("Vintage Folk Art Linocut"), "Second custom style was not forwarded to the prompt");
+  assert.ok(futureVariants[2].prompt.includes("Carved-looking linework"), "Second custom direction was not forwarded to the prompt");
+  assert.ok(buildStyleDirection(futureStyle).startsWith(futureStyle), "Free-form style must remain authoritative and unmapped");
 
   const autoCases = [
     { slogan: "NOPE NOT TODAY", signals: { typographyStrength: 0.92, humanActionStrength: 0.1, mascotPotential: 0.1, standaloneIllustrationStrength: 0.2 } },
@@ -293,7 +344,7 @@ async function runDeterministicBenchmark(): Promise<void> {
 
   assert.match(overridePrompts.CHARACTER.prompt, /one primary human figure/i);
   assert.equal(overridePrompts.CHARACTER.composition.maxPrimarySubjects, 1);
-  assert.match(overridePrompts.CARTOON.prompt, /one stylized character/i);
+  assert.match(overridePrompts.CARTOON.prompt, /one[^\n]*stylized[^\n]*character/i);
   assert.match(overridePrompts.CARTOON.composition.hierarchy[0].element, /stylized cartoon or mascot character/i);
   assert.equal(overridePrompts.HYBRID.composition.primaryFocus, "hybrid");
   assert.match(overridePrompts.HYBRID.prompt, /Typography and one meaning-bearing illustration share the visual hierarchy/i);

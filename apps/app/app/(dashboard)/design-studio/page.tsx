@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useFactory, type DesignMode } from "../../../hooks/useFactory";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
+import CustomStyleSelector, { resolveVisualStyle } from "@/components/design/CustomStyleSelector";
 import { Zap, Sparkles, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
 
 const VISUAL_ENGINE_VERSION = "dynamic-visual-v4";
@@ -73,6 +74,18 @@ const SUBJECT_OVERRIDES: Array<{ value: "AUTO" | "NO_PERSON" | "INCLUDE_PERSON";
     { value: "NO_PERSON", label: "No Person" },
     { value: "INCLUDE_PERSON", label: "Include Person" },
 ];
+
+function applyVisualStyleToPrompt(prompt: string, visualStyle: string): string {
+    if (!prompt || !visualStyle.trim()) return prompt;
+    const replacement = [
+        "ART DIRECTION:",
+        visualStyle.trim(),
+        "Treat the supplied style as authoritative rendering direction, not as a fixed template.",
+    ].join("\n");
+    return /ART DIRECTION:\s*\n[\s\S]*?(?=\nEmotional tone:)/i.test(prompt)
+        ? prompt.replace(/ART DIRECTION:\s*\n[\s\S]*?(?=\nEmotional tone:)/i, replacement)
+        : prompt;
+}
 
 function getSloganBadges(entry: RankedSlogan) {
     const badges: { label: string; color: string }[] = [];
@@ -276,6 +289,7 @@ export default function DesignStudioPage() {
     const [niche, setNiche] = useState("");
     const [audience, setAudience] = useState("");
     const [style, setStyle] = useState("Vintage Distressed");
+    const [customStyle, setCustomStyle] = useState("");
     const [designMode, setDesignMode] = useState<DesignMode>("AUTO");
     const [subjectOverride, setSubjectOverride] = useState<"AUTO" | "NO_PERSON" | "INCLUDE_PERSON">("AUTO");
     const [platform, setPlatform] = useState("amazon");
@@ -294,7 +308,13 @@ export default function DesignStudioPage() {
                 }
                 if (saved.niche) setNiche(saved.niche);
                 if (saved.audience) setAudience(saved.audience);
-                if (saved.style) setStyle(saved.style);
+                if (saved.style && PRESET_STYLES.includes(saved.style)) setStyle(saved.style);
+                if (typeof saved.customStyle === "string" && saved.customStyle.trim()) {
+                    setCustomStyle(saved.customStyle);
+                } else if (saved.style && !PRESET_STYLES.includes(saved.style)) {
+                    // Migrate the previous free-form Style Override value into the new custom layer.
+                    setCustomStyle(saved.style);
+                }
                 if (DESIGN_MODES.some((mode) => mode.value === saved.designMode)) setDesignMode(saved.designMode);
                 if (saved.platform) setPlatform(saved.platform);
                 if (saved.result) setResult(saved.result);
@@ -306,10 +326,15 @@ export default function DesignStudioPage() {
     useEffect(() => {
         try {
             if (typeof window !== "undefined") {
-                window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ niche, audience, style, designMode, platform, result }));
+                window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ niche, audience, style, customStyle, designMode, platform, result }));
             }
         } catch { /* ignore storage errors */ }
-    }, [niche, audience, style, designMode, platform, result]);
+    }, [niche, audience, style, customStyle, designMode, platform, result]);
+
+    const resolvedVisualStyle = useMemo(
+        () => resolveVisualStyle(customStyle, style),
+        [customStyle, style],
+    );
 
     const allSlogans = useMemo<RankedSlogan[]>(() => {
         if (!result) return [];
@@ -350,20 +375,18 @@ export default function DesignStudioPage() {
         (result.shirtSlogans as string[]).forEach((slogan, index) => {
             const raw = result.imagePrompts[index];
             if (!slogan || typeof raw !== "string") return;
-            map[slogan] = /ART DIRECTION:\s*\n[^\n]*/i.test(raw)
-                ? raw.replace(/ART DIRECTION:\s*\n[^\n]*/i, `ART DIRECTION:\n${style}`)
-                : raw;
+            map[slogan] = applyVisualStyleToPrompt(raw, resolvedVisualStyle);
         });
         for (const entry of allSlogans) {
             if (!map[entry.slogan]) map[entry.slogan] = "No dynamic design strategy was generated for this slogan.";
         }
         return map;
-    }, [allSlogans, style, result]);
+    }, [allSlogans, resolvedVisualStyle, result]);
 
     const handleGenerate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!niche.trim()) return;
-        const data = await generateSingleStrategy(niche.trim(), platform, audience, style, designMode);
+        const data = await generateSingleStrategy(niche.trim(), platform, audience, resolvedVisualStyle, designMode);
         if (data) setResult(data);
     };
 
@@ -373,7 +396,7 @@ export default function DesignStudioPage() {
             niche: result.niche || niche,
             slogans: result.shirtSlogans,
             profile: result.dynamicProfile,
-            style,
+            style: resolvedVisualStyle,
             platform,
             designMode,
             subjectOverride,
@@ -460,9 +483,12 @@ export default function DesignStudioPage() {
                         <button
                             key={s}
                             type="button"
-                            onClick={() => setStyle(s)}
+                            onClick={() => {
+                                setStyle(s);
+                                setCustomStyle("");
+                            }}
                             className={`text-xs font-bold py-1.5 px-3 rounded-full border transition-colors ${
-                                style === s
+                                !customStyle.trim() && style === s
                                     ? "bg-pink-500/20 border-pink-500/60 text-pink-300"
                                     : "bg-gray-100/5 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500"
                             }`}
@@ -472,7 +498,14 @@ export default function DesignStudioPage() {
                     ))}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <CustomStyleSelector
+                    value={customStyle}
+                    selectedPreset={style}
+                    disabled={isLoading || isDesignRefreshing}
+                    onChange={setCustomStyle}
+                />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Platform</label>
                         <select
@@ -493,16 +526,6 @@ export default function DesignStudioPage() {
                             value={audience}
                             onChange={(e) => setAudience(e.target.value)}
                             placeholder="e.g. Gen Z college students"
-                            className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wider">Style Override</label>
-                        <input
-                            type="text"
-                            value={style}
-                            onChange={(e) => setStyle(e.target.value)}
-                            placeholder="e.g. Retro 90s Neon"
                             className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-pink-500/50"
                         />
                     </div>
