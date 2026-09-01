@@ -4,6 +4,12 @@ import type {
   RhetoricalFamily,
 } from "./dynamicNicheProfile";
 import { classifyRhetoricalFamily } from "./dynamicNicheProfile";
+import type { VerifierExecutionDiagnostics } from "./dynamicCreativeSelectionEngine";
+import { runStructuredIndexedVerifier } from "./structuredVerifier";
+import {
+  creativeBriefVerifierRowSchema,
+  expressionWorthinessVerifierRowSchema,
+} from "./verifierSchemas";
 
 export interface CreativeDirectionInput {
   rawDirection?: string;
@@ -318,8 +324,9 @@ async function assessExpressionBatch(
   profile: DynamicNicheProfile,
   slogans: string[],
   creativeDirection: CreativeDirectionBrief,
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<ExpressionWorthinessAssessment[]> {
-  const response = await callJson<{ assessments?: unknown }>(`
+  const prompt = `
 Act as a commercial creative-quality judge. These candidates have already passed semantic eligibility. Do not re-run the truth gate and do not require behavioral evidence to appear as literal surface syntax.
 
 NICHE: ${profile.niche}
@@ -389,24 +396,24 @@ Return JSON only:
     "diagnosticTraits": [],
     "reasons": []
   }]
-}`);
-
-  const raw = Array.isArray(response.assessments) ? response.assessments : [];
-  const byIndex = new Map<number, Record<string, unknown>>();
-  for (const value of raw) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const record = value as Record<string, unknown>;
-    const index = Number(record.index);
-    if (Number.isInteger(index) && index >= 0 && index < slogans.length && !byIndex.has(index)) {
-      byIndex.set(index, record);
-    }
-  }
-  if (byIndex.size !== slogans.length) {
-    throw new Error(`Expression judge returned ${byIndex.size}/${slogans.length} complete indexed rows`);
-  }
+}`;
+  if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
+  const response = await runStructuredIndexedVerifier({
+    prompt,
+    model: process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4.1",
+    outputKey: "assessments",
+    rowSchema: expressionWorthinessVerifierRowSchema,
+    expectedCount: slogans.length,
+    expectedSchema: `{ "assessments": [{ "index": 0, "conceptKey": "", "selfRecognition": 0, "identityProjection": 0, "insiderResonance": 0, "conceptualTransformation": 0, "naturalness": 0, "wearability": 0, "creativeConstraintAlignment": 0, "expressionMode": "DECORATIVE_DESCRIPTION", "diagnosticTraits": [], "reasons": [] }] }`,
+    label: "Expression worthiness verifier",
+    onFormatRepairAttempt: () => {
+      if (verifierDiagnostics) verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+    },
+    onInitialResponseShape: (shape) => verifierDiagnostics?.verifierResponseShapes.push(`expression:${shape}`),
+  });
 
   return slogans.map((slogan, index) => {
-    const record = byIndex.get(index) as Record<string, unknown>;
+    const record = response.rows[index];
     const scoreNames = [
       "selfRecognition",
       "identityProjection",
@@ -416,40 +423,17 @@ Return JSON only:
       "wearability",
       "creativeConstraintAlignment",
     ] as const;
-    const normalized = Object.fromEntries(scoreNames.map((name) => [name, numericScore(record[name])])) as Record<typeof scoreNames[number], number | undefined>;
-    if (Object.values(normalized).some((score) => score === undefined)) {
-      throw new Error(`Expression judge returned invalid scores for candidate ${index}`);
-    }
-    const scores = normalized as Record<typeof scoreNames[number], number>;
-    const expressionMode = record.expressionMode === "SYMBOLIC_EXPRESSION"
-      ? "SYMBOLIC_EXPRESSION" as const
-      : "DECORATIVE_DESCRIPTION" as const;
-    const allowedTraits = new Set([
-      "DESCRIPTIVE",
-      "ATMOSPHERIC",
-      "DECORATIVE",
-      "POETIC",
-      "GENERIC_MYSTICAL",
-      "VISUAL_CAPTION",
-      "AUDIENCE_DESCRIPTION",
-      "IDENTITY_BEARING",
-      "SOCIALLY_SIGNALABLE",
-      "NATURALLY_SPEAKABLE",
-    ] as const);
-    const diagnosticTraits = cleanStringArray(record.diagnosticTraits, 10)
-      .filter((trait): trait is ExpressionWorthinessAssessment["diagnosticTraits"][number] => (
-        allowedTraits.has(trait as ExpressionWorthinessAssessment["diagnosticTraits"][number])
-      ));
+    const scores = Object.fromEntries(scoreNames.map((name) => [name, record[name]])) as Record<typeof scoreNames[number], number>;
     const returnedConcept = cleanString(record.conceptKey);
     return {
       slogan,
       conceptKey: semanticConceptKey(returnedConcept || slogan),
       rhetoricalFamily: classifyRhetoricalFamily(slogan),
       ...scores,
-      expressionMode,
-      diagnosticTraits,
+      expressionMode: record.expressionMode,
+      diagnosticTraits: record.diagnosticTraits,
       score: scoreExpressionWorthiness(scores),
-      reasons: cleanStringArray(record.reasons, 4),
+      reasons: record.reasons.slice(0, 4),
     };
   });
 }
@@ -457,13 +441,14 @@ Return JSON only:
 async function verifyCreativeBriefBatch(
   slogans: string[],
   creativeDirection: CreativeDirectionBrief,
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<Array<{
   slogan: string;
   conceptualTransformation: number;
   creativeConstraintAlignment: number;
   reasons: string[];
 }>> {
-  const response = await callJson<{ assessments?: unknown }>(`
+  const prompt = `
 Act as a narrow adversarial verifier for creative originality and user-brief compliance. Do not score semantic truth, niche coverage, brevity, or general marketability. Do not rewrite candidates.
 
 BINDING USER CREATIVE BRIEF:
@@ -490,57 +475,53 @@ Return JSON only:
     "creativeConstraintAlignment": 0,
     "reasons": []
   }]
-}`,
-  0.02);
-
-  const raw = Array.isArray(response.assessments) ? response.assessments : [];
-  const byIndex = new Map<number, Record<string, unknown>>();
-  for (const value of raw) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const record = value as Record<string, unknown>;
-    const index = Number(record.index);
-    if (Number.isInteger(index) && index >= 0 && index < slogans.length && !byIndex.has(index)) {
-      byIndex.set(index, record);
-    }
-  }
-  if (byIndex.size !== slogans.length) {
-    throw new Error(`Creative-brief verifier returned ${byIndex.size}/${slogans.length} complete indexed rows`);
-  }
+}`;
+  if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
+  const response = await runStructuredIndexedVerifier({
+    prompt,
+    model: process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4.1",
+    temperature: 0.02,
+    outputKey: "assessments",
+    rowSchema: creativeBriefVerifierRowSchema,
+    expectedCount: slogans.length,
+    expectedSchema: `{ "assessments": [{ "index": 0, "conceptualTransformation": 0, "creativeConstraintAlignment": 0, "reasons": [] }] }`,
+    label: "Creative brief verifier",
+    onFormatRepairAttempt: () => {
+      if (verifierDiagnostics) verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+    },
+    onInitialResponseShape: (shape) => verifierDiagnostics?.verifierResponseShapes.push(`brief:${shape}`),
+  });
 
   return slogans.map((slogan, index) => {
-    const record = byIndex.get(index) as Record<string, unknown>;
-    const conceptualTransformation = numericScore(record.conceptualTransformation);
-    const creativeConstraintAlignment = numericScore(record.creativeConstraintAlignment);
-    if (conceptualTransformation === undefined || creativeConstraintAlignment === undefined) {
-      throw new Error(`Creative-brief verifier returned invalid scores for candidate ${index}`);
-    }
+    const record = response.rows[index];
     return {
       slogan,
-      conceptualTransformation,
-      creativeConstraintAlignment,
-      reasons: cleanStringArray(record.reasons, 3),
+      conceptualTransformation: record.conceptualTransformation,
+      creativeConstraintAlignment: record.creativeConstraintAlignment,
+      reasons: record.reasons.slice(0, 3),
     };
   });
 }
 
-const EXPRESSION_BATCH_SIZE = 10;
+const EXPRESSION_BATCH_SIZE = 4;
 
 export async function assessExpressionWorthiness(
   profile: DynamicNicheProfile,
   slogans: string[],
   creativeDirection: CreativeDirectionBrief = emptyCreativeDirectionBrief(),
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<ExpressionWorthinessAssessment[]> {
   const batches: string[][] = [];
   for (let index = 0; index < slogans.length; index += EXPRESSION_BATCH_SIZE) {
     batches.push(slogans.slice(index, index + EXPRESSION_BATCH_SIZE));
   }
   const primary = (await Promise.all(
-    batches.map((batch) => assessExpressionBatch(profile, batch, creativeDirection)),
+    batches.map((batch) => assessExpressionBatch(profile, batch, creativeDirection, verifierDiagnostics)),
   )).flat();
   if (!creativeDirection.sourcePresent) return primary;
 
   const focused = (await Promise.all(
-    batches.map((batch) => verifyCreativeBriefBatch(batch, creativeDirection)),
+    batches.map((batch) => verifyCreativeBriefBatch(batch, creativeDirection, verifierDiagnostics)),
   )).flat();
   return primary.map((assessment, index) => {
     const verifier = focused[index];

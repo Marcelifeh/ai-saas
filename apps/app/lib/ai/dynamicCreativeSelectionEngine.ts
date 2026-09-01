@@ -1,5 +1,17 @@
 import type { CompositionType, DynamicNicheProfile, RecoveryContext } from "./dynamicNicheProfile";
 import type { CreativeDirectionBrief } from "./expressionWorthiness";
+import { runStructuredIndexedVerifier } from "./structuredVerifier";
+import {
+  blindReadingVerifierRowSchema,
+  compoundIntersectionVerifierRowSchema,
+  semanticEligibilityVerifierRowSchema,
+} from "./verifierSchemas";
+
+export interface VerifierExecutionDiagnostics {
+  verifierBatchCount: number;
+  verifierFormatRepairAttemptCount: number;
+  verifierResponseShapes: string[];
+}
 
 export interface CreativeEvidenceContext {
   snapshotId?: string;
@@ -487,6 +499,7 @@ Requirements:
 - Every territory must be supported by the profile or supplied evidence.
 - Treat the dynamic profile as a set of model-inferred creative hypotheses, not independent evidence. A claim does not become grounded merely because it appears in the profile.
 - For each territory, cite only exact evidence reference IDs from ORIGINAL EVIDENCE SOURCES. Use "niche" or "audience" only when the premise is a conservative implication of that explicit input.
+- A compound niche label by itself can support an emergent conceptual, symbolic, aesthetic, or identity relationship that follows directly from both axes. It does NOT prove that an organized community, recurring event, themed activity, contest, tradition, ritual, status hierarchy, insider language, or shared behavior exists. Those concrete claims require direct original evidence beyond model-authored profile hypotheses.
 - Set groundingBasis to market_corroborated when at least one market evidence ref directly supports the premise; otherwise use niche_supported_inference.
 - The user creative brief may shape expression-worthiness but cannot ground a behavioral claim.
 - Preserve all meaningful dimensions of compound/crossover niches.
@@ -591,6 +604,7 @@ async function assessSemanticEligibilityBatch(
   slogans: string[],
   territories: CreativeTerritory[],
   evidence?: CreativeEvidenceContext,
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<SemanticEligibilityAssessment[]> {
   if (slogans.length === 0) return [];
 
@@ -646,6 +660,7 @@ EVIDENCE PROVENANCE RULES:
 - Grounding may come from a conservative implication of the explicit niche/audience or corroboration in original market evidence.
 - Indirect, metaphorical, identity-led, or attitudinal expression may be grounded without repeating behavior words. Judge the implied proposition, not surface token overlap.
 - If a specific behavior exists only as an uncorroborated model inference, reflect that uncertainty in truthGrounding and unsupportedInferenceRisk.
+- Treat a bare compound niche label as support for its conservative emergent meaning, not as proof of organized events, themed activities, contests, traditions, rituals, group norms, status hierarchies, or recurring behavior. Unsupported concrete crossover claims must fail grounding even when both axis words appear.
 
 INTERSECTION APPLICABILITY:
 ${requiresIntersectionIntegrity(profile)
@@ -685,37 +700,33 @@ Return JSON only:
   ]
 }`;
 
-  const response = await callJson<{ assessments?: unknown }>(prompt, 0.05, "gpt-4o-mini");
-  const raw = Array.isArray(response.assessments) ? response.assessments : [];
-  const byIndex = new Map<number, Record<string, unknown>>();
-  for (const item of raw) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const record = item as Record<string, unknown>;
-    const index = Number(record.index);
-    if (Number.isInteger(index) && index >= 0 && index < slogans.length && !byIndex.has(index)) {
-      byIndex.set(index, record);
-    }
-  }
-
-  if (byIndex.size !== slogans.length) {
-    throw new Error(`Eligibility evaluator returned ${byIndex.size}/${slogans.length} complete indexed rows`);
-  }
+  if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
+  const verified = await runStructuredIndexedVerifier({
+    prompt,
+    model: "gpt-4o-mini",
+    temperature: 0.05,
+    outputKey: "assessments",
+    rowSchema: semanticEligibilityVerifierRowSchema,
+    expectedCount: slogans.length,
+    expectedSchema: `{ "assessments": [{ "index": 0, "truthGrounding": 0, "productIndependence": 0, "intersectionIntegrity": 0, "semanticCoherence": 0, "unsupportedInferenceRisk": 0, "axisGrounding": [{ "axis": "", "grounding": 0 }], "reasons": [] }] }`,
+    label: "Semantic eligibility verifier",
+    onFormatRepairAttempt: () => {
+      if (verifierDiagnostics) verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+    },
+    onInitialResponseShape: (shape) => verifierDiagnostics?.verifierResponseShapes.push(`semantic:${shape}`),
+  });
 
   const intersectionApplicable = requiresIntersectionIntegrity(profile);
 
   return slogans.map((slogan, index) => {
-    const item = byIndex.get(index) as Record<string, unknown>;
+    const item = verified.rows[index];
     const scores = normalizeEligibilityScoreRecord(item);
     if (!scores) throw new Error(`Eligibility evaluator returned invalid scores for candidate ${index}`);
     const { truthGrounding, productIndependence, intersectionIntegrity, semanticCoherence, unsupportedInferenceRisk } = scores;
-    const rawAxisGrounding = Array.isArray(item.axisGrounding) ? item.axisGrounding : [];
-    const axisGrounding = rawAxisGrounding.flatMap((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const record = value as Record<string, unknown>;
-      const axis = cleanString(record.axis);
-      const grounding = numericScore(record.grounding);
-      return axis && grounding !== undefined ? [{ axis, grounding: clampScore(grounding <= 1 ? grounding * 100 : grounding) }] : [];
-    });
+    const axisGrounding = item.axisGrounding.map((axis) => ({
+      axis: axis.axis,
+      grounding: axis.grounding,
+    }));
     const expectedAxisCount = intersectionApplicable ? profile.nicheComposition?.axes.length ?? 0 : 0;
     if (intersectionApplicable && axisGrounding.length !== expectedAxisCount) {
       throw new Error(`Eligibility evaluator returned ${axisGrounding.length}/${expectedAxisCount} compound-axis scores for candidate ${index}`);
@@ -742,23 +753,24 @@ Return JSON only:
       semanticCoherence,
       unsupportedInferenceRisk,
       axisGrounding,
-      reasons: cleanStringArray(item.reasons, 4),
+      reasons: item.reasons.slice(0, 4),
     };
   });
 }
 
-const ELIGIBILITY_BATCH_SIZE = 8;
+// Four rows keeps structured responses well below the observed 7/8 truncation boundary.
+const ELIGIBILITY_BATCH_SIZE = 4;
 
 async function assessCompoundIntersectionBatch(
   profile: DynamicNicheProfile,
   slogans: string[],
   _territories: CreativeTerritory[],
   evidence?: CreativeEvidenceContext,
-  retryCount = 0,
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<Array<EmergentIntersectionAssessment & { slogan: string; reasons: string[] }>> {
   const axes = profile.nicheComposition?.axes ?? [];
   const verifierModel = process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4o";
-  const blindReading = await callJson<{ readings?: unknown }>(`
+  const blindPrompt = `
 Read these candidate phrases in isolation. You are not given a niche, audience, profile, source axes, or creative brief.
 
 For each candidate, state only the minimal proposition and semantic cues actually communicated by its words or broadly established idiom. Do not guess a hidden niche and do not enrich generic language with external context.
@@ -769,9 +781,22 @@ ${JSON.stringify(slogans.map((slogan, index) => ({ index, slogan })))}
 Return JSON only:
 {
   "readings": [{ "index": 0, "expressedPremise": "", "semanticCues": [], "genericityRisk": 0 }]
-}`,
-  0.02,
-  "gpt-4o-mini");
+}`;
+  if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
+  const blindReading = await runStructuredIndexedVerifier({
+    prompt: blindPrompt,
+    model: "gpt-4o-mini",
+    temperature: 0.02,
+    outputKey: "readings",
+    rowSchema: blindReadingVerifierRowSchema,
+    expectedCount: slogans.length,
+    expectedSchema: `{ "readings": [{ "index": 0, "expressedPremise": "", "semanticCues": [], "genericityRisk": 0 }] }`,
+    label: "Blind reading verifier",
+    onFormatRepairAttempt: () => {
+      if (verifierDiagnostics) verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+    },
+    onInitialResponseShape: (shape) => verifierDiagnostics?.verifierResponseShapes.push(`blind:${shape}`),
+  });
   const prompt = `
 Act as a narrow, adversarial compound-niche integrity verifier. Do not rewrite candidates and do not score humor, brevity, marketability, or general niche relevance.
 
@@ -792,7 +817,7 @@ ORIGINAL SOURCE EVIDENCE (authoritative):
 ${JSON.stringify({ niche: profile.niche, audience: profile.audience, marketEvidence: evidence ?? {} }, null, 2)}
 
 BLIND CANDIDATE READINGS (created without seeing the niche; authoritative for what the words actually communicate):
-${JSON.stringify(blindReading.readings ?? [], null, 2)}
+${JSON.stringify(blindReading.rows, null, 2)}
 
 For each candidate:
 - State the candidate's minimal sharedPremise: the proposition a wearer or insider would understand, without copying candidate wording.
@@ -803,7 +828,7 @@ For each candidate:
 - Score contextDependenceRisk HIGH when axis support or the shared intersection appears only after the niche/profile is revealed and is absent from the blind candidate reading. Generic identity, confidence, mystery, celebration, or outsider language normally has high context-dependence unless the candidate itself adds a distinctive emergent semantic cue. HIGHER IS WORSE.
 - Score unsupportedInferenceRisk HIGH when the clever connection requires an invented fact, behavior, relationship, lore, or audience claim. HIGHER IS WORSE.
 - Score intersectionPreservation for the emergent intersection itself, not for surface mention of source terms.
-- Use the supplied compositionType. Explicit behavior is required only for BEHAVIORAL_INTERSECTION; a supported observance is required for RITUAL_INTERSECTION. Do not impose behavior syntax on identity, cultural, aesthetic, or symbolic intersections.
+- Use the supplied compositionType internally. Do not return or reclassify it. Explicit behavior is required only for BEHAVIORAL_INTERSECTION; a supported observance is required for RITUAL_INTERSECTION. Do not impose behavior syntax on identity, cultural, aesthetic, or symbolic intersections.
 - Do not award an axis merely because it exists in the niche, profile, territory, or prompt.
 - Reject one-axis collapse even when both axis words are present. Allow a compact expression that names neither axis when support, mutual dependence, and source grounding are strong.
 - Keep reasons factual and under 12 words.
@@ -819,7 +844,6 @@ Return JSON only:
     {
       "index": 0,
       "sharedPremise": "",
-      "compositionType": "IDENTITY_INTERSECTION",
       "axisSupport": [{ "axis": "", "support": 0, "presence": 0 }],
       "sharedPremiseSupport": 0,
       "mutualDependence": 0,
@@ -832,28 +856,25 @@ Return JSON only:
   ]
 }`;
 
-  try {
-    const response = await callJson<{ assessments?: unknown }>(prompt, 0.02, verifierModel);
-    const raw = Array.isArray(response.assessments) ? response.assessments : [];
-    const byIndex = new Map<number, Record<string, unknown>>();
-    for (const value of raw) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const record = value as Record<string, unknown>;
-      const index = Number(record.index);
-      if (Number.isInteger(index) && index >= 0 && index < slogans.length && !byIndex.has(index)) {
-        byIndex.set(index, record);
-      }
-    }
-    if (byIndex.size !== slogans.length) {
-      throw new Error(`Compound verifier returned ${byIndex.size}/${slogans.length} complete indexed rows`);
-    }
+  if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
+  const verified = await runStructuredIndexedVerifier({
+    prompt,
+    model: verifierModel,
+    temperature: 0.02,
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: slogans.length,
+    expectedSchema: `{ "assessments": [{ "index": 0, "sharedPremise": "", "axisSupport": [{ "axis": "", "support": 0, "presence": 0 }], "sharedPremiseSupport": 0, "mutualDependence": 0, "adjacencyRisk": 0, "contextDependenceRisk": 0, "unsupportedInferenceRisk": 0, "intersectionPreservation": 0, "reasons": [] }] }`,
+    label: "Compound intersection verifier",
+    onFormatRepairAttempt: () => {
+      if (verifierDiagnostics) verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+    },
+    onInitialResponseShape: (shape) => verifierDiagnostics?.verifierResponseShapes.push(`compound:${shape}`),
+  });
 
-    return slogans.map((slogan, index) => {
-      const item = byIndex.get(index) as Record<string, unknown>;
-      const compositionType = cleanString(item.compositionType) as CompositionType;
-      if (compositionType !== profile.nicheComposition?.compositionType) {
-        throw new Error(`Compound verifier changed composition type for candidate ${index}`);
-      }
+  return slogans.map((slogan, index) => {
+      const item = verified.rows[index];
+      const compositionType = profile.nicheComposition?.compositionType as CompositionType;
       const scoreFields = {
         sharedPremiseSupport: numericScore(item.sharedPremiseSupport),
         mutualDependence: numericScore(item.mutualDependence),
@@ -865,21 +886,7 @@ Return JSON only:
       if (Object.values(scoreFields).some((score) => score === undefined)) {
         throw new Error(`Compound verifier returned invalid emergent scores for candidate ${index}`);
       }
-      const rawAxisSupport = Array.isArray(item.axisSupport) ? item.axisSupport : [];
-      const axisSupport = rawAxisSupport.flatMap((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-        const record = value as Record<string, unknown>;
-        const axis = cleanString(record.axis);
-        const support = numericScore(record.support);
-        const presence = numericScore(record.presence);
-        return axis && support !== undefined && presence !== undefined
-          ? [{
-              axis,
-              support: clampScore(support <= 1 ? support * 100 : support),
-              presence: clampScore(presence <= 1 ? presence * 100 : presence),
-            }]
-          : [];
-      });
+      const axisSupport = item.axisSupport;
       if (axisSupport.length !== axes.length || !axes.every((axis, axisIndex) => (
         axisSupport[axisIndex]?.axis.toLowerCase() === axis.toLowerCase()
       ))) {
@@ -897,15 +904,9 @@ Return JSON only:
         contextDependenceRisk: scale(scoreFields.contextDependenceRisk),
         unsupportedInferenceRisk: scale(scoreFields.unsupportedInferenceRisk),
         intersectionPreservation: scale(scoreFields.intersectionPreservation),
-        reasons: cleanStringArray(item.reasons, 4),
+        reasons: item.reasons.slice(0, 4),
       };
     });
-  } catch (error) {
-    if (retryCount < 1) {
-      return assessCompoundIntersectionBatch(profile, slogans, _territories, evidence, retryCount + 1);
-    }
-    throw error;
-  }
 }
 
 export async function assessSemanticEligibility(
@@ -913,6 +914,7 @@ export async function assessSemanticEligibility(
   slogans: string[],
   territories: CreativeTerritory[],
   evidence?: CreativeEvidenceContext,
+  verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<SemanticEligibilityAssessment[]> {
   if (slogans.length === 0) return [];
   const batches: string[][] = [];
@@ -920,13 +922,13 @@ export async function assessSemanticEligibility(
     batches.push(slogans.slice(index, index + ELIGIBILITY_BATCH_SIZE));
   }
   const assessedBatches = await Promise.all(
-    batches.map((batch) => assessSemanticEligibilityBatch(profile, batch, territories, evidence)),
+    batches.map((batch) => assessSemanticEligibilityBatch(profile, batch, territories, evidence, verifierDiagnostics)),
   );
   const assessments = assessedBatches.flat();
   if (!requiresIntersectionIntegrity(profile)) return assessments;
 
   const focusedBatches = await Promise.all(
-    batches.map((batch) => assessCompoundIntersectionBatch(profile, batch, territories, evidence)),
+    batches.map((batch) => assessCompoundIntersectionBatch(profile, batch, territories, evidence, verifierDiagnostics)),
   );
   const focused = focusedBatches.flat();
   const expectedAxisCount = profile.nicheComposition?.axes.length ?? 0;

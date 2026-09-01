@@ -14,7 +14,7 @@ import {
   type CreativeTerritory,
   type SemanticEligibilityAssessment,
 } from "../lib/ai/dynamicCreativeSelectionEngine";
-import type { DynamicNicheProfile, RecoveryContext } from "../lib/ai/dynamicNicheProfile";
+import type { DynamicNicheProfile, NicheComposition, RecoveryContext } from "../lib/ai/dynamicNicheProfile";
 import type { CompositionType } from "../lib/ai/dynamicNicheProfile";
 import { runBoundedSemanticRecovery } from "../lib/ai/semanticEligibilityRecovery";
 import {
@@ -34,6 +34,20 @@ import {
   EXPRESSION_INTENT_THRESHOLDS,
   type ExpressionIntent,
 } from "../lib/ai/expressionIntent";
+import {
+  mergeReleasedItems,
+  runBoundedCompositionRecovery,
+  selectSupportedSecondaryComposition,
+  MIN_RECOVERY_COMPOSITION_CONFIDENCE,
+} from "../lib/ai/compositionOutcomeRecovery";
+import {
+  explicitlyCoercedVerifierScoreSchema,
+  runStructuredIndexedVerifier,
+  strictVerifierScoreSchema,
+  validateIndexedVerifierResponse,
+  VerifierTechnicalError,
+} from "../lib/ai/structuredVerifier";
+import { compoundIntersectionVerifierRowSchema } from "../lib/ai/verifierSchemas";
 
 const thresholdPassing = {
   truthGrounding: SEMANTIC_ELIGIBILITY_THRESHOLDS.truthGrounding,
@@ -500,6 +514,235 @@ async function main(): Promise<void> {
   assert.equal(exhaustedCalls, 2, "Bounded recovery must terminate at configured maximum");
   assert.equal(exhausted.eligibleCandidates.length, 0, "Exhaustion must not create a fallback slogan");
 
+  const supportedPrimaryComposition: NicheComposition = {
+    kind: "compound",
+    axes: ["first axis", "second axis"],
+    compositionType: "BEHAVIORAL_INTERSECTION",
+    sharedPremise: "a supported repeated action shaped by both axes",
+    axisRoles: [
+      { axis: "first axis", contribution: "contributes the initiating context" },
+      { axis: "second axis", contribution: "changes the repeated response" },
+    ],
+    evidenceRefs: ["niche"],
+    compositionConfidence: 88,
+    alternativeCompositionTypes: [{
+      compositionType: "CULTURAL_INTERSECTION",
+      confidence: MIN_RECOVERY_COMPOSITION_CONFIDENCE,
+      sharedPremise: "a shared cultural code whose meaning depends on both axes",
+      axisRoles: [
+        { axis: "first axis", contribution: "contributes one half of the cultural code" },
+        { axis: "second axis", contribution: "reframes that code for the shared audience" },
+      ],
+      evidenceRefs: ["niche"],
+    }],
+  };
+  const supportedSecondary = selectSupportedSecondaryComposition(supportedPrimaryComposition);
+  assert.equal(supportedSecondary?.compositionType, "CULTURAL_INTERSECTION", "A source-supported, meaningfully different secondary must be recoverable");
+
+  type MockCompositionResult = { ranked: string[]; error?: "GENERATION_EXHAUSTED" };
+  let compositionAttemptCalls = 0;
+  const primarySuccess = await runBoundedCompositionRecovery<MockCompositionResult>({
+    primaryResult: { ranked: ["released primary"] },
+    secondaryComposition: supportedSecondary,
+    releasedCount: (result) => result.ranked.length,
+    runSecondary: async () => {
+      compositionAttemptCalls += 1;
+      return { ranked: ["should not run"] };
+    },
+  });
+  assert.equal(compositionAttemptCalls, 0, "Primary composition success must not trigger a secondary attempt");
+  assert.deepEqual(primarySuccess.result.ranked, ["released primary"]);
+
+  const secondarySuccess = await runBoundedCompositionRecovery<MockCompositionResult>({
+    primaryResult: { ranked: [], error: "GENERATION_EXHAUSTED" },
+    secondaryComposition: supportedSecondary,
+    releasedCount: (result) => result.ranked.length,
+    runSecondary: async () => {
+      compositionAttemptCalls += 1;
+      return { ranked: ["released secondary"] };
+    },
+  });
+  assert.equal(secondarySuccess.secondaryAttemptUsed, true, "Zero primary output must trigger one supported secondary");
+  assert.equal(compositionAttemptCalls, 1, "Composition recovery must run exactly one secondary attempt");
+  assert.deepEqual(secondarySuccess.result.ranked, ["released secondary"], "A successful secondary must return its released survivors");
+
+  const bothExhausted = await runBoundedCompositionRecovery<MockCompositionResult>({
+    primaryResult: { ranked: [], error: "GENERATION_EXHAUSTED" },
+    secondaryComposition: supportedSecondary,
+    releasedCount: (result) => result.ranked.length,
+    runSecondary: async () => ({ ranked: [], error: "GENERATION_EXHAUSTED" }),
+  });
+  assert.equal(bothExhausted.result.error, "GENERATION_EXHAUSTED", "Two failed interpretations must remain fail-closed");
+
+  const unsupportedAlternative: NicheComposition = {
+    ...supportedPrimaryComposition,
+    alternativeCompositionTypes: [{
+      compositionType: "SYMBOLIC_INTERSECTION",
+      confidence: 95,
+      sharedPremise: "unsupported clever reinterpretation",
+      axisRoles: [{ axis: "first axis", contribution: "mentions only one side" }],
+      evidenceRefs: [],
+    }],
+  };
+  assert.equal(selectSupportedSecondaryComposition(unsupportedAlternative), undefined, "Recovery must not fabricate an unsupported alternate");
+  assert.equal(selectSupportedSecondaryComposition({ kind: "single", axes: [] }), undefined, "Single niches must never enter composition recovery");
+
+  const mergedCompositionCandidates = mergeReleasedItems(
+    ["Embracing Black Cat Flair"],
+    ["Embrace Black Cat Flair", "Midnight Familiar"],
+    semanticConceptKey,
+  );
+  assert.equal(mergedCompositionCandidates.length, 2, "Secondary candidates must dedupe semantically against primary concepts");
+
+  const verifierRow = (index: number) => ({
+    index,
+    sharedPremise: `shared premise ${index}`,
+    axisSupport: [
+      { axis: "first axis", support: 80, presence: 20 },
+      { axis: "second axis", support: 80, presence: 20 },
+    ],
+    sharedPremiseSupport: 80,
+    mutualDependence: 80,
+    adjacencyRisk: 20,
+    contextDependenceRisk: 20,
+    unsupportedInferenceRisk: 20,
+    intersectionPreservation: 80,
+    reasons: [],
+  });
+  const validVerifier = validateIndexedVerifierResponse({
+    response: { assessments: [verifierRow(0), verifierRow(1)] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 2,
+    label: "test verifier",
+  });
+  assert.deepEqual(validVerifier.rows.map((row) => row.index), [0, 1], "1. valid verifier response passes");
+
+  assert.throws(() => validateIndexedVerifierResponse({
+    response: { assessments: [verifierRow(0)] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 2,
+    label: "test verifier",
+  }), (error) => error instanceof VerifierTechnicalError && error.code === "VERIFIER_INCOMPLETE", "3. missing row detected");
+  assert.throws(() => validateIndexedVerifierResponse({
+    response: { assessments: [verifierRow(0), verifierRow(0)] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 2,
+    label: "test verifier",
+  }), (error) => error instanceof VerifierTechnicalError && error.category === "DUPLICATE_INDEX", "4. duplicate index detected");
+  assert.throws(() => validateIndexedVerifierResponse({
+    response: { assessments: [{ ...verifierRow(0), mutualDependence: 101 }] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    label: "test verifier",
+  }), (error) => error instanceof VerifierTechnicalError && error.category === "INVALID_ROW", "5. invalid score detected");
+  assert.equal(strictVerifierScoreSchema.safeParse("70").success, false, "6. numeric strings are rejected unless coercion is explicit");
+  assert.equal(explicitlyCoercedVerifierScoreSchema.parse("70"), 70);
+  const missingScore = { ...verifierRow(0) } as Record<string, unknown>;
+  delete missingScore.mutualDependence;
+  assert.throws(() => validateIndexedVerifierResponse({
+    response: { assessments: [missingScore] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    label: "test verifier",
+  }), (error) => error instanceof VerifierTechnicalError && error.category === "INVALID_ROW", "7. missing score rejected");
+
+  let metadataDriftRequests = 0;
+  const metadataDriftVerifier = await runStructuredIndexedVerifier({
+    prompt: "test",
+    model: "test",
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    expectedSchema: "test schema",
+    label: "test verifier",
+    request: async () => {
+      metadataDriftRequests += 1;
+      return { content: JSON.stringify({ assessments: [{ ...verifierRow(0), compositionType: "WRONG_LABEL" }] }) };
+    },
+  });
+  assert.equal(metadataDriftVerifier.formatRepairAttempts, 0, "8. redundant model composition labels do not invalidate judgments");
+  assert.equal(metadataDriftRequests, 1);
+  assert.equal(supportedPrimaryComposition.compositionType, "BEHAVIORAL_INTERSECTION", "8. model label drift cannot change authoritative pipeline composition");
+
+  let repairRequests = 0;
+  const repairedVerifier = await runStructuredIndexedVerifier({
+    prompt: "test",
+    model: "test",
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    expectedSchema: "test schema",
+    label: "test verifier",
+    request: async () => {
+      repairRequests += 1;
+      return repairRequests === 1
+        ? { content: JSON.stringify({ assessments: [] }) }
+        : { content: JSON.stringify({ assessments: [verifierRow(0)] }) };
+    },
+  });
+  assert.equal(repairedVerifier.formatRepairAttempts, 1, "9. one repair attempt succeeds");
+  assert.equal(repairRequests, 2);
+
+  let truncatedRequests = 0;
+  const repairedTruncation = await runStructuredIndexedVerifier({
+    prompt: "test",
+    model: "test",
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    expectedSchema: "test schema",
+    label: "test verifier",
+    request: async () => {
+      truncatedRequests += 1;
+      return truncatedRequests === 1
+        ? { content: "{\"assessments\":[", finishReason: "length" }
+        : { content: JSON.stringify({ assessments: [verifierRow(0)] }) };
+    },
+  });
+  assert.equal(repairedTruncation.formatRepairAttempts, 1, "2. truncated response detected and repaired once");
+
+  let failedRepairRequests = 0;
+  await assert.rejects(() => runStructuredIndexedVerifier({
+    prompt: "test",
+    model: "test",
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 1,
+    expectedSchema: "test schema",
+    label: "test verifier",
+    request: async () => {
+      failedRepairRequests += 1;
+      return { content: "{}" };
+    },
+  }), (error) => error instanceof VerifierTechnicalError && error.code === "VERIFIER_FORMAT_FAILED", "10. failed repair returns technical error");
+  assert.equal(failedRepairRequests, 2, "A failed repair must still stop after exactly one repair request");
+
+  const technicalFailure = { ranked: [] as string[], error: "VERIFIER_FORMAT_FAILED" as const };
+  const technicalRecovery = await runBoundedCompositionRecovery({
+    primaryResult: technicalFailure,
+    secondaryComposition: undefined,
+    releasedCount: (result) => result.ranked.length,
+    runSecondary: async () => ({ ranked: ["must not run"], error: "VERIFIER_FORMAT_FAILED" as const }),
+  });
+  assert.equal(technicalRecovery.secondaryAttemptUsed, false, "11. technical error does not trigger composition recovery");
+  assert.equal(technicalRecovery.result.error, "VERIFIER_FORMAT_FAILED", "12. technical error does not become GENERATION_EXHAUSTED");
+
+  const reordered = validateIndexedVerifierResponse({
+    response: { assessments: [verifierRow(1), verifierRow(0)] },
+    outputKey: "assessments",
+    rowSchema: compoundIntersectionVerifierRowSchema,
+    expectedCount: 2,
+    label: "test verifier",
+  });
+  assert.deepEqual(reordered.rows.map((row) => row.index), [0, 1], "13. candidate order remains stable across batches");
+  assert.equal(SEMANTIC_ELIGIBILITY_THRESHOLDS.truthGrounding, 65, "14. semantic thresholds unchanged");
+  assert.ok(!fs.readFileSync(path.resolve(__dirname, "..", "lib", "ai", "structuredVerifier.ts"), "utf8").includes("?? 50"), "15. verifier parser must not synthesize default 50 scores");
+
   const root = path.resolve(__dirname, "..", "lib");
   const factorySource = fs.readFileSync(path.join(root, "services", "factoryService.ts"), "utf8");
   const activeGenerationSource = fs.readFileSync(path.join(root, "ai", "dynamicNicheProfile.ts"), "utf8");
@@ -508,6 +751,7 @@ async function main(): Promise<void> {
   const recoverySource = fs.readFileSync(path.join(root, "ai", "semanticEligibilityRecovery.ts"), "utf8");
   const expressionSource = fs.readFileSync(path.join(root, "ai", "expressionWorthiness.ts"), "utf8");
   const intentSource = fs.readFileSync(path.join(root, "ai", "expressionIntent.ts"), "utf8");
+  const compositionRecoverySource = fs.readFileSync(path.join(root, "ai", "compositionOutcomeRecovery.ts"), "utf8");
 
   for (const forbidden of [
     "Wearability: Phrases humans actually say (e.g.",
@@ -532,14 +776,27 @@ async function main(): Promise<void> {
   assert.ok(sloganEngineSource.includes("EXPRESSION_RECOVERY_SUCCEEDED"));
   assert.ok(sloganEngineSource.includes("cacheDisabled = input.cacheTtlSec === 0"));
   assert.ok(sloganEngineSource.includes("runBoundedSemanticRecovery"));
+  assert.ok(sloganEngineSource.includes("runEliteSloganEngineAttempt(input, composition)"), "Both composition interpretations must use the same authoritative engine");
+  assert.ok(sloganEngineSource.includes("selectSupportedSecondaryComposition"), "Outcome recovery must require an independently supported alternate");
+  assert.ok(sloganEngineSource.includes("EXPRESSION_INTENT_PLANNING_FAILED"), "Technical intent-planning failures must remain distinct from zero eligible intents");
+  assert.ok(sloganEngineSource.includes("primaryCreativeFailure &&"), "Technical pipeline failures must not trigger composition recovery");
+  assert.ok(compositionRecoverySource.includes("MIN_RECOVERY_COMPOSITION_CONFIDENCE = 60"), "Secondary support must remain bounded");
+  assert.ok(!compositionRecoverySource.includes("SEMANTIC_ELIGIBILITY_THRESHOLDS"), "Composition recovery must not alter semantic release thresholds");
+  assert.ok(!compositionRecoverySource.includes("isExpressionWorthy("), "Composition recovery must not implement an expression-worthiness bypass");
   assert.ok(selectionSource.includes("assessCompoundIntersectionBatch"), "Compound niches require a focused second verifier");
   assert.ok(selectionSource.includes("Axis presence has no threshold"), "Compound verifier must separate lexical presence from semantic preservation");
+  assert.ok(selectionSource.includes("It does NOT prove that an organized community"), "A niche label must not self-ground invented crossover behavior");
+  assert.ok(intentSource.includes("A \"niche\" source ref alone does not prove an organized community"), "Intent verification must reject niche-only event and ritual claims");
   assert.ok(!selectionSource.includes("causal behavioral bridge"), "Territory generation must not assume every compound is behavioral");
   assert.ok(sloganEngineSource.includes('error: "GENERATION_EXHAUSTED"'));
-  assert.ok(factorySource.includes("We couldn't find a sufficiently grounded slogan"));
+  assert.ok(factorySource.includes("We couldn't find a strong enough slogan for this crossover"));
   assert.ok(!factorySource.includes("No slogans survived semantic eligibility"), "Raw evaluator wording must not reach users");
   assert.ok(!recoverySource.includes("fallback"), "Recovery must not contain a fallback slogan path");
   assert.ok(!factorySource.includes("safeSlogans.length > 0 ? safeSlogans : sloganEngine.slogans"));
+  assert.ok(!sloganEngineSource.toLowerCase().includes("basketball"), "Production recovery must not contain Basketball-specific logic");
+  assert.ok(!sloganEngineSource.toLowerCase().includes("halloween"), "Production recovery must not contain Halloween-specific logic");
+  assert.ok(!compositionRecoverySource.toLowerCase().includes("basketball"));
+  assert.ok(!compositionRecoverySource.toLowerCase().includes("halloween"));
 
   console.log("Creative selection regression gates passed");
 }

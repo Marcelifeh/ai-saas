@@ -45,7 +45,9 @@ Module._load = function patchedModuleLoad(request: string, parent: unknown, isMa
 
 async function main() {
   const { generateHighPotentialSlogans } = await import("../lib/ai/sloganEngine");
-  const niche = process.argv.slice(2).join(" ").trim() || "Pickleball";
+  const args = process.argv.slice(2);
+  const summaryOnly = process.env.SLOGAN_BENCHMARK_SUMMARY === "1" || args.includes("--summary");
+  const niche = args.filter((argument) => argument !== "--summary").join(" ").trim() || "Pickleball";
   const audience = process.env.SLOGAN_AUDIENCE?.trim() || undefined;
   const parseStringArrayEnv = (name: string): string[] => {
     const raw = process.env[name]?.trim();
@@ -81,6 +83,7 @@ async function main() {
   console.log(`Evidence snapshot: ${result.evidenceSnapshotId ?? "unavailable"}`);
   console.log("Creative brief:", result.creativeDirection ?? "unavailable");
   const metrics = result.pipelineMetrics;
+  const compositionRecovery = result.compositionRecovery;
   console.table([{
     profile: metrics?.profileStatus ?? (result.dynamicProfile ? "UNKNOWN" : "NOT_CREATED"),
     nicheStructure: result.dynamicProfile?.nicheComposition?.kind ?? "UNKNOWN",
@@ -101,14 +104,23 @@ async function main() {
     expressionRecovery: metrics?.expressionRecoveryAttemptCount ?? 0,
     distinctConcepts: metrics?.distinctConceptCount ?? 0,
     error: result.error ?? "NONE",
+    failureStage: result.failureStage ?? "NONE",
+    secondaryAttemptUsed: compositionRecovery?.secondaryAttemptUsed ?? false,
+    secondaryRanked: compositionRecovery?.secondaryRankedCount ?? 0,
+    verifierBatches: metrics?.verifierBatchCount ?? 0,
+    verifierFormatRepairs: metrics?.verifierFormatRepairAttemptCount ?? 0,
+    verifierShapes: metrics?.verifierResponseShapes.join(" | ") ?? "",
   }]);
   if (metrics) console.log("Rejection dimensions:", metrics.rejectionReasonCounts);
+  if (compositionRecovery) console.log("Composition recovery:", compositionRecovery);
+  const failedDiagnostics = (result.diagnostics ?? []).filter((diagnostic) => !diagnostic.ok);
+  if (failedDiagnostics.length > 0) console.log("Failed pipeline diagnostics:", failedDiagnostics);
   const intentDistribution = (result.expressionIntents ?? []).reduce<Record<string, number>>((counts, intent) => {
     counts[intent.intentType] = (counts[intent.intentType] ?? 0) + 1;
     return counts;
   }, {});
   console.log("Expression intent distribution:", intentDistribution);
-  if (process.env.SLOGAN_BENCHMARK_SUMMARY === "1") {
+  if (summaryOnly) {
     console.log("BENCHMARK_SUMMARY", JSON.stringify({
       niche,
       profile: metrics?.profileStatus ?? (result.dynamicProfile ? "UNKNOWN" : "NOT_CREATED"),
@@ -116,6 +128,7 @@ async function main() {
       compositionType: result.dynamicProfile?.nicheComposition?.compositionType ?? "SINGLE",
       compositionConfidence: result.dynamicProfile?.nicheComposition?.compositionConfidence ?? null,
       secondaryComposition: result.dynamicProfile?.nicheComposition?.alternativeCompositionTypes?.[0] ?? null,
+      attemptedSecondaryComposition: compositionRecovery?.secondaryComposition ?? null,
       territoryCount: metrics?.territoryCount ?? result.creativeTerritories?.length ?? 0,
       expressionIntentCount: metrics?.eligibleExpressionIntentCount ?? result.expressionIntents?.length ?? 0,
       intentDistribution,
@@ -124,8 +137,16 @@ async function main() {
       expressionWorthySurvivors: metrics?.expressionWorthyCount ?? 0,
       rankedCount: metrics?.rankedCount ?? result.ranked.length,
       dominantRejections: metrics?.rejectionReasonCounts ?? {},
+      dominantExpressionFailures: compositionRecovery?.dominantExpressionFailures ?? [],
+      primaryAttempt: compositionRecovery?.primary ?? null,
+      secondaryAttemptUsed: compositionRecovery?.secondaryAttemptUsed ?? false,
+      secondaryAttempt: compositionRecovery?.secondary ?? null,
+      verifierBatches: metrics?.verifierBatchCount ?? 0,
+      verifierFormatRepairAttempts: metrics?.verifierFormatRepairAttemptCount ?? 0,
+      verifierResponseShapes: metrics?.verifierResponseShapes ?? [],
       rankedSample: result.ranked.slice(0, 5).map((entry) => entry.slogan),
       error: result.error ?? null,
+      failureStage: result.failureStage ?? null,
     }));
     return;
   }

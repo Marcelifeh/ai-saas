@@ -49,13 +49,16 @@ export interface LatentLifestyleModel {
   symbolicAssociations?: string[];
 }
 
-export type CompositionType =
-  | "BEHAVIORAL_INTERSECTION"
-  | "IDENTITY_INTERSECTION"
-  | "CULTURAL_INTERSECTION"
-  | "AESTHETIC_INTERSECTION"
-  | "RITUAL_INTERSECTION"
-  | "SYMBOLIC_INTERSECTION";
+export const COMPOSITION_TYPES = [
+  "BEHAVIORAL_INTERSECTION",
+  "IDENTITY_INTERSECTION",
+  "CULTURAL_INTERSECTION",
+  "AESTHETIC_INTERSECTION",
+  "RITUAL_INTERSECTION",
+  "SYMBOLIC_INTERSECTION",
+] as const;
+
+export type CompositionType = typeof COMPOSITION_TYPES[number];
 
 export interface NicheComposition {
   kind: "single" | "compound";
@@ -70,6 +73,8 @@ export interface NicheComposition {
     compositionType: CompositionType;
     confidence: number;
     sharedPremise: string;
+    axisRoles?: Array<{ axis: string; contribution: string }>;
+    evidenceRefs?: string[];
   }>;
 }
 
@@ -291,15 +296,7 @@ function safeNicheComposition(value: unknown): NicheComposition | undefined {
   if (kind !== "single" && kind !== "compound") return undefined;
   const axes = safeStringArray(record.axes);
   if (kind === "compound" && axes.length < 2) return undefined;
-  const compositionTypes: CompositionType[] = [
-    "BEHAVIORAL_INTERSECTION",
-    "IDENTITY_INTERSECTION",
-    "CULTURAL_INTERSECTION",
-    "AESTHETIC_INTERSECTION",
-    "RITUAL_INTERSECTION",
-    "SYMBOLIC_INTERSECTION",
-  ];
-  const compositionType = compositionTypes.includes(record.compositionType as CompositionType)
+  const compositionType = COMPOSITION_TYPES.includes(record.compositionType as CompositionType)
     ? record.compositionType as CompositionType
     : undefined;
   const rawAxisRoles = Array.isArray(record.axisRoles) ? record.axisRoles : [];
@@ -317,18 +314,29 @@ function safeNicheComposition(value: unknown): NicheComposition | undefined {
     : []).flatMap((value) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return [];
       const alternative = value as Record<string, unknown>;
-      const alternativeType = compositionTypes.includes(alternative.compositionType as CompositionType)
+      const alternativeType = COMPOSITION_TYPES.includes(alternative.compositionType as CompositionType)
         ? alternative.compositionType as CompositionType
         : undefined;
       const rawAlternativeConfidence = Number(alternative.confidence);
       const sharedPremise = safeString(alternative.sharedPremise);
       if (!alternativeType || !Number.isFinite(rawAlternativeConfidence) || !sharedPremise) return [];
+      const alternativeAxisRoles = (Array.isArray(alternative.axisRoles)
+        ? alternative.axisRoles
+        : []).flatMap((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+          const role = value as Record<string, unknown>;
+          const axis = safeString(role.axis);
+          const contribution = safeString(role.contribution);
+          return axis && contribution ? [{ axis, contribution }] : [];
+        });
       return [{
         compositionType: alternativeType,
         confidence: Math.max(0, Math.min(100, Math.round(rawAlternativeConfidence <= 1
           ? rawAlternativeConfidence * 100
           : rawAlternativeConfidence))),
         sharedPremise,
+        axisRoles: alternativeAxisRoles.length > 0 ? alternativeAxisRoles : undefined,
+        evidenceRefs: safeStringArray(alternative.evidenceRefs),
       }];
     }).slice(0, 2);
   const confidence = Number.isFinite(rawCompositionConfidence)
@@ -582,6 +590,7 @@ Rules:
 - Select one primary compositionType from the list for a compound niche. Do not create hybrid labels.
 - Evaluate every composition type before selecting the primary. Activity axes that jointly describe what people repeatedly do should normally favor BEHAVIORAL_INTERSECTION or RITUAL_INTERSECTION unless original evidence shows that identity, culture, aesthetics, or symbolism is the stronger relationship.
 - Return calibrated confidence for the primary and up to two plausible alternatives. Alternatives are bounded semantic hypotheses, not extra labels to force into every territory.
+- Every alternative must independently explain both axis contributions and cite the original source evidence that supports its premise. An alternative without both axes or source support is not recoverable.
 - Describe each axis's semantic contribution without requiring literal keywords in eventual slogans.
 - sharedPremise must explain the emergent relationship, not restate "A plus B".
 - Cite only exact evidence refs: "niche", "audience", or IDs from indexedEvidence. Creative direction cannot be cited as evidence.
@@ -600,7 +609,9 @@ Return JSON only:
   "alternativeCompositionTypes": [{
     "compositionType": "CULTURAL_INTERSECTION",
     "confidence": 0,
-    "sharedPremise": ""
+    "sharedPremise": "",
+    "axisRoles": [{ "axis": "", "contribution": "" }],
+    "evidenceRefs": []
   }]
 }`,
   0.08, compositionModel);
@@ -635,6 +646,10 @@ Return JSON only:
     evidenceRefs,
     alternativeCompositionTypes: (parsed.alternativeCompositionTypes ?? [])
       .filter((alternative) => alternative.compositionType !== parsed.compositionType)
+      .map((alternative) => ({
+        ...alternative,
+        evidenceRefs: (alternative.evidenceRefs ?? []).filter((ref) => allowedRefs.has(ref)),
+      }))
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 2),
   };

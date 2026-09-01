@@ -1,5 +1,8 @@
 import type { CreativeDirectionBrief } from "./expressionWorthiness";
 import type { CompositionType, DynamicNicheProfile } from "./dynamicNicheProfile";
+import type { VerifierExecutionDiagnostics } from "./dynamicCreativeSelectionEngine";
+import { runStructuredIndexedVerifier } from "./structuredVerifier";
+import { expressionIntentVerifierRowSchema } from "./verifierSchemas";
 
 export const EXPRESSION_INTENT_TYPES = [
   "IDENTITY_CLAIM",
@@ -214,6 +217,7 @@ export async function planAndValidateExpressionIntents(input: {
   evidence?: ExpressionIntentEvidence;
   creativeDirection: CreativeDirectionBrief;
   limit?: number;
+  verifierDiagnostics?: VerifierExecutionDiagnostics;
 }): Promise<{ intents: ExpressionIntent[]; assessments: ExpressionIntentAssessment[] }> {
   if (input.profile.nicheComposition?.kind !== "compound") return { intents: [], assessments: [] };
   const model = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
@@ -255,6 +259,7 @@ Rules:
 - socialSignal must make clear what a viewer or fellow insider would understand about the wearer; vague appreciation is insufficient.
 - Reject visual depiction, atmosphere, poetic scenery, generic mysticism, or niche description as the entire human meaning.
 - Do not invent behavior, identity, lore, status, or relationships.
+- The bare compound niche can support a conservative emergent identity, symbolism, aesthetic, or conceptual reframe. It cannot by itself establish organized events, themed activities, contests, traditions, rituals, a status hierarchy, insider language, or recurring group behavior.
 - supportedByPremise must contain exact territory IDs. sourceEvidenceRefs must contain only exact original source refs.
 - Seek semantic diversity across supported human purposes, not lexical variations of one purpose.
 
@@ -321,7 +326,7 @@ Return JSON only:
   // Partial model validation is never accepted as evidence.
   for (let start = 0; start < diverse.length; start += 4) {
     const batch = diverse.slice(start, start + 4);
-    const evaluated = await callJson<{ assessments?: unknown }>(`
+    const verifierPrompt = `
 Act as an adversarial expression-intent eligibility judge. Judge the actual intent claims; intentType labels and confidence are not evidence.
 
 ORIGINAL SOURCES (authoritative):
@@ -346,6 +351,7 @@ Score 0-100:
 - intersectionPreservation: removing either axis materially changes the intent;
 - decorativeDescriptionRisk: HIGH when it merely depicts motifs, atmosphere, mood, scenery, aesthetics, or niche subject matter;
 - unsupportedInferenceRisk: HIGH when identity, behavior, lore, status, or relationship is invented.
+- A "niche" source ref alone does not prove an organized community, recurring event, themed activity, contest, tradition, ritual, status hierarchy, insider language, or shared behavior. Score those claims as unsupported unless direct original evidence establishes them.
 
 Do not award scores because metadata calls something an identity claim. A supported compact identity or insider intent needs no explicit behavior. Do not score wording quality; no wording exists yet.
 
@@ -366,20 +372,24 @@ Return JSON only:
     "unsupportedInferenceRisk": 0,
     "reasons": []
   }]
-}`,
-    0.03,
-    verifierModel);
-    const raw = Array.isArray(evaluated.assessments) ? evaluated.assessments : [];
-    const byIndex = new Map<number, Record<string, unknown>>();
-    for (const value of raw) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const record = value as Record<string, unknown>;
-      const index = Number(record.index);
-      if (Number.isInteger(index) && index >= 0 && index < batch.length) byIndex.set(index, record);
-    }
-    if (byIndex.size !== batch.length) throw new Error(`Intent evaluator returned ${byIndex.size}/${batch.length} rows`);
+}`;
+    if (input.verifierDiagnostics) input.verifierDiagnostics.verifierBatchCount += 1;
+    const evaluated = await runStructuredIndexedVerifier({
+      prompt: verifierPrompt,
+      model: verifierModel,
+      temperature: 0.03,
+      outputKey: "assessments",
+      rowSchema: expressionIntentVerifierRowSchema,
+      expectedCount: batch.length,
+      expectedSchema: `{ "assessments": [{ "index": 0, "groundedness": 0, "humanWearReason": 0, "distinctiveHumanMeaning": 0, "socialSignalSpecificity": 0, "productIndependence": 0, "intersectionPreservation": 0, "decorativeDescriptionRisk": 0, "unsupportedInferenceRisk": 0, "reasons": [] }] }`,
+      label: "Expression intent verifier",
+      onFormatRepairAttempt: () => {
+        if (input.verifierDiagnostics) input.verifierDiagnostics.verifierFormatRepairAttemptCount += 1;
+      },
+      onInitialResponseShape: (shape) => input.verifierDiagnostics?.verifierResponseShapes.push(`intent:${shape}`),
+    });
     batch.forEach((intent, index) => {
-      const record = byIndex.get(index) as Record<string, unknown>;
+      const record = evaluated.rows[index];
       const values = {
         groundedness: score(record.groundedness),
         humanWearReason: score(record.humanWearReason),
@@ -398,7 +408,7 @@ Return JSON only:
         intentId: intent.id,
         eligible: isExpressionIntentEligible(normalized),
         ...normalized,
-        reasons: cleanStringArray(record.reasons, 4),
+        reasons: record.reasons.slice(0, 4),
       });
     });
   }

@@ -9,7 +9,9 @@ import {
   type CreativeEvidenceContext,
   type CreativeTerritory,
   type SemanticEligibilityAssessment,
+  type VerifierExecutionDiagnostics,
 } from "./dynamicCreativeSelectionEngine";
+import { verifierTechnicalCode } from "./structuredVerifier";
 import {
   runBoundedSemanticRecovery,
   type SemanticRecoveryAttempt,
@@ -30,6 +32,16 @@ import {
   type ExpressionIntent,
   type ExpressionIntentAssessment,
 } from "./expressionIntent";
+import {
+  dominantExpressionFailures,
+  dominantSemanticFailures,
+  mergeReleasedItems,
+  runBoundedCompositionRecovery,
+  selectSupportedSecondaryComposition,
+  type CompositionAttemptCounts,
+  type CompositionRecoveryDiagnostics,
+  type CreativeFailureStage,
+} from "./compositionOutcomeRecovery";
 
 // Get top and low-performing patterns for a niche from DB
 async function getTopPatterns(niche: string) {
@@ -170,6 +182,7 @@ import {
   type AdaptiveBrevityEvaluation,
   type DynamicCompressionAttempt,
   type DynamicNicheProfile,
+  type NicheComposition,
   type RhetoricalFamily,
   type SloganLayoutMode,
   type SloganLengthBudget,
@@ -277,6 +290,7 @@ export type DynamicCreativeStage =
   | "ELIGIBILITY"
   | "SELF_REVELATION"
   | "EXPRESSION_WORTHINESS"
+  | "COMPOSITION_RECOVERY"
   | "RANKING";
 
 export interface DynamicCreativeDiagnostic {
@@ -303,6 +317,9 @@ export interface SloganPipelineMetrics {
   expressionWorthyCount: number;
   expressionRecoveryAttemptCount: number;
   recoveryAttemptCount: number;
+  verifierBatchCount: number;
+  verifierFormatRepairAttemptCount: number;
+  verifierResponseShapes: string[];
   rejectionReasonCounts: ReturnType<typeof aggregateSemanticRejections>;
   recoveryAttempts: SemanticRecoveryAttempt[];
 }
@@ -325,6 +342,8 @@ export interface SloganEngineResult {
   expressionWorthiness?: ExpressionWorthinessAssessment[];
   diagnostics?: DynamicCreativeDiagnostic[];
   pipelineMetrics?: SloganPipelineMetrics;
+  failureStage?: CreativeFailureStage;
+  compositionRecovery?: CompositionRecoveryDiagnostics;
   error?:
     | "EVIDENCE_FAILED"
     | "DYNAMIC_PROFILE_GENERATION_FAILED"
@@ -333,7 +352,11 @@ export interface SloganEngineResult {
     | "EXPRESSION_INTENT_FAILED"
     | "SLOGAN_GENERATION_FAILED"
     | "NO_ELIGIBLE_SLOGANS"
-    | "GENERATION_EXHAUSTED";
+    | "GENERATION_EXHAUSTED"
+    | "VERIFIER_FORMAT_FAILED"
+    | "VERIFIER_INCOMPLETE"
+    | "VERIFIER_RATE_LIMITED"
+    | "VERIFIER_API_FAILED";
   fallbackUsed?: boolean;
 }
 
@@ -2829,6 +2852,9 @@ function createEmptyResult(input: SloganEngineInput): SloganEngineResult {
       expressionWorthyCount: 0,
       expressionRecoveryAttemptCount: 0,
       recoveryAttemptCount: 0,
+      verifierBatchCount: 0,
+      verifierFormatRepairAttemptCount: 0,
+      verifierResponseShapes: [],
       rejectionReasonCounts: aggregateSemanticRejections([]),
       recoveryAttempts: [],
     },
@@ -3024,9 +3050,13 @@ function rankDynamicProfileSlogans(
   }));
 }
 
-export async function runEliteSloganEngine(input: SloganEngineInput): Promise<SloganEngineResult> {
+async function runEliteSloganEngineAttempt(
+  input: SloganEngineInput,
+  compositionOverride?: NicheComposition,
+): Promise<SloganEngineResult> {
   const base = createEmptyResult(input);
   const pipelineMetrics = base.pipelineMetrics as SloganPipelineMetrics;
+  const verifierDiagnostics = pipelineMetrics as SloganPipelineMetrics & VerifierExecutionDiagnostics;
   const diagnostics: DynamicCreativeDiagnostic[] = [];
   let creativeDirection = emptyCreativeDirectionBrief();
   try {
@@ -3042,7 +3072,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     return {
       ...base,
       creativeDirection,
-      error: "SLOGAN_GENERATION_FAILED",
+      error: verifierTechnicalCode(error) ?? "SLOGAN_GENERATION_FAILED",
       diagnostics: [{
         stage: "CREATIVE_DIRECTION",
         ok: false,
@@ -3090,7 +3120,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
 
   let dynamicProfile: DynamicNicheProfile;
   try {
-    const nicheComposition = await inferNicheComposition({
+    const nicheComposition = compositionOverride ?? await inferNicheComposition({
       niche: input.niche,
       audience: input.audience,
       originalUserBrief: input.creativeDirection,
@@ -3209,23 +3239,37 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       evidence: creativeEvidence,
       creativeDirection,
       limit: 20,
+      verifierDiagnostics,
     });
     expressionIntents = intentPlan.intents;
     expressionIntentAssessments = intentPlan.assessments;
     pipelineMetrics.expressionIntentCount = expressionIntentAssessments.length;
     pipelineMetrics.eligibleExpressionIntentCount = expressionIntents.length;
-    if (dynamicProfile.nicheComposition?.kind === "compound" && expressionIntents.length === 0) {
-      throw new Error("No grounded human expression intents survived eligibility");
-    }
-    diagnostics.push({
-      stage: "EXPRESSION_INTENT",
-      ok: true,
-      code: dynamicProfile.nicheComposition?.kind === "compound"
-        ? "EXPRESSION_INTENTS_READY"
-        : "SINGLE_NICHE_UNCHANGED",
-    });
   } catch (error) {
     console.error("[SLOGAN_PIPELINE:EXPRESSION_INTENT]", error);
+    return {
+      ...base,
+      slogans: [],
+      ranked: [],
+      collections: emptyCollections(),
+      ...profileProvenance,
+      creativeTerritories,
+      expressionIntents,
+      expressionIntentAssessments,
+      error: verifierTechnicalCode(error) ?? "EXPRESSION_INTENT_FAILED",
+      fallbackUsed: false,
+      diagnostics: [
+        ...diagnostics,
+        {
+          stage: "EXPRESSION_INTENT",
+          ok: false,
+          code: "EXPRESSION_INTENT_PLANNING_FAILED",
+          message: pipelineErrorMessage(error),
+        },
+      ],
+    };
+  }
+  if (dynamicProfile.nicheComposition?.kind === "compound" && expressionIntents.length === 0) {
     return {
       ...base,
       slogans: [],
@@ -3243,11 +3287,18 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
           stage: "EXPRESSION_INTENT",
           ok: false,
           code: "NO_ELIGIBLE_EXPRESSION_INTENTS",
-          message: pipelineErrorMessage(error),
+          message: "No grounded human expression intents survived eligibility",
         },
       ],
     };
   }
+  diagnostics.push({
+    stage: "EXPRESSION_INTENT",
+    ok: true,
+    code: dynamicProfile.nicheComposition?.kind === "compound"
+      ? "EXPRESSION_INTENTS_READY"
+      : "SINGLE_NICHE_UNCHANGED",
+  });
 
   const intentProvenance = {
     expressionIntents,
@@ -3371,6 +3422,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       compressionCandidates,
       creativeTerritories,
       creativeEvidence,
+      verifierDiagnostics,
     );
   } catch (error) {
     console.error("[SLOGAN_PIPELINE:ELIGIBILITY]", error);
@@ -3383,7 +3435,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       creativeTerritories,
       ...intentProvenance,
       semanticEligibility,
-      error: "SLOGAN_GENERATION_FAILED",
+      error: verifierTechnicalCode(error) ?? "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
         ...diagnostics,
@@ -3456,6 +3508,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
           candidates,
           creativeTerritories,
           creativeEvidence,
+          verifierDiagnostics,
         ),
       });
       generated = recovery.generatedCandidates;
@@ -3482,7 +3535,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         creativeTerritories,
         ...intentProvenance,
         semanticEligibility,
-        error: "SLOGAN_GENERATION_FAILED",
+        error: verifierTechnicalCode(error) ?? "SLOGAN_GENERATION_FAILED",
         fallbackUsed: false,
         diagnostics: [
           ...diagnostics,
@@ -3531,6 +3584,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       dynamicProfile,
       finalEligibleCandidates,
       creativeDirection,
+      verifierDiagnostics,
     );
     pipelineMetrics.expressionAssessedCount = expressionAssessments.length;
     diagnostics.push({ stage: "EXPRESSION_WORTHINESS", ok: true });
@@ -3546,7 +3600,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
       ...intentProvenance,
       semanticEligibility,
       expressionWorthiness: expressionAssessments,
-      error: "SLOGAN_GENERATION_FAILED",
+      error: verifierTechnicalCode(error) ?? "SLOGAN_GENERATION_FAILED",
       fallbackUsed: false,
       diagnostics: [
         ...diagnostics,
@@ -3624,6 +3678,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         recoveryCandidates,
         creativeTerritories,
         creativeEvidence,
+        verifierDiagnostics,
       );
       const recoveryEligibleCandidates = recoveryCandidates.filter((candidate) => (
         recoveryEligibility.find((assessment) => (
@@ -3638,6 +3693,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         dynamicProfile,
         recoveryEligibleCandidates,
         creativeDirection,
+        verifierDiagnostics,
       );
       pipelineMetrics.expressionAssessedCount += recoveryExpressionAssessments.length;
       expressionWorthyCandidates = recoveryExpressionAssessments
@@ -3667,7 +3723,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
         ...intentProvenance,
         semanticEligibility,
         expressionWorthiness: expressionAssessments,
-        error: "SLOGAN_GENERATION_FAILED",
+        error: verifierTechnicalCode(error) ?? "SLOGAN_GENERATION_FAILED",
         fallbackUsed: false,
         diagnostics: [
           ...diagnostics,
@@ -3827,6 +3883,157 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     expressionWorthiness: expressionAssessments,
     diagnostics,
     fallbackUsed: false,
+  };
+}
+
+function compositionAttemptCounts(result: SloganEngineResult): CompositionAttemptCounts {
+  return {
+    generatedCount: result.pipelineMetrics?.rawCandidateCount ?? 0,
+    semanticSurvivorCount: result.pipelineMetrics?.eligibleCount ?? 0,
+    expressionWorthyCount: result.pipelineMetrics?.expressionWorthyCount ?? 0,
+    rankedCount: result.ranked.length,
+  };
+}
+
+function creativeFailureStage(result: SloganEngineResult): CreativeFailureStage | undefined {
+  if (result.ranked.length > 0) return undefined;
+  const metrics = result.pipelineMetrics;
+  if (result.error === "PROFILE_INSUFFICIENT_EVIDENCE" || metrics?.profileStatus === "INSUFFICIENT") {
+    return "PROFILE_INSUFFICIENT_EVIDENCE";
+  }
+  if (result.diagnostics?.some((diagnostic) => diagnostic.code === "NO_ELIGIBLE_EXPRESSION_INTENTS")) {
+    return "NO_ELIGIBLE_INTENTS";
+  }
+  if (result.error === "GENERATION_EXHAUSTED" &&
+      result.diagnostics?.some((diagnostic) => diagnostic.stage === "ELIGIBILITY")) {
+    return "NO_SEMANTIC_SURVIVORS";
+  }
+  if (result.error === "GENERATION_EXHAUSTED" &&
+      result.diagnostics?.some((diagnostic) => diagnostic.stage === "EXPRESSION_WORTHINESS")) {
+    return "NO_EXPRESSION_WORTHY_SURVIVORS";
+  }
+  if (result.error === "GENERATION_EXHAUSTED") return "GENERATION_EXHAUSTED";
+  return undefined;
+}
+
+function isCreativeOutcomeFailure(result: SloganEngineResult): boolean {
+  const stage = creativeFailureStage(result);
+  return stage === "NO_ELIGIBLE_INTENTS" ||
+    stage === "NO_SEMANTIC_SURVIVORS" ||
+    stage === "NO_EXPRESSION_WORTHY_SURVIVORS" ||
+    stage === "GENERATION_EXHAUSTED";
+}
+
+function combinedDominantFailures(primary: string[], secondary: string[]): string[] {
+  return [...new Set([...primary, ...secondary])].slice(0, 4);
+}
+
+/**
+ * Authoritative entry point. Each interpretation runs through the exact same
+ * territory → intent → wording → semantic → expression → ranking attempt.
+ * A secondary is admitted only after zero released results and only when its
+ * own source references and axis roles survived composition validation.
+ */
+export async function runEliteSloganEngine(input: SloganEngineInput): Promise<SloganEngineResult> {
+  const primaryResult = await runEliteSloganEngineAttempt(input);
+  const primaryComposition = primaryResult.dynamicProfile?.nicheComposition;
+  const primaryCreativeFailure = isCreativeOutcomeFailure(primaryResult);
+  const secondaryComposition = primaryCreativeFailure && primaryResult.pipelineMetrics?.profileStatus === "SUFFICIENT"
+    ? selectSupportedSecondaryComposition(primaryComposition)
+    : undefined;
+
+  const recovery = await runBoundedCompositionRecovery({
+    primaryResult,
+    secondaryComposition,
+    releasedCount: (result) => result.ranked.length,
+    runSecondary: (composition) => runEliteSloganEngineAttempt(input, composition),
+  });
+  const secondaryResult = recovery.secondaryResult;
+  const released = recovery.result.ranked.length > 0;
+  const primarySemanticFailures = dominantSemanticFailures(
+    primaryResult.pipelineMetrics?.rejectionReasonCounts,
+  );
+  const secondarySemanticFailures = dominantSemanticFailures(
+    secondaryResult?.pipelineMetrics?.rejectionReasonCounts,
+  );
+  const diagnostics: CompositionRecoveryDiagnostics = {
+    primaryComposition: primaryComposition?.compositionType,
+    secondaryComposition: secondaryComposition?.compositionType,
+    primaryRankedCount: primaryResult.ranked.length,
+    secondaryAttemptUsed: recovery.secondaryAttemptUsed,
+    secondaryRankedCount: secondaryResult?.ranked.length ?? 0,
+    primary: compositionAttemptCounts(primaryResult),
+    secondary: secondaryResult ? compositionAttemptCounts(secondaryResult) : undefined,
+    dominantSemanticFailures: combinedDominantFailures(
+      primarySemanticFailures,
+      secondarySemanticFailures,
+    ),
+    dominantExpressionFailures: combinedDominantFailures(
+      dominantExpressionFailures(primaryResult.expressionWorthiness),
+      dominantExpressionFailures(secondaryResult?.expressionWorthiness),
+    ),
+    failureStage: released || (secondaryResult !== undefined && !isCreativeOutcomeFailure(secondaryResult))
+      ? undefined
+      : creativeFailureStage(recovery.result),
+  };
+
+  if (!recovery.secondaryAttemptUsed) {
+    return {
+      ...primaryResult,
+      error: primaryCreativeFailure ? "GENERATION_EXHAUSTED" : primaryResult.error,
+      failureStage: creativeFailureStage(primaryResult),
+      compositionRecovery: diagnostics,
+    };
+  }
+
+  const mergedRanked = mergeReleasedItems(
+    primaryResult.ranked,
+    secondaryResult?.ranked ?? [],
+    (entry) => semanticConceptKey(entry.slogan),
+  ).sort((left, right) => right.finalScore - left.finalScore);
+  const finalResult = secondaryResult ?? primaryResult;
+  console.info("[SLOGAN_COMPOSITION_RECOVERY]", diagnostics);
+  if (mergedRanked.length > 0) {
+    const topSlogans = mergedRanked.slice(0, 10).map((entry) => entry.slogan);
+    return {
+      ...finalResult,
+      slogans: topSlogans,
+      ranked: mergedRanked,
+      collections: buildCollections(mergedRanked),
+      error: undefined,
+      failureStage: undefined,
+      compositionRecovery: diagnostics,
+      diagnostics: [
+        ...(finalResult.diagnostics ?? []),
+        { stage: "COMPOSITION_RECOVERY", ok: true, code: "SECONDARY_COMPOSITION_SUCCEEDED" },
+      ],
+    };
+  }
+
+  if (!isCreativeOutcomeFailure(finalResult)) {
+    return {
+      ...finalResult,
+      failureStage: undefined,
+      compositionRecovery: diagnostics,
+      diagnostics: [
+        ...(finalResult.diagnostics ?? []),
+        { stage: "COMPOSITION_RECOVERY", ok: false, code: "SECONDARY_COMPOSITION_ATTEMPT_FAILED" },
+      ],
+    };
+  }
+
+  return {
+    ...finalResult,
+    slogans: [],
+    ranked: [],
+    collections: emptyCollections(),
+    error: "GENERATION_EXHAUSTED",
+    failureStage: diagnostics.failureStage ?? "GENERATION_EXHAUSTED",
+    compositionRecovery: diagnostics,
+    diagnostics: [
+      ...(finalResult.diagnostics ?? []),
+      { stage: "COMPOSITION_RECOVERY", ok: false, code: "GENERATION_EXHAUSTED" },
+    ],
   };
 }
 

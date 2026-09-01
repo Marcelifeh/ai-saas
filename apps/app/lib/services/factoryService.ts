@@ -80,7 +80,11 @@ const sloganFailureMessages: Partial<Record<SloganPipelineFailureCode, string>> 
     PROFILE_INSUFFICIENT_EVIDENCE: "We couldn't find enough grounded evidence for this opportunity. Try a more specific opportunity or choose another one.",
     EXPRESSION_INTENT_FAILED: "We couldn't find a grounded human expression angle for this opportunity. Try refining the creative direction or choose another opportunity.",
     NO_ELIGIBLE_SLOGANS: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
-    GENERATION_EXHAUSTED: "We couldn't find a sufficiently grounded slogan for this opportunity. Try regenerating or choose another opportunity.",
+    GENERATION_EXHAUSTED: "We couldn't find a strong enough slogan for this crossover. Try regenerating or refining the concept.",
+    VERIFIER_FORMAT_FAILED: "The slogan quality check returned an invalid response. Please try again.",
+    VERIFIER_INCOMPLETE: "The slogan quality check returned an incomplete response. Please try again.",
+    VERIFIER_RATE_LIMITED: "The slogan quality check is temporarily busy. Please try again shortly.",
+    VERIFIER_API_FAILED: "The slogan quality check is temporarily unavailable. Please try again.",
 };
 
 export class SloganPipelineFailure extends Error {
