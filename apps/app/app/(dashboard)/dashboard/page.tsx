@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useFactory, type DesignMode } from "../../../hooks/useFactory";
 import { Copy, Sparkles, Wand2, Target, Tags, ShoppingCart, BarChart2 } from "lucide-react";
@@ -8,6 +8,7 @@ import { InsightPanel } from "../../../components/dashboard/InsightPanel";
 import { AiUsageWidget } from "../../../components/dashboard/AiUsageWidget";
 import { safeJson } from "@/lib/utils/safeJson";
 import { getVisualReleasePresentation } from "@/lib/utils/visualReleasePresentation";
+import CustomStyleSelector, { resolveVisualStyle } from "@/components/design/CustomStyleSelector";
 
 const PRESET_STYLES = [
     "Vintage Distressed",
@@ -221,6 +222,7 @@ function SingleStrategyContent() {
     const [trendingTopics, setTrendingTopics] = useState<string[]>([]);
     const [crossoverTopics, setCrossoverTopics] = useState<string[]>([]);
     const [selectedDesignStyle, setSelectedDesignStyle] = useState<string>("Vintage Distressed");
+    const [customStyle, setCustomStyle] = useState("");
     const [collapsedPrompts, setCollapsedPrompts] = useState<Record<string, boolean>>({});
     const [copiedListing, setCopiedListing] = useState(false);
     const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
@@ -229,6 +231,13 @@ function SingleStrategyContent() {
     const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
     const [showListingMetrics, setShowListingMetrics] = useState(false);
     const [showSeoAudit, setShowSeoAudit] = useState(false);
+
+    // Combines custom free-form style (takes priority) with the active preset.
+    // Falls back to "Bold Graphic" if neither is set — matching the downstream engine default.
+    const resolvedVisualStyle = useMemo(
+        () => resolveVisualStyle(customStyle, selectedDesignStyle || style),
+        [customStyle, selectedDesignStyle, style],
+    );
 
     const demandScore = result ? Math.round(result.searchVolume ?? 0) : null;
     const compScore = result ? Math.round(result.competitionDensity ?? 0) : null;
@@ -515,7 +524,7 @@ function SingleStrategyContent() {
                 // Resolve the image prompt for this slogan and apply the active design style so the
                 // exported CSV never contains the raw [STYLE] placeholder token.
                 const rawPrompt: string = Array.isArray(result.imagePrompts) ? (result.imagePrompts[sloganIdx] ?? "") : "";
-                const exportPrompt = injectStyle(rawPrompt, selectedDesignStyle || style || "Bold Graphic");
+                const exportPrompt = injectStyle(rawPrompt, resolvedVisualStyle || "Bold Graphic");
                 const row = [
                     csvSafe(result.niche),
                     csvSafe(slogan),
@@ -631,7 +640,7 @@ function SingleStrategyContent() {
             marketTerms,
             purchaseMotives: result.dynamicProfile.purchaseMotives,
             marketplace,
-            visualStyle: selectedDesignStyle || style,
+            visualStyle: resolvedVisualStyle,
         }) as { dynamicListing?: DynamicListingView; amazonListing?: Record<string, unknown> } | null;
         if (!data?.dynamicListing || !data.amazonListing) return;
 
@@ -695,7 +704,7 @@ function SingleStrategyContent() {
             niche: result.niche || prompt,
             slogans: designSlogans,
             profile: result.dynamicProfile,
-            style: selectedDesignStyle || style,
+            style: resolvedVisualStyle,
             platform,
             designMode,
         }) as Record<string, unknown> | null;
@@ -708,6 +717,7 @@ function SingleStrategyContent() {
             console.error("Failed to persist regenerated designs", err);
         }
     };
+
 
     return (
         <div className="w-full max-w-6xl px-4 sm:px-8 py-8">
@@ -1425,9 +1435,10 @@ function SingleStrategyContent() {
                                             onClick={() => {
                                                 setSelectedDesignStyle(styleName);
                                                 setStyle(styleName);
+                                                setCustomStyle("");
                                             }}
                                             className={`text-[10px] font-bold px-3 py-1.5 rounded-md border uppercase tracking-tighter transition-all ${
-                                                selectedDesignStyle === styleName
+                                                !customStyle.trim() && selectedDesignStyle === styleName
                                                     ? "bg-indigo-600 text-white border-indigo-600 shadow-md"
                                                     : "bg-indigo-50/10 text-indigo-200 border-indigo-500/20 hover:bg-indigo-500/20"
                                             }`}
@@ -1437,16 +1448,22 @@ function SingleStrategyContent() {
                                     ))}
                                 </div>
 
+                                <CustomStyleSelector
+                                    value={customStyle}
+                                    selectedPreset={selectedDesignStyle}
+                                    disabled={isDesignRefreshing}
+                                    onChange={setCustomStyle}
+                                />
+
                                 <div className="space-y-4">
                                     {designSlogans.map((slogan: string, i: number) => {
                                         const basePromptText = result.imagePrompts?.[i] || "No design prompt generated.";
-                                        const styledPromptText = injectStyle(basePromptText, selectedDesignStyle);
+                                        const styledPromptText = injectStyle(basePromptText, resolvedVisualStyle);
                                         const finalPromptText = enhancePromptWithStandards(styledPromptText);
                                         const isCollapsed = collapsedPrompts[slogan] ?? true;
                                         const wordCount = finalPromptText.trim() ? finalPromptText.trim().split(/\s+/).length : 0;
                                         const sloganMeta = rankedSlogans.find((entry) => entry.slogan === slogan);
                                         const visualStrategy = visualStrategies.find((entry) => entry.slogan === slogan);
-
                                         return (
                                             <div
                                                 key={i}
