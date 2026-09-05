@@ -166,8 +166,9 @@ function parseVerifierJson(content: string, finishReason?: string | null): unkno
   if (finishReason === "length") {
     throw new VerifierTechnicalError("VERIFIER_INCOMPLETE", "Verifier JSON was truncated", "TRUNCATED_JSON");
   }
+  const clean = content.replace(/```json/gi, "").replace(/```/g, "").trim();
   try {
-    return JSON.parse(content) as unknown;
+    return JSON.parse(clean) as unknown;
   } catch {
     throw new VerifierTechnicalError("VERIFIER_FORMAT_FAILED", "Verifier returned malformed JSON", "MALFORMED_JSON");
   }
@@ -231,7 +232,7 @@ EXPECTED SCHEMA:
 ${input.expectedSchema}
 
 VALIDATION FAILURE:
-${initialError.code}: ${initialError.category ?? "UNKNOWN"}
+${initialError.code}: ${initialError.category ?? "UNKNOWN"} (${initialError.message})
 
 ORIGINAL VERIFIER RESPONSE:
 ${initial.content.slice(0, 12000)}

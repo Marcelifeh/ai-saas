@@ -12,7 +12,7 @@ export const semanticEligibilityVerifierRowSchema = z.object({
   semanticCoherence: strictVerifierScoreSchema,
   unsupportedInferenceRisk: strictVerifierScoreSchema,
   axisGrounding: z.array(z.object({
-    axis: z.string().min(1),
+    axis: z.string(),
     grounding: strictVerifierScoreSchema,
   }).strict()),
   reasons: reasonsSchema,
@@ -33,7 +33,7 @@ const compoundIntersectionJudgmentSchema = z.object({
   index: candidateIndexSchema,
   sharedPremise: z.string(),
   axisSupport: z.array(z.object({
-    axis: z.string().min(1),
+    axis: z.string(),
     support: strictVerifierScoreSchema,
     presence: strictVerifierScoreSchema,
   }).strict()),
