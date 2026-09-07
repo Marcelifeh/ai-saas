@@ -257,7 +257,7 @@ function tokenize(value: string): string[] {
   return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-function keyForNiche(niche: string): string | null {
+export function keyForNiche(niche: string): string | null {
   const lower = niche.toLowerCase();
   for (const key of Object.keys(COMMUNITY_KNOWLEDGE)) {
     if (lower.includes(key)) return key;

@@ -38,6 +38,7 @@ export interface ExpressionWorthinessAssessment {
   naturalness: number;
   wearability: number;
   creativeConstraintAlignment: number;
+  metaDescriptionRisk?: number;
   expressionMode: "SYMBOLIC_EXPRESSION" | "DECORATIVE_DESCRIPTION";
   diagnosticTraits: Array<
     | "DESCRIPTIVE"
@@ -50,6 +51,7 @@ export interface ExpressionWorthinessAssessment {
     | "IDENTITY_BEARING"
     | "SOCIALLY_SIGNALABLE"
     | "NATURALLY_SPEAKABLE"
+    | "META_DESCRIPTION"
   >;
   score: number;
   reasons: string[];
@@ -63,9 +65,29 @@ export const EXPRESSION_WORTHINESS_RELEASE = Object.freeze({
   creativeConstraintAlignment: 60,
 });
 
+const META_DESCRIPTION_RISK_THRESHOLD = 50;
+const META_DESCRIPTION_WEAK_DIMENSION_MIN = 2;
+
 export function isExpressionWorthy(
   assessment: ExpressionWorthinessAssessment,
 ): boolean {
+  const hasMetaDescriptionSignal =
+    assessment.diagnosticTraits.includes("META_DESCRIPTION") ||
+    (assessment.metaDescriptionRisk !== undefined &&
+      assessment.metaDescriptionRisk >= META_DESCRIPTION_RISK_THRESHOLD);
+
+  if (hasMetaDescriptionSignal) {
+    const weakExpressionSignals = [
+      assessment.conceptualTransformation < EXPRESSION_WORTHINESS_RELEASE.conceptualTransformation,
+      assessment.selfRecognition < EXPRESSION_WORTHINESS_RELEASE.score,
+      assessment.identityProjection < EXPRESSION_WORTHINESS_RELEASE.score,
+    ].filter(Boolean).length;
+
+    if (weakExpressionSignals >= META_DESCRIPTION_WEAK_DIMENSION_MIN) {
+      return false;
+    }
+  }
+
   return assessment.score >= EXPRESSION_WORTHINESS_RELEASE.score &&
     assessment.expressionMode === "SYMBOLIC_EXPRESSION" &&
     assessment.conceptualTransformation >= EXPRESSION_WORTHINESS_RELEASE.conceptualTransformation &&
@@ -73,6 +95,7 @@ export function isExpressionWorthy(
     assessment.wearability >= EXPRESSION_WORTHINESS_RELEASE.wearability &&
     assessment.creativeConstraintAlignment >= EXPRESSION_WORTHINESS_RELEASE.creativeConstraintAlignment;
 }
+
 
 export function buildExpressionRecoveryContext(
   assessments: ExpressionWorthinessAssessment[],
@@ -359,7 +382,12 @@ Also classify expressionMode from the actual phrase:
 
 Do not infer expressionMode from generator metadata; none is supplied. A compact identity or insider phrase can be SYMBOLIC_EXPRESSION without a verb or explicit behavior.
 
-Return every applicable diagnosticTrait from this exact list: DESCRIPTIVE, ATMOSPHERIC, DECORATIVE, POETIC, GENERIC_MYSTICAL, VISUAL_CAPTION, AUDIENCE_DESCRIPTION, IDENTITY_BEARING, SOCIALLY_SIGNALABLE, NATURALLY_SPEAKABLE.
+Return every applicable diagnosticTrait from this exact list: DESCRIPTIVE, ATMOSPHERIC, DECORATIVE, POETIC, GENERIC_MYSTICAL, VISUAL_CAPTION, AUDIENCE_DESCRIPTION, IDENTITY_BEARING, SOCIALLY_SIGNALABLE, NATURALLY_SPEAKABLE, META_DESCRIPTION.
+
+Expression vs. Meta-Description:
+- Authentic expression PERFORMS the human reality: it enacts the attitude, confession, shared priority, humor, irony, or insider observation directly.
+- META_DESCRIPTION merely LABELS or REPORTS that humor, conversation, debate, banter, or wit is taking place (e.g. describing a topic as a debate, small talk, puns, jokes, banter, or chat rather than delivering the actual perspective).
+- Assign META_DESCRIPTION whenever a slogan talks ABOUT the social or humorous act instead of embodying it. Slogans with META_DESCRIPTION fail expression worthiness and must score conceptualTransformation at most 35 and wearability at most 35.
 
 Allow many rhetorical families: observation, identity signal, declaration, confession, command, question, contrast, understatement, wordplay, metaphor, and fragment when intentionally natural. No family is inherently superior. A slogan may express grounded truth indirectly; do not demand a visible action, ritual, object, or first-person pronoun.
 
@@ -370,6 +398,8 @@ Calibration:
 - A broad topic label decorated with an adjective, approval word, rhyme, or seasonal noun scores conceptualTransformation at most 35.
 - A recognizable catchphrase with niche nouns substituted scores conceptualTransformation at most 40.
 - Cute spelling, decorative rhyme, and generic approval language are not insider resonance unless the brief explicitly asks for them.
+- Slogans structured as decorative topic definitions, product labels, or colonic descriptions score wearability at most 35 and must be classified as DECORATIVE_DESCRIPTION.
+- Mechanical formulas and template substitutions score conceptualTransformation at most 35 and wearability at most 35.
 - Wearability is elective identity value, not merely brevity or readability.
 - Use the full 0-100 range and do not default most dimensions to rounded neutral scores.
 
@@ -432,6 +462,7 @@ Return JSON only:
       ...scores,
       expressionMode: record.expressionMode,
       diagnosticTraits: record.diagnosticTraits,
+      metaDescriptionRisk: record.metaDescriptionRisk,
       score: scoreExpressionWorthiness(scores),
       reasons: record.reasons.slice(0, 4),
     };

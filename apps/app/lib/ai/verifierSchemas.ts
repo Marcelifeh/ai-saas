@@ -89,6 +89,7 @@ export const expressionWorthinessVerifierRowSchema = z.object({
   naturalness: strictVerifierScoreSchema,
   wearability: strictVerifierScoreSchema,
   creativeConstraintAlignment: strictVerifierScoreSchema,
+  metaDescriptionRisk: strictVerifierScoreSchema.optional(),
   expressionMode: z.enum(["SYMBOLIC_EXPRESSION", "DECORATIVE_DESCRIPTION"]),
   diagnosticTraits: z.array(z.enum([
     "DESCRIPTIVE",
@@ -101,6 +102,7 @@ export const expressionWorthinessVerifierRowSchema = z.object({
     "IDENTITY_BEARING",
     "SOCIALLY_SIGNALABLE",
     "NATURALLY_SPEAKABLE",
+    "META_DESCRIPTION",
   ])),
   reasons: reasonsSchema,
 }).strict();

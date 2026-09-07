@@ -1,8 +1,19 @@
 import { createHash } from "crypto";
 import { collectTrendSignals } from "@/lib/ai/trendEngine";
-import { getCommunityKnowledge, getBehaviorFragmentPool, getCommunityCompressionTokens } from "@/lib/ai/communityKnowledgeEngine";
+import {
+  getCommunityKnowledge,
+  getBehaviorFragmentPool,
+  getCommunityCompressionTokens,
+  keyForNiche,
+} from "@/lib/ai/communityKnowledgeEngine";
+import {
+  evaluateSpecificityCompatibility,
+  type SupportedNicheFact,
+} from "@/lib/ai/specificityCompatibilityEvaluator";
 import { getBehavioralProfile } from "@/lib/ai/behavioralLexicon";
 import { globalCache } from "@/lib/utils/cache";
+
+export type { SupportedNicheFact };
 
 export interface TrendSignal {
   phrase: string;
@@ -162,8 +173,9 @@ export async function getNicheEvidence(niche: string): Promise<NicheMarketEviden
   });
 
   // 2. Community-language evidence is derived deterministically from the
-  // existing knowledge sources. Evidence counts reflect actual supporting
-  // collections, not random values.
+  // existing knowledge sources with specificity-aware provenance evaluation.
+  // Specialized parent subculture jargon is pruned when uncorroborated by sub-domain qualifiers.
+  const parentCategoryKey = keyForNiche(cleanNiche);
   const profile = getBehavioralProfile(cleanNiche);
   const knowledge = getCommunityKnowledge(cleanNiche, profile);
   const pool = getBehaviorFragmentPool(cleanNiche, undefined, profile);
@@ -178,10 +190,24 @@ export async function getNicheEvidence(niche: string): Promise<NicheMarketEviden
   ].map((collection) => collection.filter(Boolean));
   const buyerPhrasesRaw = Array.from(new Set(buyerCollections.flat())).filter(Boolean);
 
-  const buyerLanguage: BuyerPhrase[] = buyerPhrasesRaw.slice(0, 12).map((phrase) => {
-    const evidenceCount = buyerCollections.filter((collection) => collection.includes(phrase)).length;
+  const candidateBuyerFacts = buyerPhrasesRaw.map((phrase) => ({
+    phrase,
+    category: parentCategoryKey ?? undefined,
+  }));
+  const evaluatedBuyerFacts = evaluateSpecificityCompatibility(
+    candidateBuyerFacts,
+    cleanNiche,
+    parentCategoryKey,
+    rawSignals,
+  );
+  const eligibleBuyerFacts = evaluatedBuyerFacts.filter(
+    (fact) => fact.supportStatus === "DIRECT" || fact.supportStatus === "CORROBORATED" || fact.supportStatus === "INHERITED",
+  );
+
+  const buyerLanguage: BuyerPhrase[] = eligibleBuyerFacts.slice(0, 12).map((fact) => {
+    const evidenceCount = buyerCollections.filter((collection) => collection.includes(fact.phrase)).length;
     return {
-      phrase,
+      phrase: fact.phrase,
       confidence: Math.round(Math.min(0.95, 0.55 + evidenceCount * 0.1) * 100) / 100,
       evidenceCount,
     };
@@ -208,8 +234,26 @@ export async function getNicheEvidence(niche: string): Promise<NicheMarketEviden
     ),
   ];
 
+  const candidateCulturalFacts = Array.from(new Set(culturalSignalEntries.map(([phrase]) => phrase))).map((phrase) => ({
+    phrase,
+    category: parentCategoryKey ?? undefined,
+  }));
+  const evaluatedCulturalFacts = evaluateSpecificityCompatibility(
+    candidateCulturalFacts,
+    cleanNiche,
+    parentCategoryKey,
+    rawSignals,
+  );
+  const eligibleCulturalPhrases = new Set(
+    evaluatedCulturalFacts
+      .filter((fact) => fact.supportStatus === "DIRECT" || fact.supportStatus === "CORROBORATED" || fact.supportStatus === "INHERITED")
+      .map((fact) => fact.phrase),
+  );
+
   const culturalSignals: CulturalSignal[] = Array.from(
-    new Map<string, CulturalSignal>(culturalSignalEntries).values(),
+    new Map<string, CulturalSignal>(
+      culturalSignalEntries.filter(([phrase]) => eligibleCulturalPhrases.has(phrase)),
+    ).values(),
   ).slice(0, 8);
 
   const purchaseSignalEntries: Array<[string, PurchaseSignal]> = [
@@ -233,8 +277,26 @@ export async function getNicheEvidence(niche: string): Promise<NicheMarketEviden
     ),
   ];
 
+  const candidatePurchaseFacts = Array.from(new Set(purchaseSignalEntries.map(([phrase]) => phrase))).map((phrase) => ({
+    phrase,
+    category: parentCategoryKey ?? undefined,
+  }));
+  const evaluatedPurchaseFacts = evaluateSpecificityCompatibility(
+    candidatePurchaseFacts,
+    cleanNiche,
+    parentCategoryKey,
+    rawSignals,
+  );
+  const eligiblePurchasePhrases = new Set(
+    evaluatedPurchaseFacts
+      .filter((fact) => fact.supportStatus === "DIRECT" || fact.supportStatus === "CORROBORATED" || fact.supportStatus === "INHERITED")
+      .map((fact) => fact.phrase),
+  );
+
   const purchaseSignals: PurchaseSignal[] = Array.from(
-    new Map<string, PurchaseSignal>(purchaseSignalEntries).values(),
+    new Map<string, PurchaseSignal>(
+      purchaseSignalEntries.filter(([phrase]) => eligiblePurchasePhrases.has(phrase)),
+    ).values(),
   ).slice(0, 8);
 
   const sourceTimes = sources

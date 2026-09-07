@@ -589,6 +589,7 @@ Rules:
 - Do not assume every compound is behavioral.
 - Select one primary compositionType from the list for a compound niche. Do not create hybrid labels.
 - Evaluate every composition type before selecting the primary. Activity axes that jointly describe what people repeatedly do should normally favor BEHAVIORAL_INTERSECTION or RITUAL_INTERSECTION unless original evidence shows that identity, culture, aesthetics, or symbolism is the stronger relationship.
+- Do not treat emotional tone, delivery style, or comedic descriptors (e.g. "humor", "funny", "jokes", "puns", "sarcasm", "satire", "comedy") as distinct subject axes. Treat them as the voice or tone of the core subject.
 - Return calibrated confidence for the primary and up to two plausible alternatives. Alternatives are bounded semantic hypotheses, not extra labels to force into every territory.
 - Every alternative must independently explain both axis contributions and cite the original source evidence that supports its premise. An alternative without both axes or source support is not recoverable.
 - Describe each axis's semantic contribution without requiring literal keywords in eventual slogans.
@@ -953,7 +954,9 @@ TASK:
 Write ${count} original t-shirt slogans.
 
 Rules:
-- Do NOT use reusable slogan templates or imitate recurring merchandising formulas.
+- Do NOT use reusable merchandising scaffolds, syntactic formula imitation, or fill-in-the-blank novelty patterns.
+- Do NOT write meta-description that merely labels, announces, or describes humor, conversation, or jokes. Express perspective, contradiction, or relatable human behavior directly.
+- Do NOT use mechanical token stitching where axis keywords are simply concatenated or paired. Ground the slogan in an authentic, integrated human observation or shared attitude.
 - Do NOT write generic identity labels.
 - Do not talk about finding, buying, wearing, gifting, printing, or promoting the merchandise carrying the slogan unless commerce itself is genuinely part of the niche truth.
 - Every implied behavior, identity, role, affiliation, status, or use-case must be supported by the original niche/audience and an eligible expression intent.
@@ -2130,8 +2133,8 @@ export function classifyRhetoricalFamily(slogan: string): RhetoricalFamily {
   if (/\b(?:before|after)\b/.test(normalized)) return "PRIORITY";
   if (commandOpeners.has(firstWord) || /^do not\b/.test(normalized)) return "COMMAND";
   if (/^(?:i|i'm|i've|i'd|me)\b/.test(normalized)) return "CONFESSION";
-  if (/^(?:my|our)\b/.test(normalized) || /\bis (?:my|our)\b/.test(normalized)) return "IDENTITY";
-  if (/\b(?:but|instead|not|can't|cannot|won't|without|over)\b/.test(normalized)) return "CONTRAST";
+  if (/^(?:my|our)\b/.test(normalized) || /\b(?:is|are) (?:my|our)\b/.test(normalized)) return "IDENTITY";
+  if (/\b(?:but|instead|not|can't|cannot|won't|without|over)\b/.test(normalized) || (/^no\b/.test(normalized) && /\bjust\b/.test(normalized))) return "CONTRAST";
   return "OBSERVATION";
 }
 
@@ -2178,11 +2181,132 @@ function genericStructuralPattern(words: string[]): string {
   }).join(" ");
 }
 
+export interface LinguisticStructuralFeatures {
+  clauseCount: number;
+  wordCount: number;
+  hasNegation: boolean;
+  hasContrast: boolean;
+  hasCopula: boolean;
+  hasPossessive: boolean;
+  hasColonStructure: boolean;
+  hasApposition: boolean;
+  personPerspective: "FIRST_PERSON" | "SECOND_PERSON" | "THIRD_PERSON" | "IMPERSONAL";
+  featureSignature: string;
+  functionWordSkeleton: string;
+}
+
+export function extractLinguisticFeatures(slogan: string): LinguisticStructuralFeatures {
+  const trimmed = slogan.trim();
+  const words = normalizedWords(slogan);
+  const normalized = words.join(" ");
+
+  const rawClauses = trimmed
+    .split(/[:;\u2014\u2013,]|(?:\s+(?:but|than|before|after|over)\s+)/i)
+    .map((c) => c.trim())
+    .filter(Boolean);
+  const clauseCount = Math.max(1, rawClauses.length);
+
+  const hasNegation = /\b(?:no|not|never|don't|can't|won't|cannot|neither|nor)\b/i.test(normalized);
+  const hasContrast = /\b(?:but|just|only|instead|over|than|rather|versus)\b/i.test(normalized);
+  const hasCopula = /\b(?:is|are|am|was|were|be|being|been)\b/i.test(normalized);
+  const hasPossessive = /\b(?:my|our|your|their|his|her)\b/i.test(normalized) || /'s\b/i.test(trimmed);
+  const hasColonStructure = trimmed.includes(":");
+  const hasApposition = hasColonStructure || (clauseCount >= 2 && !/\b(?:is|are|was|were)\b/i.test(rawClauses[1] || ""));
+
+  let personPerspective: "FIRST_PERSON" | "SECOND_PERSON" | "THIRD_PERSON" | "IMPERSONAL" = "IMPERSONAL";
+  if (/\b(?:i|i'm|i've|i'd|me|my|we|us|our)\b/i.test(normalized)) {
+    personPerspective = "FIRST_PERSON";
+  } else if (/\b(?:you|your|you're|you've)\b/i.test(normalized)) {
+    personPerspective = "SECOND_PERSON";
+  } else if (/\b(?:he|she|they|them|their|his|her)\b/i.test(normalized)) {
+    personPerspective = "THIRD_PERSON";
+  }
+
+  const traitMarkers: string[] = [];
+  if (hasNegation) traitMarkers.push("NEG");
+  if (hasContrast) traitMarkers.push("CONTRAST");
+  if (hasCopula) traitMarkers.push("COPULA");
+  if (hasPossessive) traitMarkers.push("POSS");
+  if (hasColonStructure) traitMarkers.push("COLON");
+
+  const featureSignature = `${clauseCount}C:${traitMarkers.length > 0 ? traitMarkers.join("+") : "NEUTRAL"}:${personPerspective}`;
+  const functionWordSkeleton = genericStructuralPattern(words);
+
+  return {
+    clauseCount,
+    wordCount: words.length,
+    hasNegation,
+    hasContrast,
+    hasCopula,
+    hasPossessive,
+    hasColonStructure,
+    hasApposition,
+    personPerspective,
+    featureSignature,
+    functionWordSkeleton,
+  };
+}
+
+export interface StructuralDerivativeness {
+  derivativenessPenalty: number;
+  features: LinguisticStructuralFeatures;
+  isFormulaic: boolean;
+  syntacticMechanism?: string;
+}
+
+export function evaluateStructuralDerivativeness(slogan: string): StructuralDerivativeness {
+  const features = extractLinguisticFeatures(slogan);
+  const normalized = normalizedWords(slogan).join(" ");
+
+  if (features.hasNegation && features.hasContrast && features.clauseCount >= 2) {
+    return {
+      derivativenessPenalty: 25,
+      features,
+      isFormulaic: true,
+      syntacticMechanism: "NEGATION_CONTRAST_SCAFFOLD",
+    };
+  }
+
+  if (features.hasCopula && features.hasPossessive && features.clauseCount === 1) {
+    return {
+      derivativenessPenalty: 25,
+      features,
+      isFormulaic: true,
+      syntacticMechanism: "COPULAR_POSSESSIVE_METAPHOR",
+    };
+  }
+
+  if (features.hasColonStructure && features.clauseCount >= 2 && classifyRhetoricalFamily(slogan) !== "COMPARISON") {
+    return {
+      derivativenessPenalty: 20,
+      features,
+      isFormulaic: true,
+      syntacticMechanism: "COLONIC_TOPIC_APPOSITION",
+    };
+  }
+
+  if (/\b(?:knows|remembers|understands|judges)\b.+\b(?:season|weather|time|month|day|year)\b/.test(normalized)) {
+    return {
+      derivativenessPenalty: 25,
+      features,
+      isFormulaic: true,
+      syntacticMechanism: "ANTHROPOMORPHIC_COGNITION",
+    };
+  }
+
+  return {
+    derivativenessPenalty: 0,
+    features,
+    isFormulaic: false,
+  };
+}
+
 export function buildStructuralFingerprint(slogan: string): StructuralFingerprint {
   const words = normalizedWords(slogan);
   const normalized = words.join(" ");
   const family = classifyRhetoricalFamily(slogan);
   const opening = words[0] || "";
+  const features = extractLinguisticFeatures(slogan);
   let pattern: string;
 
   if (family === "COMPARISON" && /\b(?:more|less|better|worse)\b.+\bthan\b/.test(normalized)) {
@@ -2200,11 +2324,17 @@ export function buildStructuralFingerprint(slogan: string): StructuralFingerprin
   } else if (family === "WARNING") {
     pattern = "WARNING <CLAUSE>";
   } else if (family === "QUESTION") {
-    pattern = `${genericStructuralPattern(words).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim()} ?`;
+    pattern = `${features.functionWordSkeleton.replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim()} ?`;
   } else if (family === "COMMAND") {
     pattern = `<COMMAND> ${genericStructuralPattern(words.slice(1))}`.trim();
   } else if (family === "CONFESSION") {
     pattern = `<PRON> ${genericStructuralPattern(words.slice(1)).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim()}`.trim();
+  } else if (features.hasNegation && features.hasContrast && features.clauseCount >= 2) {
+    pattern = `${features.clauseCount}C:NEG+CONTRAST`;
+  } else if (features.hasCopula && features.hasPossessive && features.clauseCount === 1) {
+    pattern = `${features.clauseCount}C:COPULA+POSS`;
+  } else if (features.hasColonStructure && features.clauseCount >= 2) {
+    pattern = `${features.clauseCount}C:COLON_APPOSITION`;
   } else if (family === "IDENTITY") {
     pattern = genericStructuralPattern(words).replace(/(?:<WORD>\s*)+/g, "<CLAUSE> ").trim();
   } else {
@@ -2235,13 +2365,14 @@ export function applyStructuralDiversityRanking<
 
   while (remaining.length > 0) {
     const evaluated = remaining.map((entry) => {
+      const derivativeness = evaluateStructuralDerivativeness(entry.candidate.slogan);
       const patternCount = patternCounts.get(entry.fingerprint.pattern) || 0;
       const familyCount = familyCounts.get(entry.fingerprint.family) || 0;
       const openingCount = openingCounts.get(entry.fingerprint.opening) || 0;
       const structuralPenalty = patternCount * 28;
       const openingPenalty = openingCount * 16;
       const familyPenalty = familyCount <= 1 ? familyCount * 4 : 8 + (familyCount - 1) * 10;
-      const penalty = structuralPenalty + openingPenalty + familyPenalty;
+      const penalty = structuralPenalty + openingPenalty + familyPenalty + derivativeness.derivativenessPenalty;
 
       return {
         ...entry,
