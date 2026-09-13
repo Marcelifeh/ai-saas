@@ -11,3 +11,7 @@ build/
 # Native Prisma engines for non-Windows deployments are generated at build time.
 packages/db/generated/client/libquery_engine-*.so.node
 packages/db/generated/client/libquery_engine-*.dylib.node
+
+# Local model experiments and blinded identities are not application source.
+apps/app/artifacts/model-routing*/
+apps/app/artifacts/stage-calibration*/

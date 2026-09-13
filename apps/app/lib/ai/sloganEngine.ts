@@ -124,6 +124,8 @@ function enrichTrendLanguage(trends: string[]): string[] {
 // for the standalone script execution path.
 import { prisma } from "@/lib/db/prisma";
 import { chatCompletionSafe } from "./aiGateway";
+import { withAIComplexity, routingStrategy } from "./modelRouting";
+import { withAIRun } from "./aiTelemetry";
 import { globalCache } from "@/lib/utils/cache";
 import { runSafetyEngine } from "./safetyEngine";
 import {
@@ -3946,7 +3948,7 @@ export async function runEliteSloganEngine(input: SloganEngineInput): Promise<Sl
     primaryResult,
     secondaryComposition,
     releasedCount: (result) => result.ranked.length,
-    runSecondary: (composition) => runEliteSloganEngineAttempt(input, composition),
+    runSecondary: (composition) => withAIComplexity({ primaryAttemptFailed: true }, () => runEliteSloganEngineAttempt(input, composition)),
   });
   const secondaryResult = recovery.secondaryResult;
   const released = recovery.result.ranked.length > 0;
@@ -4071,6 +4073,12 @@ function normalizeResult(result: SloganEngineResult): SloganEngineResult {
 export async function generateHighPotentialSlogans(
   input: SloganEngineInput & { execMode?: ExecMode; context?: string; cacheTtlSec?: number },
 ): Promise<SloganEngineResult> {
+  return withAIRun(() => generateHighPotentialSlogansInternal(input));
+}
+
+async function generateHighPotentialSlogansInternal(
+  input: SloganEngineInput & { execMode?: ExecMode; context?: string; cacheTtlSec?: number },
+): Promise<SloganEngineResult> {
   const execMode = resolveExecMode(input.context, input.execMode);
   const nicheKey = (input.niche || "").trim().toLowerCase().slice(0, 60);
   const audienceKey = (input.audience || "").trim().toLowerCase().slice(0, 40);
@@ -4082,7 +4090,8 @@ export async function generateHighPotentialSlogans(
     negatives: input.negativeCreativeConstraints || [],
   }));
   const cacheKey = `slogans:creative-selection-v4:${nicheKey}:${audienceKey}:${execMode}:${layoutKey}:${creativeDirectionKey}`;
-  const cacheDisabled = input.cacheTtlSec === 0;
+  // Challenger runs must never consume or populate legacy creative caches.
+  const cacheDisabled = input.cacheTtlSec === 0 || routingStrategy() !== "CONTROL";
 
   // Try in-memory/Redis cache (async read for cold-starts)
   if (!cacheDisabled) {

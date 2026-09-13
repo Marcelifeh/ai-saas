@@ -3,6 +3,12 @@ import { strictVerifierScoreSchema } from "./structuredVerifier";
 
 const candidateIndexSchema = z.number().int().nonnegative();
 const reasonsSchema = z.array(z.string());
+export const selfRevelationVerifierRowSchema = z.object({
+  index: candidateIndexSchema,
+  classification: z.enum(["A", "B"]),
+  confidence: strictVerifierScoreSchema,
+  reason: z.string(),
+}).strict();
 
 export const semanticEligibilityVerifierRowSchema = z.object({
   index: candidateIndexSchema,
@@ -29,7 +35,7 @@ export const blindReadingVerifierRowSchema = z.object({
 
 export type BlindReadingVerifierRow = z.infer<typeof blindReadingVerifierRowSchema>;
 
-const compoundIntersectionJudgmentSchema = z.object({
+export const compoundIntersectionJudgmentSchema = z.object({
   index: candidateIndexSchema,
   sharedPremise: z.string(),
   axisSupport: z.array(z.object({

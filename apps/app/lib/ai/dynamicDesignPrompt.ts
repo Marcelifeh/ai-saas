@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import "server-only";
 
 import type { DynamicNicheProfile } from "./dynamicNicheProfile";
@@ -1244,7 +1245,8 @@ function profileForPrompt(profile: DynamicNicheProfile): Record<string, unknown>
 async function generateUnscoredStrategies(input: DynamicDesignBatchInput): Promise<UnscoredStrategy[]> {
   const evidence = collectVisualEvidence(input.profile);
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "DESIGN" },
+    model: legacyModels.utility,
     temperature: 0.7,
     max_tokens: 8000,
     response_format: { type: "json_object" },
@@ -1387,7 +1389,8 @@ async function evaluateAndReviseStrategies(
   strategies: UnscoredStrategy[],
 ): Promise<EvaluatedStrategy[]> {
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "DESIGN" },
+    model: legacyModels.utility,
     temperature: 0.25,
     max_tokens: 8000,
     response_format: { type: "json_object" },
@@ -1505,7 +1508,8 @@ async function repairCollapsedStrategies(
     }))
     .filter((strategy) => repairSet.has(strategy.index));
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "RECOVERY" },
+    model: legacyModels.utility,
     temperature: 0.65,
     max_tokens: 8000,
     response_format: { type: "json_object" },
@@ -1623,7 +1627,8 @@ async function auditRepairedStrategyQuality(
     }))
     .filter((strategy) => repairedSet.has(strategy.index));
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "STRUCTURAL_EVALUATION" },
+    model: legacyModels.utility,
     temperature: 0.1,
     max_tokens: 2200,
     response_format: { type: "json_object" },

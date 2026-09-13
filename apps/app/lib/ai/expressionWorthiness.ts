@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import type {
   DynamicNicheProfile,
   ExpressionRecoveryContext,
@@ -156,7 +157,8 @@ async function callJson<T extends Record<string, unknown>>(
 ): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "NORMALIZATION" },
+    model: legacyModels.utility,
     temperature,
     max_tokens: 2600,
     response_format: { type: "json_object" },
@@ -429,10 +431,12 @@ Return JSON only:
 }`;
   if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
   const response = await runStructuredIndexedVerifier({
+    taskType: "EXPRESSION_VERIFICATION",
     prompt,
-    model: process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4.1",
+    model: legacyModels.verifier(),
     outputKey: "assessments",
     rowSchema: expressionWorthinessVerifierRowSchema,
+    providerRowSchema: expressionWorthinessVerifierRowSchema.required({ metaDescriptionRisk: true }),
     expectedCount: slogans.length,
     expectedSchema: `{ "assessments": [{ "index": 0, "conceptKey": "", "selfRecognition": 0, "identityProjection": 0, "insiderResonance": 0, "conceptualTransformation": 0, "naturalness": 0, "wearability": 0, "creativeConstraintAlignment": 0, "expressionMode": "DECORATIVE_DESCRIPTION", "diagnosticTraits": [], "reasons": [] }] }`,
     label: "Expression worthiness verifier",
@@ -509,8 +513,9 @@ Return JSON only:
 }`;
   if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
   const response = await runStructuredIndexedVerifier({
+    taskType: "EXPRESSION_VERIFICATION",
     prompt,
-    model: process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4.1",
+    model: legacyModels.verifier(),
     temperature: 0.02,
     outputKey: "assessments",
     rowSchema: creativeBriefVerifierRowSchema,

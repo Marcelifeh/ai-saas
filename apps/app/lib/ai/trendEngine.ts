@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import { globalCache } from "../utils/cache";
 import { getServerEnv } from "@/lib/utils/serverEnv";
 import { safeJson } from "@/lib/utils/safeJson";
@@ -883,7 +884,8 @@ Output ONLY a raw, valid JSON array of 30 short string phrases. NO markdown bloc
 `;
 
     const completion = await chatCompletionSafe({
-        model: "gpt-4o-mini",
+    aiTask: { taskType: "NICHE_DECOMPOSITION" },
+        model: legacyModels.utility,
         temperature: 0.85,
         messages: [{ role: "user", content: prompt }],
         usageContext: { feature: "discovery.generateNiches" },
@@ -1031,7 +1033,8 @@ ${niches.map((n, i) => `${i + 1}. ${n}`).join('\n')}
 `;
 
     const completion = await chatCompletionSafe({
-        model: "gpt-4o-mini",
+    aiTask: { taskType: "EXTRACTION" },
+        model: legacyModels.utility,
         temperature: 0.2,
         messages: [{ role: "user", content: prompt }],
         usageContext: { feature: "discovery.detectViral" },

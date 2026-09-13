@@ -1,3 +1,4 @@
+import { legacyModels } from "../ai/modelRouting";
 import { discoverTrends, TrendSignalSourceResult } from "../ai/trendEngine";
 import { createTrendSnapshot, generateMarketSignals, scoreWithMarketIntel, calculateRevenue, MarketIntel } from "../ai/marketMath";
 import { chatCompletionSafe } from "../ai/aiGateway";
@@ -37,7 +38,8 @@ export async function runDiscovery(userId?: string): Promise<{ opportunities: En
 
     // 2. Enrich the phrases with expected frontend metadata via a single fast LLM call
     const enrichment = await chatCompletionSafe({
-        model: 'gpt-4o-mini',
+    aiTask: { taskType: "EXTRACTION" },
+        model: legacyModels.utility,
         response_format: { type: 'json_object' },
         messages: [
                 { role: 'system', content: 'You are a POD analyst. Return a JSON object with a key "enriched" containing an array of objects corresponding exactly to the niches provided.' },
