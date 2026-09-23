@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import "server-only";
 
 import type { DynamicNicheProfile } from "./dynamicNicheProfile";
@@ -768,7 +769,8 @@ function sanitizeRepairedDraft(input: DynamicListingInput, draft: ListingDraft, 
 
 async function requestDraft(input: DynamicListingInput, repairWarnings: string[] = []): Promise<ListingDraft | null> {
   const response = await chatCompletionSafe({
-    model: "gpt-4o-mini",
+    aiTask: { taskType: "LISTING" },
+    model: legacyModels.utility,
     temperature: repairWarnings.length > 0 ? 0.35 : 0.65,
     max_tokens: 1400,
     response_format: { type: "json_object" },

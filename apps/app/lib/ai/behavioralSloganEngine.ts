@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import { BehavioralArchetype, BehavioralProfile, describeBehavioralProfile, getBehavioralArchetypes, getBehavioralProfile } from "./behavioralLexicon";
 import { assignArchetypeToSlogan, getBehaviorFragmentPool, getCommunityCompressionTokens, getCommunityKnowledge, scoreCulturalCompression } from "./communityKnowledgeEngine";
 import { logError } from "../utils/logger";
@@ -554,7 +555,8 @@ export async function generateBehavioralAISlogans({
   try {
     const { chatCompletionSafe } = await import("./aiGateway");
     const response = await chatCompletionSafe({
-      model: "gpt-4o-mini",
+    aiTask: { taskType: "SLOGAN_GENERATION" },
+      model: legacyModels.utility,
       temperature: 1,
       response_format: { type: "json_object" },
       messages: [

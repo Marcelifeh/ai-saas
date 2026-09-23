@@ -1,9 +1,11 @@
+import { legacyModels, profileComplexity, type AITaskContext } from "./modelRouting";
 import type { CompositionType, DynamicNicheProfile, RecoveryContext } from "./dynamicNicheProfile";
 import type { CreativeDirectionBrief } from "./expressionWorthiness";
 import { runStructuredIndexedVerifier } from "./structuredVerifier";
 import {
   blindReadingVerifierRowSchema,
   compoundIntersectionVerifierRowSchema,
+  compoundIntersectionJudgmentSchema,
   semanticEligibilityVerifierRowSchema,
 } from "./verifierSchemas";
 
@@ -373,11 +375,13 @@ export function validateTerritoryEvidenceRefs(
 async function callJson<T>(
   prompt: string,
   temperature = 0.15,
-  model = "gpt-4o-mini",
+  model = legacyModels.utility,
+  aiTask: AITaskContext = { taskType: "OTHER" },
 ): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await chatCompletionSafe({
+    aiTask,
       model,
       temperature,
       max_tokens: 5200,
@@ -538,8 +542,8 @@ Return JSON only:
   ]
 }`;
 
-  const territoryModel = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
-  const response = await callJson<{ territories?: unknown }>(prompt, 0.35, territoryModel);
+  const territoryModel = legacyModels.creative();
+  const response = await callJson<{ territories?: unknown }>(prompt, 0.35, territoryModel, { taskType: "TERRITORY_GENERATION", complexity: profileComplexity(profile) });
   const raw = Array.isArray(response.territories) ? response.territories : [];
 
   return raw
@@ -702,8 +706,9 @@ Return JSON only:
 
   if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
   const verified = await runStructuredIndexedVerifier({
+    taskType: "SEMANTIC_VERIFICATION",
     prompt,
-    model: "gpt-4o-mini",
+    model: legacyModels.utility,
     temperature: 0.05,
     outputKey: "assessments",
     rowSchema: semanticEligibilityVerifierRowSchema,
@@ -769,7 +774,7 @@ async function assessCompoundIntersectionBatch(
   verifierDiagnostics?: VerifierExecutionDiagnostics,
 ): Promise<Array<EmergentIntersectionAssessment & { slogan: string; reasons: string[] }>> {
   const axes = profile.nicheComposition?.axes ?? [];
-  const verifierModel = process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4o";
+  const verifierModel = legacyModels.intersection();
   const blindPrompt = `
 Read these candidate phrases in isolation. You are not given a niche, audience, profile, source axes, or creative brief.
 
@@ -784,8 +789,9 @@ Return JSON only:
 }`;
   if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
   const blindReading = await runStructuredIndexedVerifier({
+    taskType: "INTERSECTION_VERIFICATION",
     prompt: blindPrompt,
-    model: "gpt-4o-mini",
+    model: legacyModels.utility,
     temperature: 0.02,
     outputKey: "readings",
     rowSchema: blindReadingVerifierRowSchema,
@@ -858,11 +864,13 @@ Return JSON only:
 
   if (verifierDiagnostics) verifierDiagnostics.verifierBatchCount += 1;
   const verified = await runStructuredIndexedVerifier({
+    taskType: "INTERSECTION_VERIFICATION",
     prompt,
     model: verifierModel,
     temperature: 0.02,
     outputKey: "assessments",
     rowSchema: compoundIntersectionVerifierRowSchema,
+    providerRowSchema: compoundIntersectionJudgmentSchema,
     expectedCount: slogans.length,
     expectedSchema: `{ "assessments": [{ "index": 0, "sharedPremise": "", "axisSupport": [{ "axis": "", "support": 0, "presence": 0 }], "sharedPremiseSupport": 0, "mutualDependence": 0, "adjacencyRisk": 0, "contextDependenceRisk": 0, "unsupportedInferenceRisk": 0, "intersectionPreservation": 0, "reasons": [] }] }`,
     label: "Compound intersection verifier",

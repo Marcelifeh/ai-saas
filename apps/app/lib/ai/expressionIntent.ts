@@ -1,3 +1,4 @@
+import { legacyModels, profileComplexity, type AITaskContext } from "./modelRouting";
 import type { CreativeDirectionBrief } from "./expressionWorthiness";
 import type { CompositionType, DynamicNicheProfile } from "./dynamicNicheProfile";
 import type { VerifierExecutionDiagnostics } from "./dynamicCreativeSelectionEngine";
@@ -157,10 +158,12 @@ async function callJson<T extends Record<string, unknown>>(
   prompt: string,
   temperature: number,
   model: string,
+  aiTask: AITaskContext = { taskType: "OTHER" },
 ): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const response = await chatCompletionSafe({
+    aiTask,
       model,
       temperature,
       max_tokens: 5200,
@@ -220,7 +223,7 @@ export async function planAndValidateExpressionIntents(input: {
   verifierDiagnostics?: VerifierExecutionDiagnostics;
 }): Promise<{ intents: ExpressionIntent[]; assessments: ExpressionIntentAssessment[] }> {
   if (input.profile.nicheComposition?.kind !== "compound") return { intents: [], assessments: [] };
-  const model = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
+  const model = legacyModels.creative();
   const indexedEvidence = [
     ...(input.evidence?.trendSignals ?? []).map((value, index) => ({ ref: `trend:${index}`, value })),
     ...(input.evidence?.buyerLanguage ?? []).map((value, index) => ({ ref: `buyer:${index}`, value })),
@@ -279,7 +282,7 @@ Return JSON only:
   }]
 }`,
   0.55,
-  model);
+  model, { taskType: "EXPRESSION_INTENT", complexity: profileComplexity(input.profile) });
 
   const intents = (Array.isArray(planned.intents) ? planned.intents : []).flatMap((value, index) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -321,7 +324,7 @@ Return JSON only:
   if (diverse.length === 0) return { intents: [], assessments: [] };
 
   const assessments: ExpressionIntentAssessment[] = [];
-  const verifierModel = process.env.OPENAI_SLOGAN_VERIFIER_MODEL?.trim() || "gpt-4.1";
+  const verifierModel = legacyModels.verifier();
   // Keep verification bounded while enforcing an exact completeness contract.
   // Partial model validation is never accepted as evidence.
   for (let start = 0; start < diverse.length; start += 4) {
@@ -375,6 +378,7 @@ Return JSON only:
 }`;
     if (input.verifierDiagnostics) input.verifierDiagnostics.verifierBatchCount += 1;
     const evaluated = await runStructuredIndexedVerifier({
+    taskType: "INTENT_VERIFICATION",
       prompt: verifierPrompt,
       model: verifierModel,
       temperature: 0.03,

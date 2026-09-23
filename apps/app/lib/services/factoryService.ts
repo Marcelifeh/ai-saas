@@ -1,9 +1,11 @@
+import { legacyModels } from "../ai/modelRouting";
 import "server-only";
 import { discoverTrends, getGoogleTrends } from "../ai/trendEngine";
 import { createTrendSnapshot, generateMarketSignals, scoreWithMarketIntel, calculateRevenue, MarketIntel } from "../ai/marketMath";
 import { detectPlatform, PLATFORM_RULES } from "../ai/promptBuilder";
 import { globalCache } from "../utils/cache";
 import { chatCompletionSafe } from "../ai/aiGateway";
+import { withAIRun } from "../ai/aiTelemetry";
 import { TrendSignalSourceResult } from "../ai/trendEngine";
 import {
     runEliteSloganEngine,
@@ -437,7 +439,11 @@ export async function regenerateSlogansOnly(
     };
 }
 
-export async function generateSingleStrategy(
+export async function generateSingleStrategy(...args: Parameters<typeof generateSingleStrategyInternal>): Promise<any> {
+    return withAIRun(() => generateSingleStrategyInternal(...args));
+}
+
+async function generateSingleStrategyInternal(
     prompt: string,
     platform?: string,
     audience?: string,
@@ -451,7 +457,8 @@ export async function generateSingleStrategy(
     const detectedPlatform = detectPlatform(platform);
 
     const aiResponse = await chatCompletionSafe({
-        model: 'gpt-4o-mini',
+    aiTask: { taskType: "PROFILE_REASONING" },
+        model: legacyModels.utility,
         temperature: 0.7,
         max_tokens: 4000,
         response_format: { type: 'json_object' },
@@ -713,7 +720,8 @@ export async function bulkDiscover(userId?: string): Promise<BulkDiscoveryResult
         try {
             const prompt = `Generate 3 short ad hooks (social/ad copy style) for the slogan: "${slogan}". Return a JSON array of 3 strings.`;
             const ai = await chatCompletionSafe({
-                model: 'gpt-4o-mini',
+    aiTask: { taskType: "LISTING" },
+                model: legacyModels.utility,
                 temperature: 0.8,
                 max_tokens: 200,
                 response_format: { type: 'json_object' },
@@ -866,6 +874,10 @@ export async function bulkDiscover(userId?: string): Promise<BulkDiscoveryResult
 }
 
 export async function generateChunk(niches: any[], isAutopilot: boolean = false, userId?: string): Promise<any[]> {
+    return withAIRun(() => generateChunkInternal(niches, isAutopilot, userId));
+}
+
+async function generateChunkInternal(niches: any[], isAutopilot: boolean = false, userId?: string): Promise<any[]> {
     if (!niches || !Array.isArray(niches)) throw new Error("Niches array required");
 
     const settledResults = await Promise.allSettled(niches.map(async (nicheData) => {

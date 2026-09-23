@@ -1,3 +1,8 @@
+import { legacyModels, profileComplexity, type AITaskContext } from "./modelRouting";
+import { routeModel, modelCapabilities } from "./modelRouting";
+import { compositionResponseSchema } from "./compositionSchema";
+import { runStructuredObjectVerifier, runStructuredIndexedVerifier } from "./structuredVerifier";
+import { selfRevelationVerifierRowSchema } from "./verifierSchemas";
 import type { CreativeDirectionBrief } from "./expressionWorthiness";
 import type { ExpressionIntent } from "./expressionIntent";
 
@@ -501,10 +506,16 @@ export function normalizeDynamicNicheProfile(
 async function callAIJson<T extends Record<string, unknown>>(
   prompt: string,
   temperature = 0.35,
-  model = "gpt-4o-mini",
+  model = legacyModels.utility,
+  aiTask: AITaskContext = { taskType: "OTHER" },
 ): Promise<Partial<T>> {
   const { chatCompletionSafe } = await import("./aiGateway");
+  const route = routeModel(aiTask, model);
+  const strictComposition = route.enabled && aiTask.taskType === "COMPOSITION_INFERENCE" && modelCapabilities(route.modelName).strict;
+  if (strictComposition) return await runStructuredObjectVerifier({ prompt, model, taskType: aiTask.taskType,
+    schema: compositionResponseSchema, temperature, maxTokens: 5200 }) as unknown as Partial<T>;
   const response = await chatCompletionSafe({
+    aiTask,
     model,
     temperature,
     max_tokens: 5200,
@@ -530,7 +541,8 @@ async function callAIJson<T extends Record<string, unknown>>(
   if (!content) throw new Error("Dynamic profile returned no JSON content");
 
   try {
-    return JSON.parse(content) as Partial<T>;
+    const parsed = JSON.parse(content);
+    return parsed as Partial<T>;
   } catch {
     throw new Error("Dynamic profile returned malformed JSON");
   }
@@ -554,7 +566,7 @@ export async function inferNicheComposition(
     ...(input.evidence?.purchaseSignals ?? []).map((value, index) => ({ ref: `purchase:${index}`, value })),
   ];
   const explicitAxes = input.niche.split("×").map((axis) => axis.trim()).filter(Boolean);
-  const compositionModel = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
+  const compositionModel = legacyModels.creative();
   const response = await callAIJson<Record<string, unknown>>(`
 Infer the semantic composition of this niche before profile generation.
 
@@ -615,7 +627,7 @@ Return JSON only:
     "evidenceRefs": []
   }]
 }`,
-  0.08, compositionModel);
+  0.08, compositionModel, { taskType: "COMPOSITION_INFERENCE", complexity: { isCompound: explicitAxes.length >= 2 } });
 
   const parsed = safeNicheComposition(response);
   if (!parsed) throw new Error("Composition classifier returned an invalid composition");
@@ -791,7 +803,7 @@ Rules:
 - visualCulture must name objects and interfaces the audience actually handles or sees during those rituals; avoid legacy, decorative, or literal topic symbols unless the profile supports them. Do not use wall art, posters, skulls, blood, weapons, bodies, or crime-scene props as filler.
 `;
 
-  const json = await callAIJson<DynamicProfileJson>(prompt);
+  const json = await callAIJson<DynamicProfileJson>(prompt, undefined, undefined, { taskType: "PROFILE_REASONING", complexity: profileComplexity({ nicheComposition: inferredComposition }) });
   return normalizeDynamicNicheProfile(niche, audience, json, inferredComposition);
 }
 
@@ -807,7 +819,7 @@ export async function generateSlogansFromDynamicProfile(
   const compositionSourcePriority = behaviorLed
     ? "Prioritize supported shared scenes, rituals, decisions, tensions, consequences, and insider mechanics. The joint behavior or observance must remain semantically intact, although it need not be narrated literally."
     : `This is ${compositionType}. Prioritize the classified sharedPremise, axisRoles, sharedMeanings, identitySignals, culturalCodes, aestheticCodes, symbolicAssociations, statusSignals, tensions, and emotionalRewards. Behavioral fields are secondary hypotheses, not mandatory creative material. Do not invent a scene to justify an identity, cultural, aesthetic, or symbolic expression.`;
-  const creativeModel = process.env.OPENAI_SLOGAN_CREATIVE_MODEL?.trim() || "gpt-4.1";
+  const creativeModel = legacyModels.creative();
   const expressionIntents = options.expressionIntents ?? [];
   if (profile.nicheComposition?.kind === "compound" && expressionIntents.length === 0) {
     throw new Error("Compound generation requires at least one eligible expression intent");
@@ -858,7 +870,7 @@ Return JSON only:
   "candidates": [{ "intentId": "intent_1", "slogan": "" }]
 }`,
     0.85,
-    creativeModel);
+    creativeModel, { taskType: options.recoveryContext || options.expressionRecoveryContext ? "RECOVERY" : "SLOGAN_GENERATION", complexity: profileComplexity(profile) });
     const validIntentIds = new Set(expressionIntents.map((intent) => intent.id));
     const intentCounts = new Map<string, number>();
     const slogans = (Array.isArray(compoundResponse.candidates) ? compoundResponse.candidates : [])
@@ -1003,7 +1015,7 @@ Rules:
 { "slogans": [] }
 `;
 
-  const json = await callAIJson<{ slogans?: unknown }>(prompt, 0.8, creativeModel);
+  const json = await callAIJson<{ slogans?: unknown }>(prompt, 0.8, creativeModel, { taskType: options.recoveryContext || options.expressionRecoveryContext ? "RECOVERY" : "SLOGAN_GENERATION", complexity: profileComplexity(profile) });
   return safeStringArray(json.slogans, count);
 }
 
@@ -1143,7 +1155,7 @@ OUTPUT:
 }
 `;
 
-  const response = await callAIJson<{ slogans?: unknown }>(prompt);
+  const response = await callAIJson<{ slogans?: unknown }>(prompt, undefined, undefined, { taskType: "COMPRESSION", complexity: profileComplexity(profile) });
   const compressedValues = Array.isArray(response.slogans) ? response.slogans : [];
 
   return slogans.map((original, index) => {
@@ -1215,7 +1227,14 @@ Return JSON only:
 }
 `;
 
-  const response = await callAIJson<{ assessments?: unknown }>(prompt, 0.05);
+  const response = routeModel({ taskType: "EXPRESSION_VERIFICATION" }, legacyModels.utility).enabled
+    ? { assessments: (await runStructuredIndexedVerifier({
+      prompt, model: legacyModels.utility, taskType: "EXPRESSION_VERIFICATION", temperature: 0.05,
+      maxTokens: 5200, outputKey: "assessments", rowSchema: selfRevelationVerifierRowSchema,
+      expectedCount: slogans.length, expectedSchema: "{ assessments: [{ index, classification: A or B, confidence, reason }] }",
+      label: "Self revelation verifier",
+    })).rows }
+    : await callAIJson<{ assessments?: unknown }>(prompt, 0.05, undefined, { taskType: "EXPRESSION_VERIFICATION", complexity: profileComplexity(profile) });
   const rawAssessments = Array.isArray(response.assessments)
     ? response.assessments.filter((value): value is Record<string, unknown> => (
       Boolean(value) && typeof value === "object" && !Array.isArray(value)

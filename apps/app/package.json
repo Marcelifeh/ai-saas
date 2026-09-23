@@ -13,8 +13,13 @@
     "benchmark:design": "tsx scripts/benchmark_dynamic_design.ts",
     "benchmark:design:live": "tsx scripts/benchmark_dynamic_design.ts --live",
     "benchmark:listing": "tsx scripts/regression_dynamic_listing.ts",
+    "test:model-routing": "node scripts/model_routing_runner.cjs test_model_routing",
+    "test:model-gateway": "node scripts/model_routing_runner.cjs test_model_gateway",
+    "benchmark:model-routing": "node scripts/model_routing_runner.cjs benchmark_model_routing",
+    "report:model-routing": "node scripts/model_routing_runner.cjs report_model_routing",
     "benchmark:listing:live": "tsx scripts/benchmark_dynamic_listing_live.ts",
-    "verify:visual-learning": "tsx scripts/verify_visual_learning_persistence.ts"
+    "verify:visual-learning": "tsx scripts/verify_visual_learning_persistence.ts",
+    "test:model-cache": "node scripts/model_routing_runner.cjs test_model_cache"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

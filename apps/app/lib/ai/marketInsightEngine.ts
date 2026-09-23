@@ -1,3 +1,4 @@
+import { legacyModels } from "./modelRouting";
 import { chatCompletionSafe } from "./aiGateway";
 import { OpportunityScoreResult } from "../market/providers/types";
 
@@ -25,7 +26,8 @@ Keep each point under 15 words. Be extremely sharp.
 `;
 
     const completion = await chatCompletionSafe({
-        model: "gpt-4o-mini",
+    aiTask: { taskType: "PROFILE_REASONING" },
+        model: legacyModels.utility,
         temperature: 0.7,
         messages: [{ role: "user", content: prompt }],
         usageContext: { feature: "ai.marketInsightEngine" },
